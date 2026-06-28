@@ -35,6 +35,11 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/videotuner"]
 
+[tool.uv]
+# Security floor for a transitive dependency (pulled in by rich).
+# pygments < 2.20.0 has a ReDoS in AdlLexer (GHSA / Dependabot alert).
+constraint-dependencies = ["pygments>=2.20.0"]
+
 [tool.ruff]
 exclude = [
     "vapoursynth-portable",

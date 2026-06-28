@@ -23,7 +23,7 @@ dev = [
     "ruff>=0.14.10",
 ]
 build = [
-    "nuitka>=2.8.9",
+    "nuitka>=4.0.8",
     "ordered-set>=4.1.0",  # Faster Nuitka builds
     "zstandard>=0.25.0",   # Better compression for onefile
 ]

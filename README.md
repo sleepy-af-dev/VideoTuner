@@ -170,7 +170,7 @@ Both installation methods require these external tools on PATH:
 
 ### Pre-built Release (Recommended)
 
-Download the latest release from the [Releases page](https://github.com/AV-Foundry/VideoTuner/releases):
+Download the latest release from the [Releases page](https://github.com/sleepy-af-dev/VideoTuner/releases):
 
 1. Download `VideoTuner-vX.X.X.zip`
 2. Extract to your preferred location
@@ -196,7 +196,7 @@ Requires **Python 3.13+**. All dependencies must be installed manually.
 **Using uv (Recommended):**
 
 ```bash
-git clone https://github.com/AV-Foundry/VideoTuner.git
+git clone https://github.com/sleepy-af-dev/VideoTuner.git
 cd VideoTuner
 uv sync
 ```
@@ -204,7 +204,7 @@ uv sync
 **Using pip:**
 
 ```bash
-git clone https://github.com/AV-Foundry/VideoTuner.git
+git clone https://github.com/sleepy-af-dev/VideoTuner.git
 cd VideoTuner
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate

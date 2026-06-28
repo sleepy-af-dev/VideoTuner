@@ -428,8 +428,8 @@ def run_nuitka() -> Path:
         f"--product-version={__version__}",
         f"--file-version={__version__}",
         "--product-name=VideoTuner",
-        "--company-name=AVFoundry",
-        "--copyright=Copyright 2025 AVFoundry",
+        "--company-name=sleepy-af-dev",
+        "--copyright=Copyright 2025 sleepy-af-dev",
         "--file-description=CRF optimization and encoder benchmarking tool",
         # Point to the package directory (not __main__.py)
         "src/videotuner",

@@ -4,7 +4,7 @@ Thank you for your interest in contributing to VideoTuner! This document provide
 
 ## Code of Conduct
 
-This project adheres to the [Contributor Covenant 3.0 Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to <avfoundry@pm.me>.
+This project has a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold it. Please report unacceptable behavior as described there.
 
 ## Getting Started
 
@@ -19,7 +19,7 @@ This project adheres to the [Contributor Covenant 3.0 Code of Conduct](CODE_OF_C
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/AV-Foundry/VideoTuner.git
+   git clone https://github.com/sleepy-af-dev/VideoTuner.git
    cd VideoTuner
    ```
 

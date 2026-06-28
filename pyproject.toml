@@ -19,7 +19,7 @@ videotuner = "videotuner.pipeline:main"
 [project.optional-dependencies]
 dev = [
     "basedpyright>=1.38.0",
-    "pytest>=9.0.2",
+    "pytest>=9.0.3",
     "ruff>=0.14.10",
 ]
 build = [

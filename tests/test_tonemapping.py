@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import subprocess
 from typing import cast
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from videotuner.tonemapping import has_vulkan_support, build_tonemap_chain
+from videotuner.tonemapping import build_tonemap_chain, has_vulkan_support
 
 
 class TestHasVulkanSupport:

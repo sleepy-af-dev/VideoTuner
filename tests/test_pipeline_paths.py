@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from videotuner.encoder_type import EncoderType
 from videotuner.pipeline_cli import PipelineArgs
 from videotuner.pipeline_types import (
     IterationContext,
@@ -15,7 +16,6 @@ from videotuner.pipeline_types import (
     get_ssim2_dir,
     get_vmaf_dir,
 )
-from videotuner.encoder_type import EncoderType
 from videotuner.profiles import Profile
 
 

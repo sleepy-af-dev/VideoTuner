@@ -6,11 +6,11 @@ import shlex
 import subprocess
 import sys
 import threading
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Callable, TextIO
+from typing import TextIO
 
-from .constants import LOG_SEPARATOR_WIDTH, LOG_SEPARATOR_CHAR
+from .constants import LOG_SEPARATOR_CHAR, LOG_SEPARATOR_WIDTH
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +199,7 @@ def run(
         env: Environment variables
         line_callback: Optional callback for each output line. If provided and returns True,
                       the line is considered consumed and won't be forwarded to stdout.
-    """
+    """  # noqa: E501  # TODO(E501): shorten line
     if live:
         try:
             with subprocess.Popen(
@@ -271,7 +271,7 @@ def run_capture(
 
     Returns:
         Combined stdout and stderr output as a string
-    """
+    """  # noqa: E501  # TODO(E501): shorten line
     if line_callback is None:
         proc = subprocess.run(
             cmd,

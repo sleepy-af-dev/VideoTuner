@@ -181,7 +181,7 @@ def build_global_x265_params(
                 colormatrix = "smpte170m"
 
         logger.debug(
-            f"Color matrix detection: color_space='{video_info.color_space}', colormatrix='{colormatrix}'"
+            f"Color matrix detection: color_space='{video_info.color_space}', colormatrix='{colormatrix}'"  # noqa: E501  # TODO(E501): shorten line
         )
 
         if colormatrix:

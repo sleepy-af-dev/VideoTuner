@@ -5,11 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from videotuner.media import (
-    VideoInfo,
     VideoFormat,
+    VideoInfo,
     get_bit_depth_from_pix_fmt,
-    get_video_format,
     get_frame_count,
+    get_video_format,
 )
 from videotuner.tool_parsers import parse_fraction
 

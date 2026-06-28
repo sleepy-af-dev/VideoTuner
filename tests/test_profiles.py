@@ -87,7 +87,7 @@ class TestProfileGroups:
         validate_groups_exist(profiles, ["live-action", "animation"])
 
     def test_validate_groups_exist_raises_for_invalid_group(self):
-        """Test that validate_groups_exist raises ProfileError for non-existent groups."""
+        """Test that validate_groups_exist raises ProfileError for non-existent groups."""  # noqa: E501  # TODO(E501): shorten line
         profiles = self._create_test_profiles()
 
         with pytest.raises(ProfileError) as exc_info:
@@ -97,7 +97,7 @@ class TestProfileGroups:
         assert "Default" in str(exc_info.value)  # Should list available groups
 
     def test_get_profiles_by_groups_returns_all_when_no_filter(self):
-        """Test that get_profiles_by_groups returns all profiles when no groups specified."""
+        """Test that get_profiles_by_groups returns all profiles when no groups specified."""  # noqa: E501  # TODO(E501): shorten line
         profiles = self._create_test_profiles()
 
         result = get_profiles_by_groups(profiles, None)

@@ -1,8 +1,0 @@
-{
-  "exclude": [
-    "vapoursynth-portable",
-    ".venv"
-  ],
-  "venvPath": ".",
-  "venv": ".venv"
-}

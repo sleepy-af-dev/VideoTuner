@@ -114,7 +114,7 @@ class CRFSearchState:
                 self.failing_crf = result
 
     def _check_targets_met(self, scores: dict[str, float]) -> bool:
-        """Check if all targets are met with given scores (rounded to metric_decimals)."""
+        """Check if all targets are met with given scores (rounded to metric_decimals)."""  # noqa: E501  # TODO(E501): shorten line
         for target in self.targets:
             if target.metric_name not in scores:
                 return False
@@ -178,7 +178,7 @@ class CRFSearchState:
 
                 # Ensure we haven't already tested this value
                 if self.has_been_tested(next_crf):
-                    # Already tested - if we've tested ceiling and it passes, we've converged at ceiling
+                    # Already tested - if we've tested ceiling and it passes, we've converged at ceiling  # noqa: E501  # TODO(E501): shorten line
                     # Otherwise, we're converged within the interval
                     return None
 
@@ -286,7 +286,7 @@ class CRFSearchState:
         return min(targets_with_values, key=lambda item: item[1])[0]
 
     def _find_closest_to_target(self) -> QualityTarget | None:
-        """Find the target that's closest to its target value (smallest positive delta)."""
+        """Find the target that's closest to its target value (smallest positive delta)."""  # noqa: E501  # TODO(E501): shorten line
         targets_with_values: list[tuple[QualityTarget, float]] = []
         for t in self.targets:
             delta = t.delta()
@@ -343,8 +343,8 @@ class CRFSearchState:
         target_score = target.target_value
 
         # Passing CRF has lower quality score (higher CRF)
-        # Failing CRF has higher quality score (lower CRF) but still doesn't meet ALL targets
-        # Note: This might seem counterintuitive, but failing_crf fails because OTHER targets aren't met
+        # Failing CRF has higher quality score (lower CRF) but still doesn't meet ALL targets  # noqa: E501  # TODO(E501): shorten line
+        # Note: This might seem counterintuitive, but failing_crf fails because OTHER targets aren't met  # noqa: E501  # TODO(E501): shorten line
 
         # For interpolation, we want to find where target_score would be
         score_range = pass_score - fail_score
@@ -398,7 +398,7 @@ class CRFSearchState:
              (going higher would almost certainly fail), OR
            - We've tested a higher CRF that doesn't meet targets, and the gap is too
              small to test anything in between (considering the CRF interval)
-        """
+        """  # noqa: E501  # TODO(E501): shorten line
         if self.passing_crf is None:
             return False
 

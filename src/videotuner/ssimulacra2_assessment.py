@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .utils import ensure_dir, run_capture
+from .encoding_utils import VapourSynthEnv, write_vpy_script
 from .media import get_assessment_frame_count
-from .encoding_utils import write_vpy_script, VapourSynthEnv
+from .utils import ensure_dir, run_capture
 
 if TYPE_CHECKING:
     from .profiles import Profile
@@ -170,7 +170,7 @@ except Exception as e:
     import traceback
     traceback.print_exc()
     sys.exit(1)
-'''
+'''  # noqa: E501  # TODO(E501): shorten line
 
     write_vpy_script(vpy_path, vpy_content)
     log.debug("vszip script written to: %s", vpy_path)

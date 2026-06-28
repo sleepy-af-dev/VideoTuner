@@ -10,11 +10,11 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from .progress import PipelineDisplay
 from .encoding_utils import CropValues
 from .media import VideoInfo
 from .pipeline_cli import PipelineArgs
 from .profiles import Profile
+from .progress import PipelineDisplay
 from .utils import ensure_dir
 
 

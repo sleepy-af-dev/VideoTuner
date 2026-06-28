@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from videotuner.x265_params import build_global_x265_params, VALID_PRESETS
 from videotuner.media import VideoInfo
+from videotuner.x265_params import VALID_PRESETS, build_global_x265_params
 
 
 class TestBuildGlobalX265Params:
@@ -220,7 +220,7 @@ class TestBuildGlobalX265Params:
         assert "smpte170m" in params
 
     def test_colormatrix_fallback_from_primaries(self):
-        """Test that color matrix is inferred from primaries when color_space is unknown."""
+        """Test that color matrix is inferred from primaries when color_space is unknown."""  # noqa: E501  # TODO(E501): shorten line
         video_info = VideoInfo(
             fps=24.0,
             duration=100.0,

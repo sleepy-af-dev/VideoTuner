@@ -79,9 +79,7 @@ def _run_ffprobe_json(
         str(input_path),
     ]
 
-    proc = subprocess.run(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    )
+    proc = subprocess.run(cmd, capture_output=True, text=True)
 
     if proc.returncode != 0:
         logger.warning("ffprobe JSON query failed: %s", proc.stderr)
@@ -142,9 +140,7 @@ def parse_video_info(
         "default=nw=1:nk=1",
         str(input_path),
     ]
-    check_proc = subprocess.run(
-        check_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    )
+    check_proc = subprocess.run(check_cmd, capture_output=True, text=True)
 
     # Check for common error patterns indicating invalid video file
     stderr_lower = check_proc.stderr.lower()
@@ -279,7 +275,7 @@ def parse_video_info(
                 except (ValueError, TypeError):
                     logger.warning("Failed to parse video bitrate: %s", raw_bitrate)
 
-            # Fallback to overall bitrate from general track if video bitrate not available
+            # Fallback to overall bitrate from general track if video bitrate not available  # noqa: E501  # TODO(E501): shorten line
             if video_bitrate_kbps is None and media_info.general_tracks:
                 general_track = media_info.general_tracks[0]
                 overall_bitrate = cast(
@@ -290,7 +286,7 @@ def parse_video_info(
                     try:
                         video_bitrate_kbps = float(overall_bitrate) / 1000.0
                         logger.debug(
-                            "Video bitrate from pymediainfo overall: %.0f kbps (includes audio)",
+                            "Video bitrate from pymediainfo overall: %.0f kbps (includes audio)",  # noqa: E501  # TODO(E501): shorten line
                             video_bitrate_kbps,
                         )
                     except (ValueError, TypeError):
@@ -299,7 +295,7 @@ def parse_video_info(
                         )
 
             logger.debug(
-                "HDR metadata from pymediainfo: primaries=%s, luminance=%s, MaxCLL=%s, MaxFALL=%s",
+                "HDR metadata from pymediainfo: primaries=%s, luminance=%s, MaxCLL=%s, MaxFALL=%s",  # noqa: E501  # TODO(E501): shorten line
                 mastering_display_primaries,
                 mastering_display_luminance,
                 max_cll,
@@ -319,7 +315,7 @@ def parse_video_info(
                 logger.info("HDR metadata: %s", ", ".join(hdr_parts))
     except ImportError:
         logger.warning(
-            "pymediainfo not available, HDR metadata and video bitrate will not be extracted"
+            "pymediainfo not available, HDR metadata and video bitrate will not be extracted"  # noqa: E501  # TODO(E501): shorten line
         )
 
     # Fallback: calculate frame_count from fps × duration if not available from metadata
@@ -489,9 +485,7 @@ def get_encode_stats(
     ]
 
     try:
-        proc = subprocess.run(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
+        proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             logger.warning("ffprobe failed for encode stats: %s", proc.stderr)
             return None

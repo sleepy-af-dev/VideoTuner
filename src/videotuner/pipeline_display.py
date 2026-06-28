@@ -14,7 +14,7 @@ from rich.table import Table
 
 from .constants import METRIC_DECIMALS
 from .crf_search import QualityTarget
-from .pipeline_cli import DEFAULT_CRF_START_VALUE, DEFAULT_CRF_INTERVAL, get_default
+from .pipeline_cli import DEFAULT_CRF_INTERVAL, DEFAULT_CRF_START_VALUE, get_default
 
 if TYPE_CHECKING:
     from .pipeline_types import MultiProfileResult
@@ -79,11 +79,11 @@ def display_ignored_args_warnings(
     # Check for explicitly-provided CRF arguments (differ from defaults)
     if crf_start_value != DEFAULT_CRF_START_VALUE:
         warnings.append(
-            f"--crf-start-value {crf_start_value} will be ignored for bitrate profiles: {profiles_str}"
+            f"--crf-start-value {crf_start_value} will be ignored for bitrate profiles: {profiles_str}"  # noqa: E501  # TODO(E501): shorten line
         )
     if crf_interval != DEFAULT_CRF_INTERVAL:
         warnings.append(
-            f"--crf-interval {crf_interval} will be ignored for bitrate profiles: {profiles_str}"
+            f"--crf-interval {crf_interval} will be ignored for bitrate profiles: {profiles_str}"  # noqa: E501  # TODO(E501): shorten line
         )
 
     # Display warnings
@@ -110,7 +110,7 @@ def display_settings_summary(
         args: Pipeline arguments
         multi_profile_display: Pre-formatted string showing profiles/groups for multi-profile mode
         source_name: Name of the source video file
-    """
+    """  # noqa: E501  # TODO(E501): shorten line
     console.print()
     console.print("[bold]Settings[/bold]")
 
@@ -214,7 +214,7 @@ def display_assessment_summary(
         targets_only: If True, only show metrics that are targets (for iteration displays)
         custom_title: Optional custom title (overrides iteration-based title)
         metric_decimals: Decimal places for metric display (default: METRIC_DECIMALS)
-    """
+    """  # noqa: E501  # TODO(E501): shorten line
     # Build target lookup
     target_map = {}
     if targets:
@@ -379,7 +379,7 @@ def check_and_display_bitrate_warning(
         )
         console.print(f"[yellow]  Predicted: {bitrate_percent:.1f}% of input[/yellow]")
         log.warning(
-            "Predicted bitrate%s (%.0f kbps) exceeds threshold: %.1f%% of input (%.0f kbps)",
+            "Predicted bitrate%s (%.0f kbps) exceeds threshold: %.1f%% of input (%.0f kbps)",  # noqa: E501  # TODO(E501): shorten line
             profile_str,
             predicted_bitrate_kbps,
             bitrate_percent,
@@ -400,7 +400,7 @@ def display_multi_profile_results(
         results: Sorted list of profile results (best first)
         targets: Quality targets that were set
         metric_decimals: Decimal places for metric display (default: METRIC_DECIMALS)
-    """
+    """  # noqa: E501  # TODO(E501): shorten line
     if not results:
         return
 
@@ -486,7 +486,7 @@ def display_multi_profile_results(
 
             if value is not None:
                 formatted_value = f"{value:.{decimals}f}"
-                # Add checkmark if target is met (for profiles where targets were evaluated)
+                # Add checkmark if target is met (for profiles where targets were evaluated)  # noqa: E501  # TODO(E501): shorten line
                 if is_target and result.meets_all_targets is not None:
                     target = next(
                         (t for t in targets if t.metric_name == metric_key), None
@@ -529,7 +529,7 @@ def display_multi_profile_results(
                 row_values.append("-")
         table.add_row(*row_values)
 
-    # Add Targets Met row (when targets exist and any profile was evaluated against them)
+    # Add Targets Met row (when targets exist and any profile was evaluated against them)  # noqa: E501  # TODO(E501): shorten line
     has_evaluated_profiles = any(r.meets_all_targets is not None for r in results)
     if targets and has_evaluated_profiles:
         row_values = ["All Targets Met"]
@@ -552,7 +552,7 @@ def display_multi_profile_results(
 
     if all_abr and has_targets_specified:
         console.print(
-            "[dim]Ranked by target achievement, then quality score priority (winner highlighted)[/dim]"
+            "[dim]Ranked by target achievement, then quality score priority (winner highlighted)[/dim]"  # noqa: E501  # TODO(E501): shorten line
         )
     elif all_abr:
         console.print(
@@ -560,11 +560,11 @@ def display_multi_profile_results(
         )
     elif has_targets_specified:
         console.print(
-            "[dim]Ranked by target achievement, then lowest predicted bitrate with quality tiebreaker (winner highlighted)[/dim]"
+            "[dim]Ranked by target achievement, then lowest predicted bitrate with quality tiebreaker (winner highlighted)[/dim]"  # noqa: E501  # TODO(E501): shorten line
         )
     else:
         console.print(
-            "[dim]Ranked by lowest predicted bitrate with quality tiebreaker (winner highlighted)[/dim]"
+            "[dim]Ranked by lowest predicted bitrate with quality tiebreaker (winner highlighted)[/dim]"  # noqa: E501  # TODO(E501): shorten line
         )
 
     # Show key legend only when checkmarks are displayed

@@ -65,7 +65,7 @@ class TestParseMasterDisplayMetadata:
         assert result is None
 
     def test_luminance_unit_conversion(self):
-        """Test that luminance values are converted to x265 units (multiply by 10000)."""
+        """Test that luminance values are converted to x265 units (multiply by 10000)."""  # noqa: E501  # TODO(E501): shorten line
         primaries = "Display P3"
         luminance = "min: 0.0100 cd/m2, max: 500 cd/m2"
 

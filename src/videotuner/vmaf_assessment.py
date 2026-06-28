@@ -6,27 +6,27 @@ import math
 import os
 import re
 import shlex
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from .media import (
-    VideoInfo,
-    parse_video_info,
-    get_bit_depth_from_pix_fmt,
-    get_assessment_frame_count,
-)
-from .tonemapping import has_vulkan_support, build_tonemap_chain
-from .tool_parsers import get_float
-from .utils import run, make_relative_path
 from .constants import (
-    VMAF_THREAD_CPU_FRACTION,
-    VMAF_MAX_THREADS,
+    MIN_CROP_FRACTION,
     RESOLUTION_CONFIDENCE_THRESHOLD,
     RESOLUTION_RELATIVE_TOLERANCE,
-    MIN_CROP_FRACTION,
+    VMAF_MAX_THREADS,
+    VMAF_THREAD_CPU_FRACTION,
 )
+from .media import (
+    VideoInfo,
+    get_assessment_frame_count,
+    get_bit_depth_from_pix_fmt,
+    parse_video_info,
+)
+from .tonemapping import build_tonemap_chain, has_vulkan_support
+from .tool_parsers import get_float
+from .utils import make_relative_path, run
 
 if TYPE_CHECKING:
     from .profiles import Profile
@@ -168,7 +168,7 @@ class CommercialResolutionInfer:
             dh = abs(h - bh) / bh if bh > 0 else float("inf")
             ar_err = abs(obs_ar - base_ar) / base_ar if base_ar > 0 else float("inf")
 
-            # Three hypotheses: full-frame, cropped height (letterbox), cropped width (pillarbox)
+            # Three hypotheses: full-frame, cropped height (letterbox), cropped width (pillarbox)  # noqa: E501  # TODO(E501): shorten line
             err_full = (dw + dh) / 2 + 0.25 * ar_err
 
             err_crop_h = None
@@ -244,11 +244,11 @@ def validate_comparison(ref_info: VideoInfo, dis_info: VideoInfo) -> None:
     # Check for upscaling (distorted > reference)
     if ref_info.width and dis_info.width and dis_info.width > ref_info.width:
         raise ValueError(
-            f"Upscaling not supported: distorted width ({dis_info.width}) > reference width ({ref_info.width})"
+            f"Upscaling not supported: distorted width ({dis_info.width}) > reference width ({ref_info.width})"  # noqa: E501  # TODO(E501): shorten line
         )
     if ref_info.height and dis_info.height and dis_info.height > ref_info.height:
         raise ValueError(
-            f"Upscaling not supported: distorted height ({dis_info.height}) > reference height ({ref_info.height})"
+            f"Upscaling not supported: distorted height ({dis_info.height}) > reference height ({ref_info.height})"  # noqa: E501  # TODO(E501): shorten line
         )
 
     # Check for color space upgrade (reference is BT.709 but distorted is BT.2020)
@@ -256,7 +256,7 @@ def validate_comparison(ref_info: VideoInfo, dis_info: VideoInfo) -> None:
     dis_is_2020 = needs_tonemap(dis_info)
     if not ref_is_2020 and dis_is_2020:
         raise ValueError(
-            "Color space upgrade not supported: reference is BT.709 but distorted is BT.2020"
+            "Color space upgrade not supported: reference is BT.709 but distorted is BT.2020"  # noqa: E501  # TODO(E501): shorten line
         )
 
     # Check for bit depth upgrade (distorted > reference)
@@ -264,7 +264,7 @@ def validate_comparison(ref_info: VideoInfo, dis_info: VideoInfo) -> None:
     dis_depth = get_bit_depth_from_pix_fmt(dis_info.pix_fmt)
     if dis_depth > ref_depth:
         raise ValueError(
-            f"Bit depth upgrade not supported: distorted bit depth ({dis_depth}-bit) > reference bit depth ({ref_depth}-bit)"
+            f"Bit depth upgrade not supported: distorted bit depth ({dis_depth}-bit) > reference bit depth ({ref_depth}-bit)"  # noqa: E501  # TODO(E501): shorten line
         )
 
 
@@ -288,13 +288,13 @@ def select_vmaf_model(width: int, height: int) -> str:
 
     # Log classification details
     log.debug(
-        f"Resolution classification: {width}x{height} → {result.base_label}p (confidence: {result.confidence}, AR: {result.extras.get('observed_ar', 'N/A')})"
+        f"Resolution classification: {width}x{height} → {result.base_label}p (confidence: {result.confidence}, AR: {result.extras.get('observed_ar', 'N/A')})"  # noqa: E501  # TODO(E501): shorten line
     )
 
     # Warn on low confidence matches
     if result.confidence < RESOLUTION_CONFIDENCE_THRESHOLD:
         log.warning(
-            f"Low confidence resolution classification for {width}x{height}: {result.notes}"
+            f"Low confidence resolution classification for {width}x{height}: {result.notes}"  # noqa: E501  # TODO(E501): shorten line
         )
 
     # Use 4K model for 2160p tier and above
@@ -372,7 +372,7 @@ def run_vmaf(
     # Build model option: prefer explicit path if it exists; otherwise accept
     # direct 'name=' or 'version=' input; fallback to 'version=<spec>'.
     if Path(model_spec).exists():
-        model_opt = f"model=path={_escape_filter_path(Path(make_relative_path(Path(model_spec), cwd)))}"
+        model_opt = f"model=path={_escape_filter_path(Path(make_relative_path(Path(model_spec), cwd)))}"  # noqa: E501  # TODO(E501): shorten line
     else:
         lower = model_spec.lower()
         if (
@@ -435,7 +435,7 @@ def run_vmaf(
     run(cmd, live=True, cwd=cwd, line_callback=line_handler)
 
     try:
-        with open(log_path, "r", encoding="utf-8") as f:
+        with open(log_path, encoding="utf-8") as f:
             data = cast(object, json.load(f))
         frame_scores: list[float] = []
         mean: float | None = None
@@ -553,7 +553,7 @@ def assess_with_vmaf(
     Centralizes all VMAF-related orchestration here (probing, filtering, parsing).
     If model_spec is None, automatically selects the appropriate model based on
     the distorted video's resolution.
-    """
+    """  # noqa: E501  # TODO(E501): shorten line
     ref_info = parse_video_info(
         ref_path, ffprobe_bin=ffprobe_bin, log_hdr_metadata=False
     )

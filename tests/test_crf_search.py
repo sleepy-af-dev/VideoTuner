@@ -1,6 +1,6 @@
 """Tests for CRF search algorithm."""
 
-from videotuner.crf_search import CRFSearchState, QualityTarget, CRF_CEILING
+from videotuner.crf_search import CRF_CEILING, CRFSearchState, QualityTarget
 
 
 class TestCRFSearchConvergence:
@@ -62,7 +62,7 @@ class TestCRFSearchConvergence:
         assert state.get_optimal_crf() == 16.0
 
     def test_convergence_when_last_iteration_failed(self):
-        """Test convergence works even when the most recent iteration didn't meet targets."""
+        """Test convergence works even when the most recent iteration didn't meet targets."""  # noqa: E501  # TODO(E501): shorten line
         targets = [
             QualityTarget("vmaf_mean", 99.0),
             QualityTarget("ssim2_mean", 85.0),
@@ -152,7 +152,7 @@ class TestExactMatchConvergence:
         assert state.get_optimal_crf() == 14.0
 
     def test_no_convergence_exact_match_but_other_target_not_met(self):
-        """Test that exact match doesn't trigger convergence if other targets aren't met."""
+        """Test that exact match doesn't trigger convergence if other targets aren't met."""  # noqa: E501  # TODO(E501): shorten line
         targets = [
             QualityTarget("vmaf_mean", 99.0),
             QualityTarget("ssim2_mean", 90.0),
@@ -178,7 +178,7 @@ class TestExactMatchConvergence:
         assert state.get_optimal_crf() == 14.0
 
     def test_no_convergence_when_above_target(self):
-        """Test that being above target (not exact) doesn't trigger early convergence."""
+        """Test that being above target (not exact) doesn't trigger early convergence."""  # noqa: E501  # TODO(E501): shorten line
         targets = [QualityTarget("ssim2_mean", 90.0)]
         state = CRFSearchState(targets, crf_interval=0.5)
 

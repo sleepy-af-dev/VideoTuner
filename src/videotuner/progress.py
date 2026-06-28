@@ -68,7 +68,7 @@ class PipelineDisplay:
         transient: bool = True,
         show_done: bool = True,
         progress_indicator: str | None = None,
-    ) -> Generator[Stage, None, None]:
+    ) -> Generator[Stage]:
         stage = Stage(
             console=self.console,
             name=name,
@@ -124,7 +124,7 @@ class Stage:
         self._task_id = None
         self._closed = False
 
-    def __enter__(self) -> "Stage":
+    def __enter__(self) -> Stage:
         # Only show header if not transient or if we want persistent headers
         if not self.transient:
             self.console.print(f"[cyan]{self.name}[/cyan]")
@@ -307,7 +307,7 @@ class Stage:
         Args:
             total_frames: Expected total frame count
             use_native_display: If True, don't update Rich progress (let SSIMULACRA2's native display show)
-        """
+        """  # noqa: E501  # TODO(E501): shorten line
         if total_frames:
             self.set_total(total_frames)
 

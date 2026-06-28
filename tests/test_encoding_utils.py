@@ -10,18 +10,18 @@ import pytest
 from videotuner.encoder_type import EncoderType
 from videotuner.encoding_utils import (
     HDR_TRANSFER_CHARACTERISTICS,
+    EncoderPaths,
+    VapourSynthEnv,
+    build_encoder_command,
     build_vspipe_command,
     build_x264_command,
     build_x265_command,
-    build_encoder_command,
+    calculate_usable_frames,
     create_temp_encode_paths,
-    get_vapoursynth_portable_dir,
     get_encoder_bin,
+    get_vapoursynth_portable_dir,
     is_hdr_video,
     resolve_absolute_path,
-    calculate_usable_frames,
-    VapourSynthEnv,
-    EncoderPaths,
 )
 
 
@@ -226,7 +226,7 @@ class TestCreateTempEncodePaths:
             EncoderType.X265, temp_dir=None, name="mytest"
         )
 
-        # When using system temp, name is used as prefix, but files still use random names
+        # When using system temp, name is used as prefix, but files still use random names  # noqa: E501  # TODO(E501): shorten line
         # Just verify they have the right extensions and the prefix is included
         assert vpy_path.suffix == ".vpy"
         assert bitstream_path.suffix == ".hevc"

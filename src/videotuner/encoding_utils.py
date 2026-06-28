@@ -8,10 +8,11 @@ import shlex
 import subprocess
 import tempfile
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from io import TextIOWrapper
 from pathlib import Path
-from typing import IO, Callable
+from typing import IO
 
 from .encoder_type import EncoderType
 
@@ -214,7 +215,7 @@ class VapourSynthEnv:
     vspipe_bin: Path
 
     @classmethod
-    def from_cwd(cls, cwd: Path | None) -> "VapourSynthEnv":
+    def from_cwd(cls, cwd: Path | None) -> VapourSynthEnv:
         """Resolve VapourSynth paths from working directory.
 
         Args:
@@ -243,7 +244,7 @@ class VapourSynthEnv:
         vs_dir_arg: Path | None,
         vs_plugin_dir_arg: Path | None,
         repo_root: Path,
-    ) -> "VapourSynthEnv":
+    ) -> VapourSynthEnv:
         """Resolve VapourSynth paths from CLI args with repo root fallback.
 
         Args:
@@ -253,7 +254,7 @@ class VapourSynthEnv:
 
         Returns:
             VapourSynthEnv with all paths resolved.
-        """
+        """  # noqa: E501  # TODO(E501): shorten line
         vs_dir = (
             vs_dir_arg
             if vs_dir_arg is not None
@@ -339,7 +340,7 @@ class EncoderPaths:
     vs_env: VapourSynthEnv
 
     @classmethod
-    def from_cwd(cls, cwd: Path | None, encoder_type: EncoderType) -> "EncoderPaths":
+    def from_cwd(cls, cwd: Path | None, encoder_type: EncoderType) -> EncoderPaths:
         """Resolve all encoder paths from working directory.
 
         Args:
@@ -449,7 +450,7 @@ def calculate_usable_range(params: SamplingParams) -> UsableRange:
     usable_frames = usable_end - usable_start
     if usable_frames < params.region_frames:
         raise ValueError(
-            f"Usable frames ({usable_frames}) less than region size ({params.region_frames})"
+            f"Usable frames ({usable_frames}) less than region size ({params.region_frames})"  # noqa: E501  # TODO(E501): shorten line
         )
 
     return UsableRange(start=usable_start, end=usable_end, frame_count=usable_frames)
@@ -481,7 +482,7 @@ def build_sampling_vpy_script(
     region_frames: int,
     fps: float,
     cwd: Path | None = None,
-    crop_values: "CropValues | None" = None,
+    crop_values: CropValues | None = None,
 ) -> str:
     """Build VapourSynth script for periodic frame sampling.
 
@@ -509,7 +510,7 @@ def build_sampling_vpy_script(
         "import vapoursynth as vs",
         "core = vs.core",
         "",
-        f'clip = core.ffms2.Source(r"{abs_source_path}", cachefile=r"{abs_cache_file}")',
+        f'clip = core.ffms2.Source(r"{abs_source_path}", cachefile=r"{abs_cache_file}")',  # noqa: E501  # TODO(E501): shorten line
         "",
         "# Trim to usable range (skip guard bands)",
         f"usable = clip[{usable_range.start}:{usable_range.end}]",
@@ -519,7 +520,7 @@ def build_sampling_vpy_script(
         f"offsets = list(range({region_frames}))",
         f"sampled = usable.std.SelectEvery({interval_frames}, offsets)",
         "",
-        "# Reset FPS to original rate (SelectEvery preserves timestamps, creating gaps)",
+        "# Reset FPS to original rate (SelectEvery preserves timestamps, creating gaps)",  # noqa: E501  # TODO(E501): shorten line
         "# This renumbers frames sequentially at the original FPS",
         f"sampled = sampled.std.AssumeFPS(fpsnum={fps_num}, fpsden=1000)",
     ]
@@ -536,7 +537,7 @@ def build_sampling_vpy_script(
             vpy_lines.append("# Apply crop to sampled frames")
             crop_line = (
                 f"sampled = core.std.Crop(sampled, left={crop_values.left}, "
-                f"right={crop_values.right}, top={crop_values.top}, bottom={crop_values.bottom})"
+                f"right={crop_values.right}, top={crop_values.top}, bottom={crop_values.bottom})"  # noqa: E501  # TODO(E501): shorten line
             )
             vpy_lines.append(crop_line)
 

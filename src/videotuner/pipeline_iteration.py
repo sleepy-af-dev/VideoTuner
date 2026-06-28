@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from .media import parse_video_info, get_encode_stats
+from .media import get_encode_stats, parse_video_info
 
 if TYPE_CHECKING:
     from .pipeline_types import IterationContext
@@ -43,7 +43,7 @@ class MetricSampleParams:
 
 
 def calculate_metric_params(
-    ctx: "IterationContext",
+    ctx: IterationContext,
     metric_type: Literal["vmaf", "ssim2"],
 ) -> MetricSampleParams:
     """Calculate sample counts and frame totals for a metric.
@@ -77,10 +77,10 @@ def calculate_metric_params(
 
 
 def run_vmaf_assessment(
-    ctx: "IterationContext",
+    ctx: IterationContext,
     distorted_path: Path,
     iteration: int,
-) -> list["VMAFResult"]:
+) -> list[VMAFResult]:
     """Run VMAF assessment with standard parameters.
 
     Args:
@@ -118,10 +118,10 @@ def run_vmaf_assessment(
 
 
 def run_ssim2_assessment(
-    ctx: "IterationContext",
+    ctx: IterationContext,
     distorted_path: Path,
     iteration: int,
-) -> list["SSIM2Result"]:
+) -> list[SSIM2Result]:
     """Run SSIMULACRA2 assessment with VapourSynth config.
 
     Uses vszip VapourSynth plugin for CPU-based SSIMULACRA2 calculation.
@@ -163,8 +163,8 @@ def run_ssim2_assessment(
 
 
 def extract_scores(
-    vmaf_results: list["VMAFResult"],
-    ssim2_results: list["SSIM2Result"],
+    vmaf_results: list[VMAFResult],
+    ssim2_results: list[SSIM2Result],
 ) -> dict[str, float | None]:
     """Build scores dictionary from assessment results.
 
@@ -279,7 +279,7 @@ def calculate_predicted_bitrate(
 
 
 def _encode_crf_metric(
-    ctx: "IterationContext",
+    ctx: IterationContext,
     metric_params: MetricSampleParams,
     output_path: Path,
     crf: float,
@@ -377,7 +377,7 @@ def _encode_crf_metric(
 
 
 def run_single_crf_iteration(
-    ctx: "IterationContext",
+    ctx: IterationContext,
     crf: float,
     iteration: int = 1,
 ) -> IterationResult:
@@ -470,11 +470,11 @@ def run_single_crf_iteration(
     log_section(ctx.log, f"Assessment (CRF {crf:.1f})")
 
     # Run assessments using shared helpers
-    vmaf_results: list["VMAFResult"] = []
+    vmaf_results: list[VMAFResult] = []
     if ctx.args.vmaf and vmaf_distorted_path:
         vmaf_results = run_vmaf_assessment(ctx, vmaf_distorted_path, iteration)
 
-    ssim2_results: list["SSIM2Result"] = []
+    ssim2_results: list[SSIM2Result] = []
     if ctx.args.ssim2 and ssim2_distorted_path:
         ssim2_results = run_ssim2_assessment(ctx, ssim2_distorted_path, iteration)
 
@@ -506,7 +506,7 @@ def run_single_crf_iteration(
 
 
 def run_single_bitrate_iteration(
-    ctx: "IterationContext",
+    ctx: IterationContext,
     iteration: int = 1,
 ) -> IterationResult:
     """Run a single bitrate encoding and assessment iteration.
@@ -547,7 +547,7 @@ def run_single_bitrate_iteration(
     if is_multipass:
         if pass_num == 3:
             ctx.log.info(
-                "3-pass encoding: Pass 1 (analysis) -> Pass 3 (refine) -> Pass 2 (final)"
+                "3-pass encoding: Pass 1 (analysis) -> Pass 3 (refine) -> Pass 2 (final)"  # noqa: E501  # TODO(E501): shorten line
             )
         else:
             ctx.log.info("2-pass encoding: Pass 1 (analysis) -> Pass 2 (final)")
@@ -732,13 +732,13 @@ def run_single_bitrate_iteration(
     # Run assessments using shared helpers
     log_section(ctx.log, "Quality Assessment")
 
-    vmaf_results: list["VMAFResult"] = []
+    vmaf_results: list[VMAFResult] = []
     if ctx.args.vmaf and vmaf_distorted_path:
         vmaf_results = run_vmaf_assessment(ctx, vmaf_distorted_path, iteration)
         if vmaf_results:
             ctx.log.info("VMAF assessment complete")
 
-    ssim2_results: list["SSIM2Result"] = []
+    ssim2_results: list[SSIM2Result] = []
     if ctx.args.ssim2 and ssim2_distorted_path:
         ssim2_results = run_ssim2_assessment(ctx, ssim2_distorted_path, iteration)
         if ssim2_results:
@@ -764,10 +764,10 @@ def run_single_bitrate_iteration(
 
 
 def _encode_bitrate_metric(
-    ctx: "IterationContext",
+    ctx: IterationContext,
     metric_params: MetricSampleParams,
     output_path: Path,
-    profile: "Profile",
+    profile: Profile,
     pass_num: int,
     is_multipass: bool,
     stats_file: Path | None,

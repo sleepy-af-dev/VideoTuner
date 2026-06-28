@@ -105,7 +105,7 @@ class Profile:
                 value = self.settings[positive_param]
                 if isinstance(value, bool) and value is False:
                     raise ProfileError(
-                        f"Profile '{self.name}': Invalid boolean syntax: '{positive_param}: false' should be '{negative_param}: true'"
+                        f"Profile '{self.name}': Invalid boolean syntax: '{positive_param}: false' should be '{negative_param}: true'"  # noqa: E501  # TODO(E501): shorten line
                     )
 
         # Validate preset parameter (same presets for both x264 and x265)
@@ -113,14 +113,14 @@ class Profile:
             preset_value = str(self.settings["preset"])
             if preset_value not in VALID_PRESETS:
                 raise ProfileError(
-                    f"Profile '{self.name}': Invalid preset '{preset_value}'. Valid presets: {', '.join(VALID_PRESETS)}"
+                    f"Profile '{self.name}': Invalid preset '{preset_value}'. Valid presets: {', '.join(VALID_PRESETS)}"  # noqa: E501  # TODO(E501): shorten line
                 )
 
         # Validate bitrate and pass parameters
         if "bitrate" in self.settings and "crf" in self.settings:
             raise ProfileError(
                 f"Profile '{self.name}': 'bitrate' and 'crf' are mutually exclusive. "
-                + "Remove 'crf' from profile settings (CRF is controlled by --crf-start-value CLI argument)."
+                + "Remove 'crf' from profile settings (CRF is controlled by --crf-start-value CLI argument)."  # noqa: E501  # TODO(E501): shorten line
             )
 
         # Validate bitrate value
@@ -128,11 +128,11 @@ class Profile:
             bitrate_value = self.settings["bitrate"]
             if not isinstance(bitrate_value, (int, float)):
                 raise ProfileError(
-                    f"Profile '{self.name}': 'bitrate' must be a number, got {type(bitrate_value).__name__}"
+                    f"Profile '{self.name}': 'bitrate' must be a number, got {type(bitrate_value).__name__}"  # noqa: E501  # TODO(E501): shorten line
                 )
             if bitrate_value <= 0:
                 raise ProfileError(
-                    f"Profile '{self.name}': 'bitrate' must be positive, got {bitrate_value}"
+                    f"Profile '{self.name}': 'bitrate' must be positive, got {bitrate_value}"  # noqa: E501  # TODO(E501): shorten line
                 )
 
         # Validate pass parameter
@@ -142,13 +142,13 @@ class Profile:
             # Validate pass is an integer
             if not isinstance(pass_value, int):
                 raise ProfileError(
-                    f"Profile '{self.name}': 'pass' must be an integer (1, 2, or 3), got {type(pass_value).__name__}"
+                    f"Profile '{self.name}': 'pass' must be an integer (1, 2, or 3), got {type(pass_value).__name__}"  # noqa: E501  # TODO(E501): shorten line
                 )
 
             # Validate pass value range
             if pass_value not in (1, 2, 3):
                 raise ProfileError(
-                    f"Profile '{self.name}': 'pass' must be 1, 2, or 3, got {pass_value}"
+                    f"Profile '{self.name}': 'pass' must be 1, 2, or 3, got {pass_value}"  # noqa: E501  # TODO(E501): shorten line
                 )
 
             # Validate bitrate is present when pass is specified
@@ -164,35 +164,35 @@ class Profile:
         if self.encoder == EncoderType.X264:
             if opt_analysis is not None:
                 raise ProfileError(
-                    f"Profile '{self.name}': 'multi-pass-opt-analysis' is only supported by x265"
+                    f"Profile '{self.name}': 'multi-pass-opt-analysis' is only supported by x265"  # noqa: E501  # TODO(E501): shorten line
                 )
             if opt_distortion is not None:
                 raise ProfileError(
-                    f"Profile '{self.name}': 'multi-pass-opt-distortion' is only supported by x265"
+                    f"Profile '{self.name}': 'multi-pass-opt-distortion' is only supported by x265"  # noqa: E501  # TODO(E501): shorten line
                 )
         else:
             if opt_analysis is not None:
                 if not isinstance(opt_analysis, bool):
                     raise ProfileError(
-                        f"Profile '{self.name}': 'multi-pass-opt-analysis' must be a boolean, got {type(opt_analysis).__name__}"
+                        f"Profile '{self.name}': 'multi-pass-opt-analysis' must be a boolean, got {type(opt_analysis).__name__}"  # noqa: E501  # TODO(E501): shorten line
                     )
                 # Require multi-pass encoding (any pass value 1, 2, or 3)
                 pass_value = self.settings.get("pass")
                 if opt_analysis and pass_value is None:
                     raise ProfileError(
-                        f"Profile '{self.name}': 'multi-pass-opt-analysis' requires multi-pass encoding (pass: 1, 2, or 3)"
+                        f"Profile '{self.name}': 'multi-pass-opt-analysis' requires multi-pass encoding (pass: 1, 2, or 3)"  # noqa: E501  # TODO(E501): shorten line
                     )
 
             if opt_distortion is not None:
                 if not isinstance(opt_distortion, bool):
                     raise ProfileError(
-                        f"Profile '{self.name}': 'multi-pass-opt-distortion' must be a boolean, got {type(opt_distortion).__name__}"
+                        f"Profile '{self.name}': 'multi-pass-opt-distortion' must be a boolean, got {type(opt_distortion).__name__}"  # noqa: E501  # TODO(E501): shorten line
                     )
                 # Require multi-pass encoding (any pass value 1, 2, or 3)
                 pass_value = self.settings.get("pass")
                 if opt_distortion and pass_value is None:
                     raise ProfileError(
-                        f"Profile '{self.name}': 'multi-pass-opt-distortion' requires multi-pass encoding (pass: 1, 2, or 3)"
+                        f"Profile '{self.name}': 'multi-pass-opt-distortion' requires multi-pass encoding (pass: 1, 2, or 3)"  # noqa: E501  # TODO(E501): shorten line
                     )
 
         # Note: VBV parameters (vbv-maxrate/vbv-bufsize) can be used with both bitrate
@@ -257,8 +257,8 @@ class Profile:
     def to_x265_params(
         self,
         crf: float,
-        video_format: "VideoFormat",
-        video_info: "VideoInfo",
+        video_format: VideoFormat,
+        video_info: VideoInfo,
         is_lossless: bool = False,
         stats_file: Path | None = None,
         analysis_file: Path | None = None,
@@ -278,9 +278,9 @@ class Profile:
 
         Returns:
             List of x265 CLI arguments (e.g., ["--preset", "slow", "--aud", "--crf", "16"])
-        """
-        from .x265_params import GLOBAL_X265_PARAMS, build_global_x265_params
+        """  # noqa: E501  # TODO(E501): shorten line
         from .media import VideoFormat
+        from .x265_params import GLOBAL_X265_PARAMS, build_global_x265_params
 
         # Determine which global params the profile overrides
         skip_params = set(self.settings.keys()) & GLOBAL_X265_PARAMS
@@ -309,7 +309,7 @@ class Profile:
             if key == "preset":
                 continue
 
-            # Skip bitrate, pass, and multi-pass optimization params (handled in rate control section)
+            # Skip bitrate, pass, and multi-pass optimization params (handled in rate control section)  # noqa: E501  # TODO(E501): shorten line
             if key in (
                 "bitrate",
                 "pass",
@@ -327,7 +327,7 @@ class Profile:
                         value["hdr"] if is_hdr else value["sdr"],
                     )
                     logger.debug(
-                        f"Conditional param '{key}': is_hdr={is_hdr}, using value={conditional_value} (hdr={value['hdr']}, sdr={value['sdr']})"
+                        f"Conditional param '{key}': is_hdr={is_hdr}, using value={conditional_value} (hdr={value['hdr']}, sdr={value['sdr']})"  # noqa: E501  # TODO(E501): shorten line
                     )
                     if isinstance(conditional_value, bool):
                         if conditional_value:
@@ -337,7 +337,7 @@ class Profile:
                 else:
                     # Unknown dict structure, skip with warning
                     logger.warning(
-                        "Skipping parameter '%s': unrecognized dict structure (expected 'hdr' and 'sdr' keys)",
+                        "Skipping parameter '%s': unrecognized dict structure (expected 'hdr' and 'sdr' keys)",  # noqa: E501  # TODO(E501): shorten line
                         key,
                     )
                 continue
@@ -360,7 +360,7 @@ class Profile:
                 params.extend(["--bitrate", str(bitrate_kbps)])
 
             pass_num = self.pass_number
-            # Only add --pass for multi-pass encoding (pass 2/3, or pass 1 with stats file)
+            # Only add --pass for multi-pass encoding (pass 2/3, or pass 1 with stats file)  # noqa: E501  # TODO(E501): shorten line
             if pass_num is not None and (pass_num in (2, 3) or stats_file is not None):
                 params.extend(["--pass", str(pass_num)])
 
@@ -368,7 +368,7 @@ class Profile:
                 if pass_num in (2, 3):
                     if stats_file is None:
                         raise ProfileError(
-                            f"Profile '{self.name}': pass {pass_num} requires stats_file parameter"
+                            f"Profile '{self.name}': pass {pass_num} requires stats_file parameter"  # noqa: E501  # TODO(E501): shorten line
                         )
                     params.extend(["--stats", str(stats_file)])
                 elif pass_num == 1 and stats_file is not None:
@@ -376,7 +376,7 @@ class Profile:
                     params.extend(["--stats", str(stats_file)])
 
             # Add multi-pass optimization parameters
-            # No pass-specific logic needed - x265 handles read/write based on pass number
+            # No pass-specific logic needed - x265 handles read/write based on pass number  # noqa: E501  # TODO(E501): shorten line
             opt_analysis = self.settings.get("multi-pass-opt-analysis", False)
             opt_distortion = self.settings.get("multi-pass-opt-distortion", False)
 
@@ -401,8 +401,8 @@ class Profile:
     def _to_x264_params(
         self,
         crf: float,
-        video_format: "VideoFormat",
-        video_info: "VideoInfo",
+        video_format: VideoFormat,
+        video_info: VideoInfo,
         is_lossless: bool = False,
         stats_file: Path | None = None,
     ) -> list[str]:
@@ -460,7 +460,7 @@ class Profile:
                         value["hdr"] if is_hdr else value["sdr"],
                     )
                     logger.debug(
-                        f"Conditional param '{key}': is_hdr={is_hdr}, using value={conditional_value}"
+                        f"Conditional param '{key}': is_hdr={is_hdr}, using value={conditional_value}"  # noqa: E501  # TODO(E501): shorten line
                     )
                     if isinstance(conditional_value, bool):
                         if conditional_value:
@@ -469,7 +469,7 @@ class Profile:
                         params.extend([f"--{key}", str(conditional_value)])
                 else:
                     logger.warning(
-                        "Skipping parameter '%s': unrecognized dict structure (expected 'hdr' and 'sdr' keys)",
+                        "Skipping parameter '%s': unrecognized dict structure (expected 'hdr' and 'sdr' keys)",  # noqa: E501  # TODO(E501): shorten line
                         key,
                     )
                 continue
@@ -498,7 +498,7 @@ class Profile:
                 if pass_num in (2, 3):
                     if stats_file is None:
                         raise ProfileError(
-                            f"Profile '{self.name}': pass {pass_num} requires stats_file parameter"
+                            f"Profile '{self.name}': pass {pass_num} requires stats_file parameter"  # noqa: E501  # TODO(E501): shorten line
                         )
                     params.extend(["--stats", str(stats_file)])
                 elif pass_num == 1 and stats_file is not None:
@@ -512,8 +512,8 @@ class Profile:
     def to_encoder_params(
         self,
         crf: float,
-        video_format: "VideoFormat",
-        video_info: "VideoInfo",
+        video_format: VideoFormat,
+        video_info: VideoInfo,
         is_lossless: bool = False,
         stats_file: Path | None = None,
         analysis_file: Path | None = None,
@@ -548,7 +548,7 @@ _PASS1_EXCLUDED_KEYS = frozenset(
 )
 
 
-def create_multipass_profile(base_profile: "Profile", pass_num: int) -> "Profile":
+def create_multipass_profile(base_profile: Profile, pass_num: int) -> Profile:
     """Create a multi-pass variant of a profile.
 
     For pass 1, excludes multi-pass optimization keys since they only apply
@@ -623,13 +623,13 @@ def load_profiles(profile_file: Path | None = None) -> dict[str, Profile]:
             paths_str = "\n  - ".join(str(p) for p in candidates)
             raise ProfileError(
                 f"Multiple profile files found:\n  - {paths_str}\n"
-                + "Please specify which file to use with --profile-file, or remove duplicates."
+                + "Please specify which file to use with --profile-file, or remove duplicates."  # noqa: E501  # TODO(E501): shorten line
             )
         elif len(candidates) == 1:
             profile_file = candidates[0]
         else:
             raise ProfileError(
-                f"Profile file not found. Searched:\n  - {cwd_path}\n  - {project_path}\n"
+                f"Profile file not found. Searched:\n  - {cwd_path}\n  - {project_path}\n"  # noqa: E501  # TODO(E501): shorten line
                 + "Please create a profiles.yaml file or specify --profile-file."
             )
 
@@ -639,7 +639,7 @@ def load_profiles(profile_file: Path | None = None) -> dict[str, Profile]:
 
     # Load and parse YAML
     try:
-        with open(profile_file, "r", encoding="utf-8") as f:
+        with open(profile_file, encoding="utf-8") as f:
             data = cast(object, yaml.safe_load(f))
     except yaml.YAMLError as e:
         raise ProfileError(f"Failed to parse profile file: {e}")
@@ -831,7 +831,7 @@ def validate_profile_and_group_names(profiles: dict[str, Profile]) -> None:
     collisions = profile_names & all_groups
     if collisions:
         raise ProfileError(
-            f"Name collision between profile(s) and group(s): {', '.join(sorted(collisions))}. "
+            f"Name collision between profile(s) and group(s): {', '.join(sorted(collisions))}. "  # noqa: E501  # TODO(E501): shorten line
             + "Profile names and group names must be distinct."
         )
 

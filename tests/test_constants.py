@@ -3,33 +3,33 @@
 from __future__ import annotations
 
 from videotuner.constants import (
-    # CRF constants
-    CRF_MIN,
-    CRF_MAX,
-    CRF_SEARCH_MAX_ITERATIONS,
-    CRF_FLOOR_VALUE,
-    CRF_FLOOR_TOLERANCE,
-    # Guard band constants
-    MAX_COMBINED_GUARD_PERCENT,
+    BITRATE_WARNING_PERCENT_MAX,
     # Bitrate warning constants
     BITRATE_WARNING_PERCENT_MIN,
-    BITRATE_WARNING_PERCENT_MAX,
-    # VMAF constants
-    VMAF_THREAD_CPU_FRACTION,
-    VMAF_MAX_THREADS,
-    RESOLUTION_RELATIVE_TOLERANCE,
-    MIN_CROP_FRACTION,
-    RESOLUTION_CONFIDENCE_THRESHOLD,
-    # Display constants
-    PROGRESS_BAR_WIDTH,
-    LOG_SEPARATOR_WIDTH,
-    LOG_SEPARATOR_CHAR,
+    CRF_FLOOR_TOLERANCE,
+    CRF_FLOOR_VALUE,
+    CRF_MAX,
+    # CRF constants
+    CRF_MIN,
+    CRF_SEARCH_MAX_ITERATIONS,
     # Frame rate constants
     FPS_DENOMINATOR,
+    LOG_SEPARATOR_CHAR,
+    LOG_SEPARATOR_WIDTH,
+    # Guard band constants
+    MAX_COMBINED_GUARD_PERCENT,
+    MIN_CROP_FRACTION,
     # Percentile constants
     PERCENTILE_1PCT,
     PERCENTILE_5PCT,
     PERCENTILE_95PCT,
+    # Display constants
+    PROGRESS_BAR_WIDTH,
+    RESOLUTION_CONFIDENCE_THRESHOLD,
+    RESOLUTION_RELATIVE_TOLERANCE,
+    VMAF_MAX_THREADS,
+    # VMAF constants
+    VMAF_THREAD_CPU_FRACTION,
 )
 
 

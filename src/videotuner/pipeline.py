@@ -7,60 +7,58 @@ from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
-from .constants import METRIC_DECIMALS
-from .ssimulacra2_assessment import SSIM2Result
-from .vmaf_assessment import VMAFResult
+from .constants import (
+    CRF_SEARCH_MAX_ITERATIONS,
+    METRIC_DECIMALS,
+)
 from .create_encodes import (
     build_ffms2_index,
     calculate_cropdetect_values,
 )
-from .encoding_utils import CropValues, is_hdr_video
-from .pipeline_iteration import run_single_crf_iteration, run_single_bitrate_iteration
-from .pipeline_cli import (
-    PipelineArgs,
-    build_arg_parser,
-    parse_cli,
-    validate_args,
-    get_default,
-)
-from .pipeline_types import get_reference_dir
-from .pipeline_display import (
-    display_settings_summary,
-    display_assessment_summary,
-    display_ignored_args_warnings,
-    format_bitrate_percentage,
-    check_and_display_bitrate_warning,
-    display_multi_profile_results,
-)
-from .pipeline_types import IterationContext
-from .progress import PipelineDisplay
-from .media import parse_video_info, InvalidVideoFileError, get_frame_count
-from .profiles import Profile
-from .utils import ensure_dir, sanitize_filename
 from .crf_search import (
     CRFFloorError,
     CRFSearchState,
     QualityTarget,
 )
-from .pipeline_validation import (
-    has_targets,
-    build_targets,
-    validate_sampling_parameters,
+from .encoding_utils import CropValues, is_hdr_video
+from .media import InvalidVideoFileError, get_frame_count, parse_video_info
+from .pipeline_cli import (
+    PipelineArgs,
+    build_arg_parser,
+    get_default,
+    parse_cli,
+    validate_args,
 )
+from .pipeline_display import (
+    check_and_display_bitrate_warning,
+    display_assessment_summary,
+    display_ignored_args_warnings,
+    display_multi_profile_results,
+    display_settings_summary,
+    format_bitrate_percentage,
+)
+from .pipeline_iteration import run_single_bitrate_iteration, run_single_crf_iteration
 from .pipeline_multi_profile import (
     MultiProfileSearchParams,
-    run_multi_profile_search,
     rank_profile_results,
+    run_multi_profile_search,
 )
 from .pipeline_reference import (
     MetricSamplingParams,
     are_sampling_params_equal,
     generate_metric_reference,
 )
-from .utils import get_app_root, log_section
-from .constants import (
-    CRF_SEARCH_MAX_ITERATIONS,
+from .pipeline_types import IterationContext, get_reference_dir
+from .pipeline_validation import (
+    build_targets,
+    has_targets,
+    validate_sampling_parameters,
 )
+from .profiles import Profile
+from .progress import PipelineDisplay
+from .ssimulacra2_assessment import SSIM2Result
+from .utils import ensure_dir, get_app_root, log_section, sanitize_filename
+from .vmaf_assessment import VMAFResult
 
 
 def run_pipeline(args: PipelineArgs) -> int:
@@ -165,7 +163,7 @@ def run_pipeline(args: PipelineArgs) -> int:
             f"{guard_end_percent * 100:.1f}% end, seconds min {guard_seconds:.1f}) "
             f"leave no usable duration in {info.duration:.1f}s video"
         )
-        msg2 = "ERROR: Reduce --guard-start-percent, --guard-end-percent, or --guard-seconds"
+        msg2 = "ERROR: Reduce --guard-start-percent, --guard-end-percent, or --guard-seconds"  # noqa: E501  # TODO(E501): shorten line
         print(msg1, file=sys.stderr)
         print(msg2, file=sys.stderr)
         log.error(
@@ -318,7 +316,7 @@ def run_pipeline(args: PipelineArgs) -> int:
     # This is done BEFORE cropdetect to avoid delays during crop detection
     # Index is stored alongside the source file for persistence across job runs
     if crop_detect or args.vmaf or args.ssim2:
-        # Store index alongside source file (e.g., sources/video.mkv -> sources/video.ffindex)
+        # Store index alongside source file (e.g., sources/video.mkv -> sources/video.ffindex)  # noqa: E501  # TODO(E501): shorten line
         cache_file = input_path.parent / f"{input_path.stem}.ffindex"
 
         # Only build if index doesn't exist
@@ -326,7 +324,7 @@ def run_pipeline(args: PipelineArgs) -> int:
             with (
                 display.stage(
                     "Building FFMS2 Index",
-                    total=1,  # Placeholder - will be updated when ffmsindex reports frame count
+                    total=1,  # Placeholder - will be updated when ffmsindex reports frame count  # noqa: E501  # TODO(E501): shorten line
                     show_eta=True,
                     transient=True,  # Transient to avoid duplicate header line
                     show_done=True,
@@ -674,7 +672,7 @@ def run_pipeline(args: PipelineArgs) -> int:
         assert selected_profile is not None
         crf_search_state = CRFSearchState(targets, args.crf_interval)
 
-        # Create iteration context with selected profile (may have been updated by profile search)
+        # Create iteration context with selected profile (may have been updated by profile search)  # noqa: E501  # TODO(E501): shorten line
         ctx = IterationContext(
             input_path=input_path,
             workdir=workdir,
@@ -714,7 +712,7 @@ def run_pipeline(args: PipelineArgs) -> int:
 
         display.console.print()
         display.console.print(
-            f"[bold]CRF Search: {selected_profile.display_label} '{selected_profile.display_name}'[/bold]"
+            f"[bold]CRF Search: {selected_profile.display_label} '{selected_profile.display_name}'[/bold]"  # noqa: E501  # TODO(E501): shorten line
         )
 
         while iteration < max_iterations:
@@ -723,7 +721,7 @@ def run_pipeline(args: PipelineArgs) -> int:
             # Display iteration header
             display.console.print()
             display.console.print(
-                f"[bold cyan]CRF Iteration {iteration}: CRF {current_crf:.1f}[/bold cyan]"
+                f"[bold cyan]CRF Iteration {iteration}: CRF {current_crf:.1f}[/bold cyan]"  # noqa: E501  # TODO(E501): shorten line
             )
 
             log.info("\n=== CRF Iteration %d: CRF %.1f ===", iteration, current_crf)
@@ -800,7 +798,7 @@ def run_pipeline(args: PipelineArgs) -> int:
                     optimal_predicted_bitrate = 0.0
 
                 display.console.print(
-                    f"[bold green]CRF Search complete: Optimal CRF = {optimal_crf:.1f}[/bold green]"
+                    f"[bold green]CRF Search complete: Optimal CRF = {optimal_crf:.1f}[/bold green]"  # noqa: E501  # TODO(E501): shorten line
                 )
                 log.info("\nCRF Search complete after %d iterations", iteration)
                 log.info("Optimal CRF: %.1f", optimal_crf)
@@ -831,16 +829,16 @@ def run_pipeline(args: PipelineArgs) -> int:
                         optimal_predicted_bitrate = 0.0
 
                     display.console.print(
-                        f"[bold green]CRF Search complete: Optimal CRF = {optimal_crf:.1f}[/bold green]"
+                        f"[bold green]CRF Search complete: Optimal CRF = {optimal_crf:.1f}[/bold green]"  # noqa: E501  # TODO(E501): shorten line
                     )
                     log.info("\nCRF Search complete after %d iterations", iteration)
                     log.info("Optimal CRF: %.1f", optimal_crf)
                 else:
                     display.console.print(
-                        "[bold yellow]CRF Search exhausted - targets may be unreachable[/bold yellow]"
+                        "[bold yellow]CRF Search exhausted - targets may be unreachable[/bold yellow]"  # noqa: E501  # TODO(E501): shorten line
                     )
                     log.warning(
-                        "\nCRF Search exhausted after %d iterations - targets may be unreachable",
+                        "\nCRF Search exhausted after %d iterations - targets may be unreachable",  # noqa: E501  # TODO(E501): shorten line
                         iteration,
                     )
                     if crf_search_state.get_optimal_crf() is not None:
@@ -863,7 +861,7 @@ def run_pipeline(args: PipelineArgs) -> int:
                 log.info("Next CRF: %.1f (refining, delta=%s)", next_crf, delta_str)
             else:
                 display.console.print(
-                    f"[cyan]→ Next: CRF {next_crf:.1f} (searching {direction}, {delta_str})[/cyan]"
+                    f"[cyan]→ Next: CRF {next_crf:.1f} (searching {direction}, {delta_str})[/cyan]"  # noqa: E501  # TODO(E501): shorten line
                 )
                 log.info(
                     "Next CRF: %.1f (searching %s, delta=%s)",
@@ -936,7 +934,7 @@ def run_pipeline(args: PipelineArgs) -> int:
         display.console.print()
         if winner.optimal_crf is not None:
             display.console.print(
-                f"[bold green]Winner: {winner.profile_name} at CRF {winner.optimal_crf:.1f}[/bold green]"
+                f"[bold green]Winner: {winner.profile_name} at CRF {winner.optimal_crf:.1f}[/bold green]"  # noqa: E501  # TODO(E501): shorten line
             )
         else:
             display.console.print(

@@ -15,6 +15,7 @@ from .encoding_utils import (
     CropValues,
     EncoderPaths,
     SamplingParams,
+    VapourSynthEnv,
     build_encoder_command,
     build_sampling_vpy_script,
     build_vspipe_command,
@@ -26,11 +27,10 @@ from .encoding_utils import (
     resolve_absolute_path,
     run_vspipe_encode,
     write_vpy_script,
-    VapourSynthEnv,
 )
 from .media import VideoFormat
 from .profiles import Profile, create_multipass_profile
-from .tonemapping import has_vulkan_support, build_tonemap_chain
+from .tonemapping import build_tonemap_chain, has_vulkan_support
 from .tool_parsers import CROPDETECT_RE
 from .utils import ensure_dir, log_separator, run_capture
 
@@ -102,7 +102,7 @@ def build_ffms2_index(
 
     if not ffmsindex_exe.exists():
         log.debug(
-            "ffmsindex.exe not found, FFMS2 will build index automatically (no progress display)"
+            "ffmsindex.exe not found, FFMS2 will build index automatically (no progress display)"  # noqa: E501  # TODO(E501): shorten line
         )
         return False
 
@@ -415,7 +415,7 @@ def encode_concatenated_reference(
     )
     label_prefix = f"{metric_label} " if metric_label else ""
     log.info(
-        "Encoding %slossless reference: %d samples, %d total frames (interval=%d, region=%d)",
+        "Encoding %slossless reference: %d samples, %d total frames (interval=%d, region=%d)",  # noqa: E501  # TODO(E501): shorten line
         label_prefix,
         num_samples,
         total_sampled_frames,
@@ -575,7 +575,7 @@ def encode_concatenated_distorted(
     )
     label_prefix = f"{metric_label} " if metric_label else ""
     log.info(
-        "Encoding %sdistorted clip (CRF %.1f): %d samples, %d total frames (interval=%d, region=%d)",
+        "Encoding %sdistorted clip (CRF %.1f): %d samples, %d total frames (interval=%d, region=%d)",  # noqa: E501  # TODO(E501): shorten line
         label_prefix,
         crf,
         num_samples,
@@ -631,8 +631,8 @@ def encode_concatenated_bitrate(
     guard_end_frames: int,
     total_frames: int,
     fps: float,
-    profile: "Profile",
-    video_info: "VideoInfo",
+    profile: Profile,
+    video_info: VideoInfo,
     *,
     mkvmerge_bin: str = "mkvmerge",
     cwd: Path | None = None,
@@ -896,8 +896,8 @@ def encode_multipass_bitrate(
     guard_end_frames: int,
     total_frames: int,
     fps: float,
-    profile: "Profile",
-    video_info: "VideoInfo",
+    profile: Profile,
+    video_info: VideoInfo,
     *,
     mkvmerge_bin: str = "mkvmerge",
     cwd: Path | None = None,
@@ -951,7 +951,7 @@ def encode_multipass_bitrate(
     pass_num = profile.pass_number
     if pass_num not in (2, 3):
         raise ValueError(
-            f"Profile '{profile.name}' must specify pass=2 or pass=3 for multi-pass encoding"
+            f"Profile '{profile.name}' must specify pass=2 or pass=3 for multi-pass encoding"  # noqa: E501  # TODO(E501): shorten line
         )
 
     # Create a modified profile for pass 1

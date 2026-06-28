@@ -54,7 +54,7 @@ class TestCropdetectParsing:
     """Tests for CROPDETECT_RE regex."""
 
     def test_parse_crop_line(self) -> None:
-        line = "[Parsed_cropdetect_0 @ 0x...] x1:0 x2:3839 y1:276 y2:1863 w:3840 h:1584 x:0 y:278 pts:1001 t:1.001000 limit:0.094118 crop=3840:1584:0:278"
+        line = "[Parsed_cropdetect_0 @ 0x...] x1:0 x2:3839 y1:276 y2:1863 w:3840 h:1584 x:0 y:278 pts:1001 t:1.001000 limit:0.094118 crop=3840:1584:0:278"  # noqa: E501  # TODO(E501): shorten line
         matches: list[tuple[str, str, str, str]] = CROPDETECT_RE.findall(line)
         assert len(matches) == 1
         w, h, x, y = matches[0]

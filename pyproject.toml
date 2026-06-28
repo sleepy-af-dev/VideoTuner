@@ -41,6 +41,17 @@ packages = ["src/videotuner"]
 constraint-dependencies = ["pygments>=2.20.0"]
 
 [tool.ruff]
+line-length = 88
+target-version = "py313"
 exclude = [
     "vapoursynth-portable",
 ]
+
+[tool.ruff.lint]
+# E501 = line length (88); F = pyflakes (unused imports/names); I = import sorting; UP = pyupgrade.
+select = ["E501", "F", "I", "UP"]
+
+[tool.basedpyright]
+exclude = ["vapoursynth-portable", ".venv"]
+venvPath = "."
+venv = ".venv"

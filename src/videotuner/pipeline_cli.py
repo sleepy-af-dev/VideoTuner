@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable
-from dataclasses import dataclass, fields, MISSING
+from dataclasses import MISSING, dataclass, fields
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -106,7 +106,7 @@ _get_default = get_default
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="CRF optimization and encoder benchmarking using VMAF and SSIMULACRA2 quality metrics",
+        description="CRF optimization and encoder benchmarking using VMAF and SSIMULACRA2 quality metrics",  # noqa: E501  # TODO(E501): shorten line
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
@@ -202,7 +202,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=_get_default("cropdetect_interval"),
         dest="cropdetect_interval",
-        help=f"Seconds between sampled frames for crop detection (default: {_get_default('cropdetect_interval')})",
+        help=f"Seconds between sampled frames for crop detection (default: {_get_default('cropdetect_interval')})",  # noqa: E501  # TODO(E501): shorten line
     )
     _ = cropdetect_group.add_argument(
         "--cropdetect-mode",
@@ -224,7 +224,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=_get_default("cropdetect_round"),
         dest="cropdetect_round",
-        help=f"Crop dimension divisibility (default: {_get_default('cropdetect_round')}). Use 16 for best codec alignment.",
+        help=f"Crop dimension divisibility (default: {_get_default('cropdetect_round')}). Use 16 for best codec alignment.",  # noqa: E501  # TODO(E501): shorten line
     )
     _ = cropdetect_group.add_argument(
         "--cropdetect-mv-threshold",
@@ -323,28 +323,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="N",
         default=_get_default("vmaf_interval_frames"),
-        help=f"Sample every N frames for VMAF (default: {_get_default('vmaf_interval_frames')})",
+        help=f"Sample every N frames for VMAF (default: {_get_default('vmaf_interval_frames')})",  # noqa: E501  # TODO(E501): shorten line
     )
     _ = sampling_group.add_argument(
         "--vmaf-region-frames",
         type=int,
         metavar="N",
         default=_get_default("vmaf_region_frames"),
-        help=f"Consecutive frames per VMAF sample (default: {_get_default('vmaf_region_frames')})",
+        help=f"Consecutive frames per VMAF sample (default: {_get_default('vmaf_region_frames')})",  # noqa: E501  # TODO(E501): shorten line
     )
     _ = sampling_group.add_argument(
         "--ssim2-interval-frames",
         type=int,
         metavar="N",
         default=_get_default("ssim2_interval_frames"),
-        help=f"Sample every N frames for SSIM2 (default: {_get_default('ssim2_interval_frames')})",
+        help=f"Sample every N frames for SSIM2 (default: {_get_default('ssim2_interval_frames')})",  # noqa: E501  # TODO(E501): shorten line
     )
     _ = sampling_group.add_argument(
         "--ssim2-region-frames",
         type=int,
         metavar="N",
         default=_get_default("ssim2_region_frames"),
-        help=f"Consecutive frames per SSIM2 sample (default: {_get_default('ssim2_region_frames')})",
+        help=f"Consecutive frames per SSIM2 sample (default: {_get_default('ssim2_region_frames')})",  # noqa: E501  # TODO(E501): shorten line
     )
 
     # -------------------------------------------------------------------------
@@ -384,7 +384,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         metavar="PCT",
         default=_get_default("guard_start_percent"),
-        help=f"Exclude head percentage (default: {_get_default('guard_start_percent')})",
+        help=f"Exclude head percentage (default: {_get_default('guard_start_percent')})",  # noqa: E501  # TODO(E501): shorten line
     )
     _ = guard_group.add_argument(
         "--guard-end-percent",
@@ -398,7 +398,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         metavar="SEC",
         default=_get_default("guard_seconds"),
-        help=f"Minimum guard in seconds per side (default: {_get_default('guard_seconds')})",
+        help=f"Minimum guard in seconds per side (default: {_get_default('guard_seconds')})",  # noqa: E501  # TODO(E501): shorten line
     )
 
     # -------------------------------------------------------------------------
@@ -422,7 +422,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="N",
         default=_get_default("metric_decimals"),
-        help=f"Decimal places for metric display and comparison (default: {_get_default('metric_decimals')})",
+        help=f"Decimal places for metric display and comparison (default: {_get_default('metric_decimals')})",  # noqa: E501  # TODO(E501): shorten line
     )
 
     # -------------------------------------------------------------------------
@@ -531,8 +531,8 @@ def parse_cli(argv: Iterable[str] | None = None) -> PipelineArgs:
 class ValidationResult:
     """Result of argument validation with resolved profiles."""
 
-    selected_profile: "Profile | None"  # None when using multi-profile search
-    multi_profile_list: list["Profile"]
+    selected_profile: Profile | None  # None when using multi-profile search
+    multi_profile_list: list[Profile]
     multi_profile_display: str
     has_quality_targets: bool
 
@@ -543,7 +543,7 @@ def validate_time_args(args: PipelineArgs, parser: argparse.ArgumentParser) -> N
         parser.error(f"--guard-seconds must be non-negative (got {args.guard_seconds})")
     if args.guard_start_percent < 0:
         parser.error(
-            f"--guard-start-percent must be non-negative (got {args.guard_start_percent})"
+            f"--guard-start-percent must be non-negative (got {args.guard_start_percent})"  # noqa: E501  # TODO(E501): shorten line
         )
     if args.guard_end_percent < 0:
         parser.error(
@@ -567,7 +567,7 @@ def validate_sampling_args(args: PipelineArgs, parser: argparse.ArgumentParser) 
 
     if args.guard_start_percent + args.guard_end_percent >= MAX_COMBINED_GUARD_PERCENT:
         parser.error(
-            f"--guard-start-percent + --guard-end-percent must be less than {MAX_COMBINED_GUARD_PERCENT} (got {args.guard_start_percent + args.guard_end_percent:.2f})"
+            f"--guard-start-percent + --guard-end-percent must be less than {MAX_COMBINED_GUARD_PERCENT} (got {args.guard_start_percent + args.guard_end_percent:.2f})"  # noqa: E501  # TODO(E501): shorten line
         )
 
 
@@ -575,19 +575,19 @@ def validate_metric_args(args: PipelineArgs, parser: argparse.ArgumentParser) ->
     """Validate metric enable/disable flags."""
     if not args.vmaf and not args.ssim2:
         parser.error(
-            "At least one metric must be enabled. Cannot use both --no-vmaf and --no-ssim2 together."
+            "At least one metric must be enabled. Cannot use both --no-vmaf and --no-ssim2 together."  # noqa: E501  # TODO(E501): shorten line
         )
 
 
 def validate_crf_args(args: PipelineArgs, parser: argparse.ArgumentParser) -> None:
     """Validate CRF search parameters."""
-    from .constants import CRF_MIN, CRF_MAX
+    from .constants import CRF_MAX, CRF_MIN
 
     if args.crf_interval <= 0:
         parser.error(f"--crf-interval must be greater than 0 (got {args.crf_interval})")
     if args.crf_start_value < CRF_MIN or args.crf_start_value > CRF_MAX:
         parser.error(
-            f"--crf-start-value must be between {CRF_MIN:.0f} and {CRF_MAX:.0f} (got {args.crf_start_value})"
+            f"--crf-start-value must be between {CRF_MIN:.0f} and {CRF_MAX:.0f} (got {args.crf_start_value})"  # noqa: E501  # TODO(E501): shorten line
         )
 
 
@@ -607,11 +607,11 @@ def validate_target_args(args: PipelineArgs, parser: argparse.ArgumentParser) ->
 
     if any(t is not None for t in vmaf_targets) and not args.vmaf:
         parser.error(
-            "VMAF targets require VMAF to be enabled. Remove --no-vmaf or remove VMAF targets."
+            "VMAF targets require VMAF to be enabled. Remove --no-vmaf or remove VMAF targets."  # noqa: E501  # TODO(E501): shorten line
         )
     if any(t is not None for t in ssim2_targets) and not args.ssim2:
         parser.error(
-            "SSIMULACRA2 targets require SSIMULACRA2 to be enabled. Remove --no-ssim2 or remove SSIM2 targets."
+            "SSIMULACRA2 targets require SSIMULACRA2 to be enabled. Remove --no-ssim2 or remove SSIM2 targets."  # noqa: E501  # TODO(E501): shorten line
         )
 
 
@@ -621,12 +621,12 @@ def validate_mode_args(
     """Validate mode-related argument combinations."""
     if args.assessment_only and has_quality_targets:
         parser.error(
-            "--assessment-only cannot be used with quality targets. Remove targets or remove --assessment-only."
+            "--assessment-only cannot be used with quality targets. Remove targets or remove --assessment-only."  # noqa: E501  # TODO(E501): shorten line
         )
 
     if args.assessment_only and args.multi_profile_search:
         parser.error(
-            "--assessment-only and --multi-profile-search are mutually exclusive. Use --assessment-only for a single encode, or --multi-profile-search for profile comparison."
+            "--assessment-only and --multi-profile-search are mutually exclusive. Use --assessment-only for a single encode, or --multi-profile-search for profile comparison."  # noqa: E501  # TODO(E501): shorten line
         )
 
     if args.profile is not None and args.preset is not None:
@@ -636,12 +636,12 @@ def validate_mode_args(
 
     if args.multi_profile_search and args.profile is not None:
         parser.error(
-            "--profile and --multi-profile-search are mutually exclusive. Use --multi-profile-search to specify profiles to compare."
+            "--profile and --multi-profile-search are mutually exclusive. Use --multi-profile-search to specify profiles to compare."  # noqa: E501  # TODO(E501): shorten line
         )
 
     if args.multi_profile_search and args.preset is not None:
         parser.error(
-            "--preset and --multi-profile-search are mutually exclusive. Use --multi-profile-search to specify profiles to compare."
+            "--preset and --multi-profile-search are mutually exclusive. Use --multi-profile-search to specify profiles to compare."  # noqa: E501  # TODO(E501): shorten line
         )
 
 
@@ -649,7 +649,7 @@ def validate_bitrate_warning_args(
     args: PipelineArgs, parser: argparse.ArgumentParser
 ) -> None:
     """Validate bitrate warning percentage range."""
-    from .constants import BITRATE_WARNING_PERCENT_MIN, BITRATE_WARNING_PERCENT_MAX
+    from .constants import BITRATE_WARNING_PERCENT_MAX, BITRATE_WARNING_PERCENT_MIN
 
     if args.predicted_bitrate_warning_percent is not None:
         if not (
@@ -658,7 +658,7 @@ def validate_bitrate_warning_args(
             <= BITRATE_WARNING_PERCENT_MAX
         ):
             parser.error(
-                f"--predicted-bitrate-warning-percent must be between {BITRATE_WARNING_PERCENT_MIN:.0f} and {BITRATE_WARNING_PERCENT_MAX:.0f} (got {args.predicted_bitrate_warning_percent})"
+                f"--predicted-bitrate-warning-percent must be between {BITRATE_WARNING_PERCENT_MIN:.0f} and {BITRATE_WARNING_PERCENT_MAX:.0f} (got {args.predicted_bitrate_warning_percent})"  # noqa: E501  # TODO(E501): shorten line
             )
 
 
@@ -686,7 +686,7 @@ def validate_cropdetect_args(
         )
     if args.cropdetect_limit is not None and not (0 <= args.cropdetect_limit <= 255):
         parser.error(
-            f"--cropdetect-limit must be between 0 and 255 (got {args.cropdetect_limit})"
+            f"--cropdetect-limit must be between 0 and 255 (got {args.cropdetect_limit})"  # noqa: E501  # TODO(E501): shorten line
         )
     if args.cropdetect_low is not None and not (0.0 <= args.cropdetect_low <= 1.0):
         parser.error(
@@ -694,7 +694,7 @@ def validate_cropdetect_args(
         )
     if args.cropdetect_high is not None and not (0.0 <= args.cropdetect_high <= 1.0):
         parser.error(
-            f"--cropdetect-high must be between 0.0 and 1.0 (got {args.cropdetect_high})"
+            f"--cropdetect-high must be between 0.0 and 1.0 (got {args.cropdetect_high})"  # noqa: E501  # TODO(E501): shorten line
         )
     if (
         args.cropdetect_low is not None
@@ -702,15 +702,15 @@ def validate_cropdetect_args(
         and args.cropdetect_low > args.cropdetect_high
     ):
         parser.error(
-            f"--cropdetect-low ({args.cropdetect_low}) must be <= --cropdetect-high ({args.cropdetect_high})"
+            f"--cropdetect-low ({args.cropdetect_low}) must be <= --cropdetect-high ({args.cropdetect_high})"  # noqa: E501  # TODO(E501): shorten line
         )
 
 
 def _resolve_multi_profile_search(
     args: PipelineArgs,
     parser: argparse.ArgumentParser,
-    profiles: dict[str, "Profile"],
-) -> tuple[list["Profile"], str]:
+    profiles: dict[str, Profile],
+) -> tuple[list[Profile], str]:
     """Resolve multi-profile-search references to profile objects.
 
     Returns:
@@ -718,7 +718,7 @@ def _resolve_multi_profile_search(
     """
     from .profiles import get_all_groups, get_profiles_by_groups
 
-    multi_profile_list: list["Profile"] = []
+    multi_profile_list: list[Profile] = []
     all_groups = get_all_groups(profiles)
 
     passed_groups: list[tuple[str, list[str]]] = []
@@ -746,7 +746,7 @@ def _resolve_multi_profile_search(
 
     # Deduplicate while preserving order
     seen: set[str] = set()
-    unique_profiles: list["Profile"] = []
+    unique_profiles: list[Profile] = []
     for p in multi_profile_list:
         if p.name not in seen:
             seen.add(p.name)
@@ -763,7 +763,7 @@ def _resolve_multi_profile_search(
 
     if len(multi_profile_list) < 2:
         parser.error(
-            f"--multi-profile-search requires at least 2 profiles, but only {len(multi_profile_list)} resolved. Specify more profiles or groups."
+            f"--multi-profile-search requires at least 2 profiles, but only {len(multi_profile_list)} resolved. Specify more profiles or groups."  # noqa: E501  # TODO(E501): shorten line
         )
 
     return multi_profile_list, multi_profile_display
@@ -773,7 +773,7 @@ def _validate_target_requirements(
     args: PipelineArgs,
     parser: argparse.ArgumentParser,
     has_quality_targets: bool,
-    multi_profile_list: list["Profile"],
+    multi_profile_list: list[Profile],
 ) -> None:
     """Validate that required targets are specified based on mode."""
     if args.assessment_only:
@@ -789,15 +789,15 @@ def _validate_target_requirements(
             return  # All bitrate profiles don't require targets
 
     parser.error(
-        "At least one quality target is required (e.g., --vmaf-target, --ssim2-mean-target). Use --assessment-only for a single encode without targets."
+        "At least one quality target is required (e.g., --vmaf-target, --ssim2-mean-target). Use --assessment-only for a single encode without targets."  # noqa: E501  # TODO(E501): shorten line
     )
 
 
 def _resolve_selected_profile(
     args: PipelineArgs,
     parser: argparse.ArgumentParser,
-    profiles: dict[str, "Profile"] | None,
-) -> "Profile | None":
+    profiles: dict[str, Profile] | None,
+) -> Profile | None:
     """Resolve the selected encoding profile.
 
     Returns None for multi-profile search mode (which uses multi_profile_list instead).
@@ -889,7 +889,7 @@ def validate_args(
         )
 
     # Load profiles if needed
-    profiles: dict[str, "Profile"] | None = None
+    profiles: dict[str, Profile] | None = None
     if args.profile is not None or args.multi_profile_search:
         try:
             profiles = load_profiles()
@@ -897,7 +897,7 @@ def validate_args(
             parser.error(f"Failed to load profiles: {e}")
 
     # Resolve multi-profile search
-    multi_profile_list: list["Profile"] = []
+    multi_profile_list: list[Profile] = []
     multi_profile_display: str = ""
     if args.multi_profile_search and profiles is not None:
         multi_profile_list, multi_profile_display = _resolve_multi_profile_search(
@@ -916,7 +916,7 @@ def validate_args(
         assert selected_profile is not None
         if selected_profile.is_bitrate_mode:
             parser.error(
-                f"Profile '{selected_profile.name}' uses bitrate mode and cannot be used with CRF search. Use --assessment-only for a single bitrate encode, or --multi-profile-search for profile comparison."
+                f"Profile '{selected_profile.name}' uses bitrate mode and cannot be used with CRF search. Use --assessment-only for a single bitrate encode, or --multi-profile-search for profile comparison."  # noqa: E501  # TODO(E501): shorten line
             )
 
     return ValidationResult(

@@ -111,4 +111,4 @@ Initial release.
 - Automated sample extraction and quality assessment
 - Multi-profile comparison mode
 - Rich console progress display
-""".strip()
+""".strip()  # noqa: E501  # TODO(E501): shorten line

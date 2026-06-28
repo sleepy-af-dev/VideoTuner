@@ -46,9 +46,9 @@ VSZIP_URL = f"https://github.com/dnjulek/vapoursynth-zip/releases/download/{VSZI
 VSZIP_DLL = "vszip.dll"
 
 # SHA256 checksums for integrity verification (protects against compromised downloads)
-# To update: download file, run: python -c "import hashlib; print(hashlib.sha256(open('file','rb').read()).hexdigest())"
+# To update: download file, run: python -c "import hashlib; print(hashlib.sha256(open('file','rb').read()).hexdigest())"  # noqa: E501  # TODO(E501): shorten line
 CHECKSUMS = {
-    "vapoursynth_installer": "5f984e341c2264244b6549e71dd842af74a17274b6bfd494bc25e6c0e2f37439",
+    "vapoursynth_installer": "5f984e341c2264244b6549e71dd842af74a17274b6bfd494bc25e6c0e2f37439",  # noqa: E501  # TODO(E501): shorten line
     "x264": "24a478eb720cc37677d78cce01f38e9d8d3447148b0889cf7a727c6dcdc77b3a",
     "x265": "e36b5c50c779e5625368674a5baba0aec7cd2baaa08155149a4e73033b649070",
     "ffms2": "e867a3df7262865107df40f230f5b8e1455905eba9b8852e6f35b1227537caeb",

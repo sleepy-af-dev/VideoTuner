@@ -12,14 +12,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from .pipeline_cli import PipelineArgs
-    from .progress import PipelineDisplay
     from .encoding_utils import CropValues
     from .media import VideoInfo
+    from .pipeline_cli import PipelineArgs
     from .profiles import Profile
+    from .progress import PipelineDisplay
 
 
-def are_sampling_params_equal(args: "PipelineArgs") -> bool:
+def are_sampling_params_equal(args: PipelineArgs) -> bool:
     """Check if VMAF and SSIM2 sampling parameters are identical.
 
     Returns True if both metrics are enabled AND their interval_frames
@@ -80,15 +80,15 @@ def generate_metric_reference(
     output_dir: Path,
     sampling_params: MetricSamplingParams,
     fps: float,
-    lossless_profile: "Profile",
-    video_info: "VideoInfo",
+    lossless_profile: Profile,
+    video_info: VideoInfo,
     mkvmerge_bin: str,
     repo_root: Path,
     temp_dir: Path,
-    display: "PipelineDisplay",
+    display: PipelineDisplay,
     log: logging.Logger,
     crop_detect: bool = False,
-    crop_values: "CropValues | None" = None,
+    crop_values: CropValues | None = None,
 ) -> Path | None:
     """Generate a concatenated reference file for quality metric assessment.
 

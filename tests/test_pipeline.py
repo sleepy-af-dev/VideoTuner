@@ -7,14 +7,17 @@ from pathlib import Path
 
 from rich.console import Console
 
-from videotuner.pipeline_types import MultiProfileResult
-from videotuner.pipeline_cli import PipelineArgs
+from videotuner.pipeline_cli import (
+    DEFAULT_CRF_INTERVAL,
+    DEFAULT_CRF_START_VALUE,
+    PipelineArgs,
+)
 from videotuner.pipeline_display import (
     check_and_display_bitrate_warning,
     display_ignored_args_warnings,
     format_bitrate_percentage,
 )
-from videotuner.pipeline_cli import DEFAULT_CRF_START_VALUE, DEFAULT_CRF_INTERVAL
+from videotuner.pipeline_types import MultiProfileResult
 
 
 def strip_ansi(text: str) -> str:
@@ -152,7 +155,7 @@ class TestMultiProfileResult:
         assert result.meets_all_targets is False
 
     def test_meets_all_targets_none_for_bitrate_profile_without_targets(self):
-        """Test meets_all_targets is None for bitrate profiles when no targets specified."""
+        """Test meets_all_targets is None for bitrate profiles when no targets specified."""  # noqa: E501  # TODO(E501): shorten line
         result = MultiProfileResult(
             profile_name="BitrateProfile",
             optimal_crf=None,
@@ -164,7 +167,7 @@ class TestMultiProfileResult:
         assert result.meets_all_targets is None
 
     def test_meets_all_targets_bool_for_bitrate_profile_with_targets(self):
-        """Test meets_all_targets can be True/False for bitrate profiles with targets."""
+        """Test meets_all_targets can be True/False for bitrate profiles with targets."""  # noqa: E501  # TODO(E501): shorten line
         result_meets = MultiProfileResult(
             profile_name="BitrateProfile",
             optimal_crf=None,
@@ -368,7 +371,7 @@ class TestBitrateWarning:
         assert "200.0%" in output  # Check calculated percentage
 
     def test_no_warning_when_threshold_not_exceeded(self):
-        """Test that no warning is displayed when predicted bitrate is below threshold."""
+        """Test that no warning is displayed when predicted bitrate is below threshold."""  # noqa: E501  # TODO(E501): shorten line
         console, buffer = _make_console()
         log = logging.getLogger("test")
 

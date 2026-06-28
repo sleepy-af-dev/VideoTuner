@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, cast
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from .crf_search import QualityTarget
-    from .progress import PipelineDisplay
     from .pipeline_cli import PipelineArgs
     from .pipeline_types import IterationContext, MultiProfileResult
     from .profiles import Profile
+    from .progress import PipelineDisplay
 
 
 @dataclass
@@ -29,20 +30,20 @@ class MultiProfileSearchParams:
         log: Logger instance
     """
 
-    profiles: list["Profile"]
-    targets: list["QualityTarget"]
+    profiles: list[Profile]
+    targets: list[QualityTarget]
     crf_start_value: float
     crf_interval: float
     max_iterations: int
-    args: "PipelineArgs"
-    display: "PipelineDisplay"
+    args: PipelineArgs
+    display: PipelineDisplay
     log: logging.Logger
 
 
 def run_multi_profile_search(
     params: MultiProfileSearchParams,
-    ctx_factory: Callable[["Profile"], "IterationContext"],
-) -> list["MultiProfileResult"]:
+    ctx_factory: Callable[[Profile], IterationContext],
+) -> list[MultiProfileResult]:
     """Run CRF search across multiple profiles.
 
     For each profile, either runs a bitrate iteration (for bitrate-mode profiles)
@@ -70,7 +71,7 @@ def run_multi_profile_search(
     for profile_idx, profile in enumerate(profiles, 1):
         display.console.print()
         display.console.print(
-            f"[bold cyan]Testing Profile {profile_idx}/{len(profiles)}: {profile.name}[/bold cyan]"
+            f"[bold cyan]Testing Profile {profile_idx}/{len(profiles)}: {profile.name}[/bold cyan]"  # noqa: E501  # TODO(E501): shorten line
         )
         log.info("\n--- Testing profile: %s ---", profile.name)
 
@@ -103,12 +104,12 @@ def run_multi_profile_search(
 
 
 def _run_bitrate_profile(
-    ctx: "IterationContext",
-    profile: "Profile",
-    targets: list["QualityTarget"],
-    display: "PipelineDisplay",
+    ctx: IterationContext,
+    profile: Profile,
+    targets: list[QualityTarget],
+    display: PipelineDisplay,
     log: logging.Logger,
-) -> "MultiProfileResult":
+) -> MultiProfileResult:
     """Run single bitrate iteration for a bitrate-mode profile.
 
     Args:
@@ -158,15 +159,15 @@ def _run_bitrate_profile(
 
         if meets_all is True:
             display.console.print(
-                f"[green]✓ Profile {profile.name}: Encoded successfully ({predicted_bitrate:.0f} kbps) - All targets met[/green]"
+                f"[green]✓ Profile {profile.name}: Encoded successfully ({predicted_bitrate:.0f} kbps) - All targets met[/green]"  # noqa: E501  # TODO(E501): shorten line
             )
         elif meets_all is False:
             display.console.print(
-                f"[yellow]⚠ Profile {profile.name}: Encoded successfully ({predicted_bitrate:.0f} kbps) - Not all targets met[/yellow]"
+                f"[yellow]⚠ Profile {profile.name}: Encoded successfully ({predicted_bitrate:.0f} kbps) - Not all targets met[/yellow]"  # noqa: E501  # TODO(E501): shorten line
             )
         else:
             display.console.print(
-                f"[green]✓ Profile {profile.name}: Encoded successfully ({predicted_bitrate:.0f} kbps)[/green]"
+                f"[green]✓ Profile {profile.name}: Encoded successfully ({predicted_bitrate:.0f} kbps)[/green]"  # noqa: E501  # TODO(E501): shorten line
             )
         log.info(
             "Profile %s: Encoded successfully at %d kbps",
@@ -191,16 +192,16 @@ def _run_bitrate_profile(
 
 
 def _run_crf_profile_search(
-    ctx: "IterationContext",
-    profile: "Profile",
-    targets: list["QualityTarget"],
+    ctx: IterationContext,
+    profile: Profile,
+    targets: list[QualityTarget],
     crf_start_value: float,
     crf_interval: float,
     max_iterations: int,
     previous_optimal_crf: float | None,
-    display: "PipelineDisplay",
+    display: PipelineDisplay,
     log: logging.Logger,
-) -> tuple["MultiProfileResult", float | None]:
+) -> tuple[MultiProfileResult, float | None]:
     """Run CRF search for a single profile.
 
     Args:
@@ -217,12 +218,12 @@ def _run_crf_profile_search(
     Returns:
         Tuple of (MultiProfileResult, optimal_crf or None)
     """
+    from .constants import CRF_FLOOR_TOLERANCE, CRF_FLOOR_VALUE
     from .crf_search import CRFFloorError, CRFSearchState
     from .pipeline_display import display_assessment_summary
     from .pipeline_iteration import run_single_crf_iteration
     from .pipeline_types import MultiProfileResult
     from .pipeline_validation import check_scores_meet_targets
-    from .constants import CRF_FLOOR_VALUE, CRF_FLOOR_TOLERANCE
 
     crf_search_state = CRFSearchState(targets, crf_interval)
     iteration = 0
@@ -348,7 +349,7 @@ def _run_crf_profile_search(
         ):
             crf_note = " (at ceiling)"
         display.console.print(
-            f"[green]✓ Profile {profile.name}: Found optimal CRF {optimal_crf:.1f}{crf_note}[/green]"
+            f"[green]✓ Profile {profile.name}: Found optimal CRF {optimal_crf:.1f}{crf_note}[/green]"  # noqa: E501  # TODO(E501): shorten line
         )
         log.info(
             "Profile %s: Found optimal CRF %.1f%s",
@@ -361,7 +362,7 @@ def _run_crf_profile_search(
 
 
 def get_effective_metric_priority(
-    targets: list["QualityTarget"],
+    targets: list[QualityTarget],
 ) -> tuple[str, ...]:
     """Compute effective metric priority with target promotion.
 
@@ -384,7 +385,7 @@ def get_effective_metric_priority(
 
 
 def metric_priority_sort_key(
-    result: "MultiProfileResult",
+    result: MultiProfileResult,
     priority: tuple[str, ...],
 ) -> tuple[float, ...]:
     """Create a sort key from scores based on metric priority.
@@ -411,9 +412,9 @@ def metric_priority_sort_key(
 
 
 def rank_profile_results(
-    results: list["MultiProfileResult"],
-    targets: list["QualityTarget"] | None = None,
-) -> list["MultiProfileResult"]:
+    results: list[MultiProfileResult],
+    targets: list[QualityTarget] | None = None,
+) -> list[MultiProfileResult]:
     """Rank profile results using tiered ranking with metric priority.
 
     Ranking depends on whether the group contains any CRF profiles:

@@ -13,17 +13,17 @@ if TYPE_CHECKING:
 
 import pytest
 
+from videotuner.crf_search import QualityTarget
+from videotuner.pipeline_cli import PipelineArgs, build_arg_parser, validate_args
 from videotuner.pipeline_validation import (
     AssessmentError,
-    validate_assessment_results,
-    has_targets,
     build_targets,
     check_scores_meet_targets,
+    has_targets,
+    validate_assessment_results,
     validate_metric_sampling,
     validate_sampling_parameters,
 )
-from videotuner.pipeline_cli import PipelineArgs, build_arg_parser, validate_args
-from videotuner.crf_search import QualityTarget
 
 
 class TestValidateAssessmentResults:
@@ -327,7 +327,7 @@ class TestValidateMetricSampling:
         assert result.reason is None
 
     def test_returns_invalid_when_region_exceeds_usable(self):
-        """Test that validation returns invalid when region frames exceed usable frames."""
+        """Test that validation returns invalid when region frames exceed usable frames."""  # noqa: E501  # TODO(E501): shorten line
         log = logging.getLogger("test")
         result = validate_metric_sampling(
             usable_frames=100,
@@ -344,7 +344,7 @@ class TestValidateMetricSampling:
         assert "region size" in result.reason
 
     def test_returns_valid_with_large_interval(self):
-        """Test that at least one sample is possible when usable_frames >= region_frames."""
+        """Test that at least one sample is possible when usable_frames >= region_frames."""  # noqa: E501  # TODO(E501): shorten line
         log = logging.getLogger("test")
         result = validate_metric_sampling(
             usable_frames=500,
@@ -354,7 +354,7 @@ class TestValidateMetricSampling:
             metric_name="ssim2",
             log=log,
         )
-        # Formula: (usable + interval - region) // interval = (500 + 10000 - 100) // 10000 = 1
+        # Formula: (usable + interval - region) // interval = (500 + 10000 - 100) // 10000 = 1  # noqa: E501  # TODO(E501): shorten line
         assert result.is_valid is True
         assert result.num_samples == 1
 
@@ -365,7 +365,7 @@ class TestValidateMetricSampling:
         result = validate_metric_sampling(
             usable_frames=8000,  # 8000 usable out of 10000
             total_frames=10000,
-            interval_frames=1600,  # (8000 + 1600 - 500) // 1600 = 9100 // 1600 = 5 samples
+            interval_frames=1600,  # (8000 + 1600 - 500) // 1600 = 9100 // 1600 = 5 samples  # noqa: E501  # TODO(E501): shorten line
             region_frames=500,
             metric_name="vmaf",
             log=log,

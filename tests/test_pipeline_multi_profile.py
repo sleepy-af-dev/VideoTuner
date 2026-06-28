@@ -2,16 +2,16 @@
 
 from unittest.mock import MagicMock
 
-from videotuner.crf_search import QualityTarget
 from videotuner.constants import METRIC_PRIORITY
+from videotuner.crf_search import QualityTarget
+from videotuner.encoder_type import EncoderType
 from videotuner.pipeline_multi_profile import (
     MultiProfileSearchParams,
-    rank_profile_results,
     get_effective_metric_priority,
     metric_priority_sort_key,
+    rank_profile_results,
 )
 from videotuner.pipeline_types import MultiProfileResult
-from videotuner.encoder_type import EncoderType
 from videotuner.profiles import Profile
 
 

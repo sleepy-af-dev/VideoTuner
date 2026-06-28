@@ -39,8 +39,8 @@ class SamplingValidation:
 
 
 def validate_assessment_results(
-    vmaf_results: list["VMAFResult"] | None,
-    ssim2_results: list["SSIM2Result"] | None,
+    vmaf_results: list[VMAFResult] | None,
+    ssim2_results: list[SSIM2Result] | None,
     context: str,
     log: logging.Logger,
 ) -> None:
@@ -61,7 +61,7 @@ def validate_assessment_results(
     if not has_vmaf and not has_ssim2:
         log.error("No assessment results available for %s", context)
         raise AssessmentError(
-            f"Assessment failed: No VMAF or SSIMULACRA2 results available for {context}. Check the log for details."
+            f"Assessment failed: No VMAF or SSIMULACRA2 results available for {context}. Check the log for details."  # noqa: E501  # TODO(E501): shorten line
         )
 
     # Check if VMAF results are all NaN
@@ -70,7 +70,7 @@ def validate_assessment_results(
         if all_nan:
             log.error("All VMAF scores are NaN for %s", context)
             raise AssessmentError(
-                f"Assessment failed: All VMAF scores are unparseable for {context}. Check the log for details."
+                f"Assessment failed: All VMAF scores are unparseable for {context}. Check the log for details."  # noqa: E501  # TODO(E501): shorten line
             )
 
     # Check if SSIM2 results are all NaN
@@ -79,11 +79,11 @@ def validate_assessment_results(
         if all_nan:
             log.error("All SSIMULACRA2 scores are NaN for %s", context)
             raise AssessmentError(
-                f"Assessment failed: All SSIMULACRA2 scores are unparseable for {context}. Check the log for details."
+                f"Assessment failed: All SSIMULACRA2 scores are unparseable for {context}. Check the log for details."  # noqa: E501  # TODO(E501): shorten line
             )
 
 
-def has_targets(args: "PipelineArgs") -> bool:
+def has_targets(args: PipelineArgs) -> bool:
     """Check if any quality targets are specified.
 
     Args:
@@ -106,7 +106,7 @@ def has_targets(args: "PipelineArgs") -> bool:
     )
 
 
-def build_targets(args: "PipelineArgs") -> list[QualityTarget]:
+def build_targets(args: PipelineArgs) -> list[QualityTarget]:
     """Build list of quality targets from command-line arguments.
 
     Args:
@@ -227,7 +227,7 @@ def validate_metric_sampling(
             num_samples=0,
             total_frames=0,
             coverage_percent=0.0,
-            reason=f"Usable frames ({usable_frames}) less than region size ({region_frames})",
+            reason=f"Usable frames ({usable_frames}) less than region size ({region_frames})",  # noqa: E501  # TODO(E501): shorten line
         )
 
     # Calculate number of samples and total frames
@@ -250,7 +250,7 @@ def validate_metric_sampling(
 
     coverage_percent = (total_metric_frames / total_frames) * 100
     log.info(
-        "%s periodic sampling: %d samples × %d frames = %d total frames (%.1f%% coverage)",
+        "%s periodic sampling: %d samples × %d frames = %d total frames (%.1f%% coverage)",  # noqa: E501  # TODO(E501): shorten line
         metric_name.upper(),
         num_samples,
         region_frames,
@@ -267,7 +267,7 @@ def validate_metric_sampling(
 
 
 def validate_sampling_parameters(
-    args: "PipelineArgs",
+    args: PipelineArgs,
     total_frames: int,
     guard_start_frames: int,
     guard_end_frames: int,

@@ -5,8 +5,8 @@ This wrapper ensures the `src/` directory is on sys.path, then delegates to
 the package CLI implemented in `videotuner.pipeline`.
 """
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 
 def _bootstrap_src() -> None:

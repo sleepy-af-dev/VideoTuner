@@ -1,8 +1,21 @@
 """Version information and release notes for VideoTuner."""
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 RELEASE_NOTES = """
+## 0.4.1
+
+Maintenance release: dependency and build-toolchain updates, no functional changes.
+
+### Build
+
+- Update the build toolchain to Nuitka 4.x
+- Refresh bundled and pinned dependencies (including rich 15.x)
+
+### Refactoring
+
+- Migrate `EncoderType` and `VideoFormat` to `enum.StrEnum` (no behaviour change)
+
 ## 0.4.0
 
 ### Breaking Changes

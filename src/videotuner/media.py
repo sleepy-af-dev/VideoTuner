@@ -5,7 +5,7 @@ import logging
 import subprocess
 from contextlib import suppress
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
@@ -416,7 +416,7 @@ def get_bit_depth_from_pix_fmt(pix_fmt: str | None) -> int:
     return 8
 
 
-class VideoFormat(str, Enum):
+class VideoFormat(StrEnum):
     """Video format classification based on dynamic range"""
 
     SDR = "SDR"

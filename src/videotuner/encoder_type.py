@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class EncoderType(str, Enum):
+class EncoderType(StrEnum):
     """Supported video encoder types."""
 
     X265 = "x265"

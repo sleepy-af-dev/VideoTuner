@@ -17,7 +17,24 @@ from .crf_search import QualityTarget
 from .pipeline_cli import DEFAULT_CRF_INTERVAL, DEFAULT_CRF_START_VALUE, get_default
 
 if TYPE_CHECKING:
-    from .pipeline_types import MultiProfileResult
+    from .pipeline_types import JobResult, MultiProfileResult
+
+#: Metric key to display name, in the order metrics are shown. Single source of
+#: truth for both the per-job assessment summary and the batch summary.
+METRIC_DISPLAY: list[tuple[str, str]] = [
+    # VMAF metrics
+    ("vmaf_mean", "VMAF Mean"),
+    ("vmaf_hmean", "VMAF Harmonic Mean"),
+    ("vmaf_1pct", "VMAF 1% Low"),
+    ("vmaf_min", "VMAF Minimum"),
+    # SSIMULACRA2 metrics
+    ("ssim2_mean", "SSIMULACRA2 Mean"),
+    ("ssim2_median", "SSIMULACRA2 Median"),
+    ("ssim2_95pct", "SSIMULACRA2 95% High"),
+    ("ssim2_5pct", "SSIMULACRA2 5% Low"),
+]
+
+METRIC_LABELS: dict[str, str] = dict(METRIC_DISPLAY)
 
 
 class PipelineArgsProtocol(Protocol):
@@ -52,7 +69,6 @@ class PipelineArgsProtocol(Protocol):
 
 def display_ignored_args_warnings(
     console: Console,
-    log: logging.Logger,
     *,
     bitrate_profile_names: list[str],
     crf_start_value: float,
@@ -65,7 +81,6 @@ def display_ignored_args_warnings(
 
     Args:
         console: Rich console for output
-        log: Logger for file logging
         bitrate_profile_names: Names of profiles that use bitrate mode (empty if none)
         crf_start_value: The CRF start value from args
         crf_interval: The CRF interval from args
@@ -86,12 +101,11 @@ def display_ignored_args_warnings(
             f"--crf-interval {crf_interval} will be ignored for bitrate profiles: {profiles_str}"  # noqa: E501  # TODO(E501): shorten line
         )
 
-    # Display warnings
+    # Display warnings. The console tees these into the log.
     for warning in warnings:
         console.print(
             f"[bold yellow]⚠ Warning:[/bold yellow] [yellow]{warning}[/yellow]"
         )
-        log.warning(warning)
 
     if warnings:
         console.print()
@@ -220,19 +234,7 @@ def display_assessment_summary(
     if targets:
         target_map: dict[str, QualityTarget] = {t.metric_name: t for t in targets}
 
-    # Metric display configuration: (metric_key, full_display_name)
-    metric_display = [
-        # VMAF metrics
-        ("vmaf_mean", "VMAF Mean"),
-        ("vmaf_hmean", "VMAF Harmonic Mean"),
-        ("vmaf_1pct", "VMAF 1% Low"),
-        ("vmaf_min", "VMAF Minimum"),
-        # SSIMULACRA2 metrics
-        ("ssim2_mean", "SSIMULACRA2 Mean"),
-        ("ssim2_median", "SSIMULACRA2 Median"),
-        ("ssim2_95pct", "SSIMULACRA2 95% High"),
-        ("ssim2_5pct", "SSIMULACRA2 5% Low"),
-    ]
+    metric_display = METRIC_DISPLAY
 
     # Determine title
     console.print()
@@ -349,7 +351,7 @@ def check_and_display_bitrate_warning(
 
     Args:
         console: Rich console for output
-        log: Logger for file logging
+        log: Logger, for the debug lines explaining a skipped warning
         predicted_bitrate_kbps: Predicted output bitrate
         input_bitrate_kbps: Input video bitrate (None if unavailable)
         threshold_percent: Warning threshold as percentage (1-100, None if disabled)
@@ -378,13 +380,6 @@ def check_and_display_bitrate_warning(
             + f"of input bitrate ({input_bitrate_kbps:,.0f} kbps)[/bold yellow]"
         )
         console.print(f"[yellow]  Predicted: {bitrate_percent:.1f}% of input[/yellow]")
-        log.warning(
-            "Predicted bitrate%s (%.0f kbps) exceeds threshold: %.1f%% of input (%.0f kbps)",  # noqa: E501  # TODO(E501): shorten line
-            profile_str,
-            predicted_bitrate_kbps,
-            bitrate_percent,
-            input_bitrate_kbps,
-        )
 
 
 def display_multi_profile_results(
@@ -570,3 +565,74 @@ def display_multi_profile_results(
     # Show key legend only when checkmarks are displayed
     if has_checkmarks:
         console.print("[dim]Key: ✓ = Target met[/dim]")
+
+
+def display_batch_summary(
+    console: Console,
+    results: list[JobResult],
+    targets: list[QualityTarget] | None = None,
+    metric_decimals: int = METRIC_DECIMALS,
+) -> None:
+    """Display one row per job: what to use for each file in the batch.
+
+    Only metrics that were actually targeted get a column. The full per-metric
+    breakdown for any one job is in that job's own log, so repeating all eight
+    metrics across every row would cost width without adding information.
+
+    Args:
+        console: Rich console for output
+        results: One result per job, in the order the jobs ran
+        targets: Quality targets that were set (None or empty if exploring)
+        metric_decimals: Decimal places for metric display
+    """
+    if not results:
+        return
+
+    targets = targets or []
+
+    table = Table(title="Batch Summary", title_style="bold", show_lines=False)
+    table.add_column("File", style="cyan", overflow="fold")
+    table.add_column("Profile")
+    table.add_column("CRF", justify="right")
+    table.add_column("Bitrate", justify="right")
+    for target in targets:
+        label = METRIC_LABELS.get(target.metric_name, target.metric_name)
+        table.add_column(f"{label}\n≥ {target.target_value:g}", justify="right")
+    table.add_column("Status")
+
+    for result in results:
+        row = [
+            result.input_path.name,
+            result.profile_name or "-",
+            f"{result.optimal_crf:.1f}" if result.optimal_crf is not None else "-",
+            format_bitrate_percentage(
+                result.predicted_bitrate_kbps, result.source_bitrate_kbps
+            )
+            if result.predicted_bitrate_kbps > 0
+            else "-",
+        ]
+        for target in targets:
+            value = result.scores.get(target.metric_name)
+            if value is None:
+                row.append("-")
+                continue
+            met = round(value, metric_decimals) >= round(
+                target.target_value, metric_decimals
+            )
+            mark = "[green]✓[/green]" if met else "[red]✗[/red]"
+            row.append(f"{value:.{metric_decimals}f} {mark}")
+
+        row.append(f"[{'green' if result.ok else 'red'}]{result.status}[/]")
+        table.add_row(*row)
+
+    console.print()
+    console.print(table)
+
+    succeeded = sum(1 for r in results if r.ok)
+    total = len(results)
+    if succeeded == total:
+        console.print(f"[bold green]All {total} job(s) succeeded[/bold green]")
+    else:
+        console.print(
+            f"[bold red]{total - succeeded} of {total} job(s) failed[/bold red]"
+        )

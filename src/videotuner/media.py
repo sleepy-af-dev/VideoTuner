@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+from collections.abc import Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import cast
@@ -37,6 +38,53 @@ class VideoInfo:
     mastering_display_luminance: str | None = None
     maximum_content_light_level: str | None = None
     maximum_frameaverage_light_level: str | None = None
+
+
+def combine_video_info(infos: Sequence[VideoInfo]) -> VideoInfo:
+    """Describe several files as the one source a job reads.
+
+    Callers must already have established that the files agree on resolution,
+    frame rate and HDR status, so the format facts are taken from the first.
+    Only the quantities that accumulate are recomputed.
+
+    Bitrate is weighted by duration so a short high-bitrate file cannot outweigh
+    a long one, and files that report no bitrate are left out of the weighting
+    rather than counted as zero. Frame count is only known if every file
+    reported one.
+
+    Args:
+        infos: One entry per file, in playback order
+
+    Returns:
+        A single VideoInfo describing the joined source
+    """
+    first = infos[0]
+    if len(infos) == 1:
+        return first
+
+    total_duration = sum(i.duration for i in infos)
+
+    frame_counts = [i.frame_count for i in infos]
+    total_frames = (
+        sum(c for c in frame_counts if c is not None)
+        if all(c is not None for c in frame_counts)
+        else None
+    )
+
+    rated = [i for i in infos if i.video_bitrate_kbps is not None and i.duration > 0]
+    rated_duration = sum(i.duration for i in rated)
+    bitrate = (
+        sum((i.video_bitrate_kbps or 0.0) * i.duration for i in rated) / rated_duration
+        if rated_duration > 0
+        else None
+    )
+
+    return replace(
+        first,
+        duration=total_duration,
+        frame_count=total_frames,
+        video_bitrate_kbps=bitrate,
+    )
 
 
 def _run_ffprobe_json(

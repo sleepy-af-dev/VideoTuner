@@ -54,7 +54,6 @@ class TestCalculateMetricParams:
         """Test that VMAF params are calculated correctly."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf_interval_frames=1000,
             vmaf_region_frames=500,
         )
@@ -78,7 +77,6 @@ class TestCalculateMetricParams:
         """Test that SSIM2 params are calculated correctly."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             ssim2_interval_frames=2000,
             ssim2_region_frames=300,
         )
@@ -101,7 +99,6 @@ class TestCalculateMetricParams:
         """Test that calculation handles edge case of small usable frames."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf_interval_frames=500,
             vmaf_region_frames=300,
         )

@@ -2,7 +2,20 @@
 
 from __future__ import annotations
 
-from videotuner.utils import parse_master_display_metadata
+import logging
+from pathlib import Path
+
+import pytest
+
+from videotuner.constants import MAX_USABLE_PATH, PATH_FILENAME_MARGIN
+from videotuner.utils import (
+    display_path,
+    ensure_dir,
+    fit_path_segment,
+    job_folder_budget,
+    parse_master_display_metadata,
+    resolve_run_folder,
+)
 
 
 class TestParseMasterDisplayMetadata:
@@ -95,3 +108,159 @@ class TestParseMasterDisplayMetadata:
 
         assert result is not None
         assert result.endswith("L(100000000,50)")
+
+
+class TestFitPathSegment:
+    """Shortening a path segment so the files inside it stay under MAX_PATH."""
+
+    def test_name_within_budget_is_untouched(self) -> None:
+        assert fit_path_segment("short-input-name", 40) == "short-input-name"
+
+    def test_oversized_name_is_cut_to_budget(self) -> None:
+        fitted = fit_path_segment("x" * 200, 40)
+        assert len(fitted) == 40
+
+    def test_shortened_name_is_marked_and_keeps_a_readable_prefix(self) -> None:
+        name = "a-long-example-input-filename-that-does-not-fit"
+        fitted = fit_path_segment(name, 30)
+        assert fitted.startswith("a-long-example-")
+        assert "~" in fitted, "a shortened name should be visibly marked"
+
+    def test_distinct_names_sharing_a_prefix_stay_distinct(self) -> None:
+        prefix = "shared-leading-portion-of-two-input-names-"
+        a = fit_path_segment(prefix + "first", 45)
+        b = fit_path_segment(prefix + "second", 45)
+        assert a != b, "truncation must not collapse two sources into one folder"
+
+    def test_hash_is_stable_across_calls(self) -> None:
+        name = "y" * 120
+        assert fit_path_segment(name, 40) == fit_path_segment(name, 40)
+
+    def test_does_not_interpret_the_name(self) -> None:
+        """Truncation is deliberately dumb - no release-name parsing."""
+        plain = fit_path_segment("a" * 100, 30)
+        scene = fit_path_segment("b" * 100, 30)
+        assert len(plain) == len(scene) == 30
+
+
+class TestJobFolderBudget:
+    """Room left for a job folder name under a given parent."""
+
+    def test_deeper_parent_leaves_less_room(self, tmp_path: Path) -> None:
+        shallow = job_folder_budget(tmp_path, ["Profile"])
+        deeper = job_folder_budget(tmp_path / ("a" * 20), ["Profile"])
+        assert deeper < shallow
+
+    def test_longer_profile_slug_leaves_less_room(self, tmp_path: Path) -> None:
+        short = job_folder_budget(tmp_path, ["P" * 20])
+        long = job_folder_budget(tmp_path, ["P" * 40])
+        assert short - long == 20
+
+    def test_a_slug_shorter_than_the_fixed_dirs_does_not_win(
+        self, tmp_path: Path
+    ) -> None:
+        """Profile dirs sit beside reference/ and temp/, so the longest bounds it."""
+        assert job_folder_budget(tmp_path, ["P"]) == job_folder_budget(
+            tmp_path, ["reference"]
+        )
+
+    def test_longest_slug_wins(self, tmp_path: Path) -> None:
+        assert job_folder_budget(tmp_path, ["P", "P" * 40]) == job_folder_budget(
+            tmp_path, ["P" * 40]
+        )
+
+    def test_a_fitted_name_keeps_the_deepest_file_under_the_limit(
+        self, tmp_path: Path
+    ) -> None:
+        slug = "Example Profile (x265)"
+        budget = job_folder_budget(tmp_path, [slug])
+        fitted = fit_path_segment("z" * 200, budget)
+        deepest = (
+            tmp_path / fitted / "ssimulacra2" / slug / "ssim2_concatenated_iter1.json"
+        )
+        assert len(str(deepest)) <= MAX_USABLE_PATH
+
+
+class TestResolveRunFolder:
+    """Naming the folder a single run writes to, under a given parent."""
+
+    STAMP: str = "20260829_130000"
+
+    def test_short_name_is_used_as_is(self, tmp_path: Path) -> None:
+        folder, fitted = resolve_run_folder(tmp_path, "input", self.STAMP, ["P"])
+        assert fitted == "input"
+        assert folder == tmp_path / f"input_{self.STAMP}"
+
+    def test_run_folder_is_created_under_the_parent_given(self, tmp_path: Path) -> None:
+        folder, _ = resolve_run_folder(tmp_path, "input", self.STAMP, ["P"])
+        assert folder.parent == tmp_path
+
+    def test_timestamp_survives_shortening(self, tmp_path: Path) -> None:
+        folder, fitted = resolve_run_folder(tmp_path, "z" * 300, self.STAMP, ["P"])
+        assert folder.name.endswith(f"_{self.STAMP}"), "the run identifier is kept"
+        assert fitted != "z" * 300
+
+    def test_the_deepest_file_stays_under_the_limit(self, tmp_path: Path) -> None:
+        slug = "Example Profile (x265)"
+        folder, _ = resolve_run_folder(tmp_path, "z" * 300, self.STAMP, [slug])
+        deepest = folder / "ssimulacra2" / slug / "ssim2_concatenated_iter1.json"
+        assert len(str(deepest)) <= MAX_USABLE_PATH
+
+    def test_a_deep_parent_leaves_a_shorter_name(self, tmp_path: Path) -> None:
+        """The parent must be the folder the run goes in, not one already inside it.
+
+        Passing something deeper collapses the budget, which is how a name ends
+        up as a single character plus its hash.
+        """
+        shallow, _ = resolve_run_folder(tmp_path, "y" * 300, self.STAMP, ["P"])
+        deep, _ = resolve_run_folder(
+            tmp_path / ("d" * 100), "y" * 300, self.STAMP, ["P"]
+        )
+        assert len(deep.name) < len(shallow.name)
+
+
+class TestEnsureDirWarnsOnLongPaths:
+    """The backstop for a directory too deep for any reasonable filename."""
+
+    def test_no_warning_for_a_normal_path(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            _ = ensure_dir(tmp_path / "short")
+        assert not caplog.records
+
+    def test_warns_once_for_an_over_budget_path(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        deep = tmp_path
+        while len(str(deep)) < MAX_USABLE_PATH - PATH_FILENAME_MARGIN:
+            deep = deep / ("segment_" + "q" * 20)
+
+        with caplog.at_level(logging.WARNING):
+            _ = ensure_dir(deep)
+            _ = ensure_dir(deep)
+
+        assert len(caplog.records) == 1, "should warn once per directory, not per call"
+        assert "long-path aware" in caplog.records[0].message
+
+
+class TestDisplayPath:
+    """How a path is rendered into a log line."""
+
+    def test_a_path_inside_the_root_is_relative(self, tmp_path: Path) -> None:
+        assert display_path(tmp_path / "jobs" / "run", tmp_path) == str(
+            Path("jobs") / "run"
+        )
+
+    def test_a_path_outside_the_root_is_absolute(self, tmp_path: Path) -> None:
+        """--workdir can point anywhere, and a chain of parent hops reads worse
+        than the absolute path it replaces."""
+        outside = tmp_path.parent / "elsewhere" / "run"
+
+        rendered = display_path(outside, tmp_path / "app")
+
+        assert not rendered.startswith(".."), "should not climb out of the root"
+        assert rendered == str(outside)
+
+    def test_the_root_itself_is_rendered_as_dot(self, tmp_path: Path) -> None:
+        assert display_path(tmp_path, tmp_path) == "."

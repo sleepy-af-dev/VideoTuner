@@ -10,9 +10,13 @@ import pytest
 from videotuner.encoder_type import EncoderType
 from videotuner.encoding_utils import (
     HDR_TRANSFER_CHARACTERISTICS,
+    CropValues,
     EncoderPaths,
+    SampledSource,
+    UsableRange,
     VapourSynthEnv,
     build_encoder_command,
+    build_sampling_vpy_script,
     build_vspipe_command,
     build_x264_command,
     build_x265_command,
@@ -768,3 +772,81 @@ class TestBuildVspipeCommand:
             cwd=Path("C:/project"),
         )
         assert str(Path("C:/project/temp/script.vpy")) in args
+
+
+def _sampled_source(name: str, start: int = 0, end: int = 10000) -> SampledSource:
+    return SampledSource(
+        path=Path(f"{name}.mkv"),
+        cache_file=Path(f"{name}.ffindex"),
+        usable_range=UsableRange(start=start, end=end, frame_count=end - start),
+    )
+
+
+class TestBuildSamplingVpyScriptOneSource:
+    """The ordinary case: a job reading a single file."""
+
+    def test_loads_the_source_and_samples_it(self) -> None:
+        script = build_sampling_vpy_script(
+            sources=[_sampled_source("input")],
+            interval_frames=1600,
+            region_frames=20,
+            fps=24.0,
+        )
+
+        assert script.count("ffms2.Source") == 1
+        assert "[0:10000]" in script
+        assert "SelectEvery(1600" in script
+
+    def test_a_single_source_is_not_spliced(self) -> None:
+        script = build_sampling_vpy_script(
+            sources=[_sampled_source("input")],
+            interval_frames=1600,
+            region_frames=20,
+            fps=24.0,
+        )
+
+        assert "Splice" not in script
+
+
+class TestBuildSamplingVpyScriptManySources:
+    """Several files read as one source: sample each, then join the samples."""
+
+    def test_every_source_is_loaded_and_sampled(self) -> None:
+        script = build_sampling_vpy_script(
+            sources=[
+                _sampled_source("one", 100, 5000),
+                _sampled_source("two", 200, 6000),
+                _sampled_source("three", 0, 7000),
+            ],
+            interval_frames=1600,
+            region_frames=20,
+            fps=24.0,
+        )
+
+        assert script.count("ffms2.Source") == 3
+        assert script.count("SelectEvery(1600") == 3, "each file samples itself"
+        for expected in ("[100:5000]", "[200:6000]", "[0:7000]"):
+            assert expected in script, "each file keeps its own guard bands"
+
+    def test_the_samples_are_joined_once(self) -> None:
+        script = build_sampling_vpy_script(
+            sources=[_sampled_source("one"), _sampled_source("two")],
+            interval_frames=1600,
+            region_frames=20,
+            fps=24.0,
+        )
+
+        assert script.count("std.Splice") == 1
+
+    def test_crop_is_applied_once_after_joining(self) -> None:
+        """One crop covers every file, so it belongs on the joined clip."""
+        script = build_sampling_vpy_script(
+            sources=[_sampled_source("one"), _sampled_source("two")],
+            interval_frames=1600,
+            region_frames=20,
+            fps=24.0,
+            crop_values=CropValues(left=0, right=0, top=140, bottom=140),
+        )
+
+        assert script.count("std.Crop") == 1
+        assert script.index("std.Splice") < script.index("std.Crop")

@@ -31,6 +31,7 @@ quality metrics to find the optimal rate factor for video encoding.
     - [1. CRF Search Mode (Default)](#1-crf-search-mode-default)
     - [2. Assessment-Only Mode](#2-assessment-only-mode)
     - [3. Multi-Profile Search Mode](#3-multi-profile-search-mode)
+  - [Batch Processing](#batch-processing)
   - [Quality Targets](#quality-targets)
   - [Encoding Profiles](#encoding-profiles)
   - [Bitrate Mode Profiles](#bitrate-mode-profiles)
@@ -52,7 +53,10 @@ quality metrics to find the optimal rate factor for video encoding.
   - [Paths](#paths)
   - [Logging](#logging)
 - [Output](#output)
-  - [Working Directory](#working-directory)
+  - [Job folder](#job-folder)
+  - [Batch folder](#batch-folder)
+  - [Path length](#path-length)
+  - [Logs](#logs)
 - [Development](#development)
   - [Building Releases](#building-releases)
   - [Development Commands](#development-commands)
@@ -298,6 +302,55 @@ videotuner input.mkv --multi-profile-search Film,animation-group --vmaf-target 9
 
 **Performance Optimization:** Each subsequent profile's CRF search starts at the previous profile's optimal CRF value for faster convergence.
 
+### Batch Processing
+
+Pass a folder instead of a file and VideoTuner runs the same pipeline once per video inside it, with the same settings. Any mode above works in a batch.
+
+```bash
+# CRF search across every video in a folder
+videotuner ./season1 --encoder x265 --preset slow --vmaf-target 95
+
+# Batch with a profile
+videotuner ./season1 --profile Film --vmaf-target 95
+
+# Batch multi-profile comparison; the summary names the winner per file
+videotuner ./season1 --multi-profile-search Film,Grain --vmaf-target 95
+```
+
+**Which files are picked up:** video files at the top level of the folder only, matched by extension (`.mkv`, `.mp4`, `.m4v`, `.mov`, `.ts`, `.m2ts`, `.avi`, `.webm`) and processed in name order. Subfolders are not searched.
+
+**How a batch behaves:**
+
+- Settings are validated once before the first job, so a bad flag stops the batch immediately instead of failing identically on every file.
+- Every file is then probed and you are warned up front about any that are expected to fail, such as HDR sources when the chosen profile uses x264. The rest of the batch still runs.
+- A job that fails is recorded and the batch continues to the next file.
+- Jobs run one at a time. The encoders already use every core, so running two at once makes both slower.
+- The batch ends with a summary table, one row per file, and exits non-zero if any job failed.
+
+**Carrying the CRF between jobs:** `--carry-crf` starts each job at the CRF the previous job settled on, instead of `--crf-start-value`. It is off by default.
+
+```bash
+videotuner ./folder --profile Film --vmaf-target 95 --carry-crf
+```
+
+The first job uses `--crf-start-value`, since there is no previous result. A job that fails or does not converge leaves the carried value untouched, so the next job starts from the last CRF that was found. In multi-profile mode it is the winning profile's CRF that carries, whichever profile won.
+
+The carried value only sets where the search begins; it does not constrain where the search ends, so each job still converges on its own answer.
+
+**Reading a folder as one source:** `--as-one-source` treats every video in the folder as a single source and produces one result for the folder, rather than one result per file. Useful when the files are parts of one whole, such as episodes of a season you intend to encode with identical settings.
+
+```bash
+videotuner ./folder --profile Film --vmaf-target 95 --as-one-source
+```
+
+Each file is sampled on its own and the samples are joined. Every file keeps its own guard bands, so each intro and set of credits is skipped rather than only the first and last, and every file contributes samples regardless of length. Output is laid out exactly like a single-file run, in a folder named after the input folder.
+
+Files must agree on resolution, frame rate and HDR status. If any differ the run stops before encoding, listing every mismatch. Differing letterboxing is not a mismatch: the most aggressive crop measured across the files is applied to all of them, since joining requires matching dimensions.
+
+Given a single file rather than a folder, the flag is an error rather than a warning. `--carry-crf` has no effect alongside it, since there is only one job.
+
+**Note:** batch mode writes an `.ffindex` file next to each source video, the same as a single-file run. They are reused on later runs over the same folder, which is the largest available time saving when re-running a batch.
+
 ### Quality Targets
 
 Quality targets define the minimum acceptable scores. CRF search will find the highest CRF (smallest file) that meets all targets.
@@ -519,6 +572,8 @@ Run `videotuner --help` for complete options. Key options include:
 | `--preset PRESET`        | `slow`  | Encoder preset (mutually exclusive with `--profile`)         |
 | `--profile NAME`         | -       | Profile name from `profiles.yaml`                            |
 | `--crf-start-value CRF`  | `28`   | Starting CRF for search                                      |
+| `--carry-crf`            | off    | Batch mode: start each job at the CRF the previous job settled on |
+| `--as-one-source`        | off    | Read every video in the input folder as one source           |
 | `--crf-interval STEP`    | `0.5`  | Minimum CRF step size                                        |
 
 ### CropDetect Options
@@ -596,7 +651,7 @@ Run `videotuner --help` for complete options. Key options include:
 
 | Option            | Default                   | Description                    |
 | ----------------- | ------------------------- | ------------------------------ |
-| `--workdir`       | `jobs/<name>_<timestamp>` | Working directory              |
+| `--workdir`       | `jobs`                    | Parent folder that run folders are created in |
 | `--ffmpeg`        | `ffmpeg`                  | FFmpeg binary                  |
 | `--ffprobe`       | `ffprobe`                 | FFprobe binary                 |
 | `--mkvmerge`      | `mkvmerge`                | MKVmerge binary                |
@@ -605,44 +660,85 @@ Run `videotuner --help` for complete options. Key options include:
 
 ### Logging
 
-| Option             | Description               |
-| ------------------ | ------------------------- |
-| `-v` / `--verbose` | Debug logging             |
-| `-q` / `--quiet`   | Warnings only             |
-| `--log-file`       | Write summary log to file |
+| Option             | Description                                            |
+| ------------------ | ------------------------------------------------------ |
+| `-v` / `--verbose` | Add debug detail to the log                            |
+| `-q` / `--quiet`   | Reduce the log to warnings only                        |
+| `--log-file`       | Write the job log somewhere other than the job folder  |
+
+Both `-v` and `-q` affect the log file only; terminal output is unchanged.
 
 ## Output
 
-### Working Directory
+### Job folder
+
+One job is one source video processed end to end. Its output all lands in one folder.
 
 - Default location: `jobs/<input_name>_<timestamp>`
-- Override with `--workdir <path>`
+- `--workdir <path>` changes the parent, giving `<path>/<input_name>_<timestamp>`
+
+`--workdir` names the folder that run folders go in, never a run folder itself. Every run always gets its own `<name>_<timestamp>` folder, so pointing several runs at the same `--workdir` is safe and they cannot overwrite each other. A short `--workdir` is the simplest way to buy headroom against the path limit below.
 
 **Folder Structure:**
 
 ```text
 jobs/<input_name>_<timestamp>/
-├── reference/                    # Lossless reference samples
-│   └── vmaf_reference.mkv        # Concatenated VMAF reference
-│   └── ssim2_reference.mkv       # Concatenated SSIM2 reference
-├── distorted/                    # Encoded samples organized by profile
-│   ├── <ProfileName>_profile/
-│   │   └── vmaf_crf_*.mkv        # VMAF distorted at each CRF iteration
-│   │   └── ssim2_crf_*.mkv       # SSIM2 distorted at each CRF iteration
-├── vmaf/                         # VMAF assessment results
-│   └── <ProfileName>_profile/
-│       └── crf_*.json
-├── ssimulacra2/                  # SSIMULACRA2 assessment results
-│   └── <ProfileName>_profile/
-│       └── crf_*.json
-├── temp/                         # Temporary files (VapourSynth scripts, encoder bitstreams)
-└── <name>_<timestamp>.log        # Pipeline log
+├── reference/                                # Lossless reference samples
+│   ├── vmaf_reference_concatenated.mkv
+│   └── ssim2_reference_concatenated.mkv
+├── <ProfileName>/                            # Everything produced for one profile
+│   ├── vmaf_crf_*.mkv                        # VMAF distorted at each CRF iteration
+│   ├── ssim2_crf_*.mkv                       # SSIM2 distorted at each CRF iteration
+│   ├── vmaf_concatenated_iter*.json          # VMAF assessment results
+│   └── ssim2_concatenated_iter*.json         # SSIMULACRA2 assessment results
+├── temp/                                     # VapourSynth scripts, encoder bitstreams
+└── job.log                                   # Job log
 ```
 
 **Notes:**
 
 - All encoded samples and assessment results are preserved across iterations for inspection
-- In multi-profile mode, each profile gets its own subfolder
+- Each profile gets one folder holding its encodes and both metrics' results, so a multi-profile comparison is one folder per candidate rather than three
+- A profile named `reference` or `temp` would clash with the folders above, so it gets a `_profile` suffix
+
+### Batch folder
+
+A batch groups the job folders of every video in one input folder. A job folder is identical inside whether it came from a single run or from a batch.
+
+- Default location: `jobs/<input_folder_name>_<timestamp>`
+- `--workdir <path>` changes the parent, giving `<path>/<input_folder_name>_<timestamp>`
+
+```text
+jobs/<input_folder_name>_<timestamp>/
+├── batch.log                     # Batch-level events and the final summary
+├── <video_1_name>/               # Job folder, structured exactly as above
+├── <video_2_name>/
+└── ...
+```
+
+Two inputs whose names differ only by extension (`clip.mkv` and `clip.mp4`) would collide on one job folder name, so the second gets a numeric suffix rather than overwriting the first.
+
+### Path length
+
+Windows caps a path at 260 characters, and not every bundled tool handles more even when long paths are enabled system-wide. VideoTuner keeps every file it writes inside that limit.
+
+Before a job folder is created, its name is measured against the room left by the output location, the deepest subfolder and the profile name. If it does not fit, the name is shortened and a short hash of the original is appended:
+
+```text
+a-long-example-input-filename-that-does-not-fit-the-path-budget
+                          becomes
+a-long-example-input-filename-that-doe~cdc179
+```
+
+The full source path is always recorded in the job log, so a shortened name never loses the link back to its input. Shortening is reported on the terminal when it happens, and profile names and run identifiers such as `iter1` or `crf16.0` are never shortened. If the output location is so deep that even a shortened name will not fit, VideoTuner warns at startup rather than failing partway through; a shorter `--workdir` is the fix.
+
+### Logs
+
+The job log is a transcript: everything printed to the terminal during that job is written to it, so the log reads the way the run looked. Section banners and anything at warning level or above carry a timestamp; transcript lines do not, which keeps tables and panels readable.
+
+`batch.log` holds batch-level events and the summary table only. Each job's detail stays in that job's own log, so the file you open after an overnight run is the short one.
+
+`-v` adds debug detail to the log, `-q` reduces it to warnings only. Neither changes what appears on the terminal.
 
 ## Development
 

@@ -7,10 +7,11 @@ pipeline modules to avoid circular imports.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from .encoding_utils import CropValues
+from .constants import RESERVED_JOB_SUBDIRS
+from .encoding_utils import CropValues, SampledSource
 from .media import VideoInfo
 from .pipeline_cli import PipelineArgs
 from .profiles import Profile
@@ -22,8 +23,11 @@ from .utils import ensure_dir
 class IterationContext:
     """Shared context for pipeline iterations."""
 
-    # Paths
+    # Paths. ``input_path`` names the job: the file it reads, or the folder
+    # when several files are read as one source. ``sources`` is what is
+    # actually decoded, one entry per file with its own usable range.
     input_path: Path
+    sources: list[SampledSource]
     workdir: Path
     temp_dir: Path
     repo_root: Path
@@ -63,6 +67,29 @@ class IterationContext:
 
 
 @dataclass(frozen=True)
+class JobResult:
+    """Outcome of one job, for the caller's exit code and the batch summary.
+
+    A job is one source video processed end to end. ``ok`` drives the exit code;
+    ``status`` is the human-readable cell shown in the batch summary table.
+    """
+
+    input_path: Path
+    ok: bool
+    status: str = "ok"
+    profile_name: str | None = None
+    optimal_crf: float | None = None
+    predicted_bitrate_kbps: float = 0.0
+    source_bitrate_kbps: float | None = None
+    scores: dict[str, float | None] = field(default_factory=dict)
+
+    @classmethod
+    def failure(cls, input_path: Path, status: str) -> JobResult:
+        """Build a failed result. ``status`` is shown verbatim in the summary."""
+        return cls(input_path=input_path, ok=False, status=status)
+
+
+@dataclass(frozen=True)
 class MultiProfileResult:
     """Results from a single profile in multi-profile mode (CRF search or bitrate).
 
@@ -99,7 +126,11 @@ class MultiProfileResult:
 
 def _profile_slug(profile: Profile) -> str:
     """Convert profile name to filesystem-safe slug."""
-    return profile.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    slug = profile.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    if slug.casefold() in RESERVED_JOB_SUBDIRS:
+        # Case-insensitive: Windows would treat "Temp" and "temp" as one folder.
+        return f"{slug}_profile"
+    return slug
 
 
 def get_reference_dir(workdir: Path) -> Path:
@@ -115,43 +146,19 @@ def get_reference_dir(workdir: Path) -> Path:
     return ensure_dir(ref_dir)
 
 
-def get_distorted_dir(workdir: Path, profile: Profile) -> Path:
-    """Get path to distorted files directory for a profile, creating if needed.
+def get_profile_dir(workdir: Path, profile: Profile) -> Path:
+    """Get the directory holding everything produced for one profile.
+
+    Encodes and both metrics' results share a directory because their filenames
+    already say which is which. Splitting them into distorted/, vmaf/ and
+    ssimulacra2/ trees scattered one profile's output across three places and
+    cost a level of nesting that the path budget could not spare.
 
     Args:
         workdir: Working directory for the job
         profile: Encoding profile (used for directory naming)
 
     Returns:
-        Path to distorted files directory for this profile
+        Path to this profile's directory
     """
-    dist_dir = workdir / "distorted" / f"profile_{_profile_slug(profile)}"
-    return ensure_dir(dist_dir)
-
-
-def get_vmaf_dir(workdir: Path, profile: Profile) -> Path:
-    """Get path to VMAF output directory for a profile, creating if needed.
-
-    Args:
-        workdir: Working directory for the job
-        profile: Encoding profile (used for directory naming)
-
-    Returns:
-        Path to VMAF assessment output directory
-    """
-    vmaf_dir = workdir / "vmaf" / f"{_profile_slug(profile)}_profile"
-    return ensure_dir(vmaf_dir)
-
-
-def get_ssim2_dir(workdir: Path, profile: Profile) -> Path:
-    """Get path to SSIMULACRA2 output directory for a profile, creating if needed.
-
-    Args:
-        workdir: Working directory for the job
-        profile: Encoding profile (used for directory naming)
-
-    Returns:
-        Path to SSIMULACRA2 assessment output directory
-    """
-    ssim2_dir = workdir / "ssimulacra2" / f"{_profile_slug(profile)}_profile"
-    return ensure_dir(ssim2_dir)
+    return ensure_dir(workdir / _profile_slug(profile))

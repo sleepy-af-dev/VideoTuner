@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+from .encoding_utils import is_hdr_video
+from .media import VideoInfo
 
 if TYPE_CHECKING:
     from .pipeline_cli import PipelineArgs
@@ -318,3 +323,63 @@ def validate_sampling_parameters(
         ssim2_valid = validation.is_valid
 
     return (vmaf_valid, ssim2_valid)
+
+
+def check_sources_compatible(
+    sources: Sequence[tuple[Path, VideoInfo]],
+    *,
+    guard_start_percent: float = 0.0,
+    guard_end_percent: float = 0.0,
+    guard_seconds: float = 0.0,
+) -> list[str]:
+    """Report why several files cannot be read as one source, if they cannot.
+
+    Splicing joins decoded frames, so every file must agree on the things a
+    frame is made of. Resolution differences cannot be reconciled by cropping,
+    a single timeline cannot hold two frame rates, and only base layers are
+    compared, so HDR and SDR cannot mix.
+
+    A file whose guard bands consume it entirely is also a problem: it would
+    contribute nothing, and the result would silently describe fewer files than
+    were asked for.
+
+    Differing active area after crop detection is deliberately absent - that is
+    reconciled by taking the most aggressive crop, not rejected.
+
+    Args:
+        sources: One entry per file, in playback order
+        guard_start_percent: Fraction of each file skipped at the start
+        guard_end_percent: Fraction of each file skipped at the end
+        guard_seconds: Minimum seconds skipped at each end of each file
+
+    Returns:
+        One message per problem, empty when the files can be joined
+    """
+    problems: list[str] = []
+    if not sources:
+        return problems
+
+    first_path, first = sources[0]
+
+    for path, info in sources[1:]:
+        if (info.width, info.height) != (first.width, first.height):
+            mismatch = f"{info.width}x{info.height}"
+            against = f"{first_path.name} at {first.width}x{first.height}"
+            problems.append(f"{path.name}: {mismatch} does not match {against}")
+        if info.fps != first.fps:
+            mismatch = f"{info.fps:.3f} fps"
+            against = f"{first_path.name} at {first.fps:.3f} fps"
+            problems.append(f"{path.name}: {mismatch} does not match {against}")
+        if is_hdr_video(info.color_trc) != is_hdr_video(first.color_trc):
+            mismatch = "HDR" if is_hdr_video(info.color_trc) else "SDR"
+            problems.append(f"{path.name}: {mismatch} does not match {first_path.name}")
+
+    for path, info in sources:
+        start = max(info.duration * guard_start_percent, guard_seconds)
+        end = max(info.duration * guard_end_percent, guard_seconds)
+        if info.duration - (start + end) <= 0:
+            problems.append(
+                f"{path.name}: guard bands leave nothing of its {info.duration:.1f}s"
+            )
+
+    return problems

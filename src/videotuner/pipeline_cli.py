@@ -28,7 +28,6 @@ DEFAULT_CRF_INTERVAL: float = 0.5
 @dataclass
 class PipelineArgs:
     input: Path
-    output: Path | None
 
     # Periodic sampling parameters
     vmaf_interval_frames: int = 1600
@@ -45,6 +44,8 @@ class PipelineArgs:
     preset: str | None = None  # None means use default "slow"
     crf_start_value: float = DEFAULT_CRF_START_VALUE
     crf_interval: float = DEFAULT_CRF_INTERVAL
+    carry_crf: bool = False
+    as_one_source: bool = False
 
     # Mode flags
     assessment_only: bool = False
@@ -111,12 +112,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
 
     # Positional arguments
-    _ = p.add_argument("input", type=Path, help="Input video path")
     _ = p.add_argument(
-        "output",
+        "input",
         type=Path,
-        nargs="?",
-        help="Output directory (default: jobs/<name>_<timestamp>)",
+        help="Input video file, or a folder of videos to process as a batch",
     )
 
     # -------------------------------------------------------------------------
@@ -127,6 +126,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--assessment-only",
         action="store_true",
         help="Single assessment at starting CRF without CRF search",
+    )
+    _ = mode_group.add_argument(
+        "--as-one-source",
+        action="store_true",
+        default=_get_default("as_one_source"),
+        help=(
+            "Read every video in the input folder as one source, producing a "
+            "single result for the folder rather than one per file"
+        ),
     )
     _ = mode_group.add_argument(
         "--multi-profile-search",
@@ -178,6 +186,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         metavar="CRF",
         default=_get_default("crf_start_value"),
         help=f"Starting CRF for search (default: {_get_default('crf_start_value')})",
+    )
+    _ = encoding_group.add_argument(
+        "--carry-crf",
+        action="store_true",
+        default=_get_default("carry_crf"),
+        help=(
+            "Batch mode: start each job at the CRF the previous job settled on, "
+            "instead of --crf-start-value"
+        ),
     )
     _ = encoding_group.add_argument(
         "--crf-interval",
@@ -434,7 +451,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="DIR",
         default=_get_default("workdir"),
-        help="Working directory (default: jobs/<name>_<timestamp>)",
+        help=(
+            "Parent folder for run folders. Each run creates "
+            "<workdir>/<name>_<timestamp>/ inside it (default: jobs)"
+        ),
     )
     _ = paths_group.add_argument(
         "--ffmpeg",

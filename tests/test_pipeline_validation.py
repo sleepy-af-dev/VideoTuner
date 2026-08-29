@@ -14,11 +14,13 @@ if TYPE_CHECKING:
 import pytest
 
 from videotuner.crf_search import QualityTarget
+from videotuner.media import VideoInfo
 from videotuner.pipeline_cli import PipelineArgs, build_arg_parser, validate_args
 from videotuner.pipeline_validation import (
     AssessmentError,
     build_targets,
     check_scores_meet_targets,
+    check_sources_compatible,
     has_targets,
     validate_assessment_results,
     validate_metric_sampling,
@@ -115,70 +117,53 @@ class TestHasTargets:
 
     def test_returns_false_when_no_targets(self):
         """Test that has_targets returns False when no targets set."""
-        args = PipelineArgs(input=Path("test.mkv"), output=Path("output.mkv"))
+        args = PipelineArgs(input=Path("test.mkv"))
         assert has_targets(args) is False
 
     def test_returns_true_with_vmaf_target(self):
         """Test that has_targets returns True with vmaf_target."""
-        args = PipelineArgs(
-            input=Path("test.mkv"), output=Path("output.mkv"), vmaf_target=95.0
-        )
+        args = PipelineArgs(input=Path("test.mkv"), vmaf_target=95.0)
         assert has_targets(args) is True
 
     def test_returns_true_with_vmaf_hmean_target(self):
         """Test that has_targets returns True with vmaf_hmean_target."""
-        args = PipelineArgs(
-            input=Path("test.mkv"), output=Path("output.mkv"), vmaf_hmean_target=93.0
-        )
+        args = PipelineArgs(input=Path("test.mkv"), vmaf_hmean_target=93.0)
         assert has_targets(args) is True
 
     def test_returns_true_with_vmaf_1pct_target(self):
         """Test that has_targets returns True with vmaf_1pct_target."""
-        args = PipelineArgs(
-            input=Path("test.mkv"), output=Path("output.mkv"), vmaf_1pct_target=90.0
-        )
+        args = PipelineArgs(input=Path("test.mkv"), vmaf_1pct_target=90.0)
         assert has_targets(args) is True
 
     def test_returns_true_with_vmaf_min_target(self):
         """Test that has_targets returns True with vmaf_min_target."""
-        args = PipelineArgs(
-            input=Path("test.mkv"), output=Path("output.mkv"), vmaf_min_target=85.0
-        )
+        args = PipelineArgs(input=Path("test.mkv"), vmaf_min_target=85.0)
         assert has_targets(args) is True
 
     def test_returns_true_with_ssim2_mean_target(self):
         """Test that has_targets returns True with ssim2_mean_target."""
-        args = PipelineArgs(
-            input=Path("test.mkv"), output=Path("output.mkv"), ssim2_mean_target=80.0
-        )
+        args = PipelineArgs(input=Path("test.mkv"), ssim2_mean_target=80.0)
         assert has_targets(args) is True
 
     def test_returns_true_with_ssim2_median_target(self):
         """Test that has_targets returns True with ssim2_median_target."""
-        args = PipelineArgs(
-            input=Path("test.mkv"), output=Path("output.mkv"), ssim2_median_target=80.0
-        )
+        args = PipelineArgs(input=Path("test.mkv"), ssim2_median_target=80.0)
         assert has_targets(args) is True
 
     def test_returns_true_with_ssim2_95pct_target(self):
         """Test that has_targets returns True with ssim2_95pct_target."""
-        args = PipelineArgs(
-            input=Path("test.mkv"), output=Path("output.mkv"), ssim2_95pct_target=75.0
-        )
+        args = PipelineArgs(input=Path("test.mkv"), ssim2_95pct_target=75.0)
         assert has_targets(args) is True
 
     def test_returns_true_with_ssim2_5pct_target(self):
         """Test that has_targets returns True with ssim2_5pct_target."""
-        args = PipelineArgs(
-            input=Path("test.mkv"), output=Path("output.mkv"), ssim2_5pct_target=70.0
-        )
+        args = PipelineArgs(input=Path("test.mkv"), ssim2_5pct_target=70.0)
         assert has_targets(args) is True
 
     def test_returns_true_with_multiple_targets(self):
         """Test that has_targets returns True with multiple targets."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf_target=95.0,
             ssim2_mean_target=80.0,
         )
@@ -190,15 +175,13 @@ class TestBuildTargets:
 
     def test_returns_empty_list_when_no_targets(self):
         """Test that build_targets returns empty list when no targets set."""
-        args = PipelineArgs(input=Path("test.mkv"), output=Path("output.mkv"))
+        args = PipelineArgs(input=Path("test.mkv"))
         targets = build_targets(args)
         assert targets == []
 
     def test_builds_vmaf_target(self):
         """Test that build_targets creates QualityTarget for vmaf_target."""
-        args = PipelineArgs(
-            input=Path("test.mkv"), output=Path("output.mkv"), vmaf_target=95.0
-        )
+        args = PipelineArgs(input=Path("test.mkv"), vmaf_target=95.0)
         targets = build_targets(args)
         assert len(targets) == 1
         assert targets[0].metric_name == "vmaf_mean"
@@ -206,9 +189,7 @@ class TestBuildTargets:
 
     def test_builds_ssim2_target(self):
         """Test that build_targets creates QualityTarget for ssim2_mean_target."""
-        args = PipelineArgs(
-            input=Path("test.mkv"), output=Path("output.mkv"), ssim2_mean_target=80.0
-        )
+        args = PipelineArgs(input=Path("test.mkv"), ssim2_mean_target=80.0)
         targets = build_targets(args)
         assert len(targets) == 1
         assert targets[0].metric_name == "ssim2_mean"
@@ -218,7 +199,6 @@ class TestBuildTargets:
         """Test that build_targets creates multiple QualityTargets."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf_target=95.0,
             vmaf_1pct_target=90.0,
             ssim2_mean_target=80.0,
@@ -234,7 +214,6 @@ class TestBuildTargets:
         """Test that build_targets handles all target types correctly."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf_target=95.0,
             vmaf_hmean_target=93.0,
             vmaf_1pct_target=90.0,
@@ -386,7 +365,6 @@ class TestValidateSamplingParameters:
         log = logging.getLogger("test")
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=True,
             ssim2=True,
             vmaf_interval_frames=1000,
@@ -409,7 +387,6 @@ class TestValidateSamplingParameters:
         log = logging.getLogger("test")
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=True,
             ssim2=True,
             vmaf_interval_frames=1000,
@@ -432,7 +409,6 @@ class TestValidateSamplingParameters:
         log = logging.getLogger("test")
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=True,
             ssim2=True,
             vmaf_interval_frames=1000,
@@ -455,7 +431,6 @@ class TestValidateSamplingParameters:
         log = logging.getLogger("test")
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=False,
             ssim2=True,
             vmaf_interval_frames=1000,
@@ -478,7 +453,6 @@ class TestValidateSamplingParameters:
         log = logging.getLogger("test")
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=True,
             ssim2=True,
             vmaf_interval_frames=1000,
@@ -513,7 +487,6 @@ class TestValidateArgsCLI:
         """Verify at least one encoding option is required."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output"),
             vmaf_target=95.0,
         )
         with pytest.raises(SystemExit):
@@ -525,7 +498,6 @@ class TestValidateArgsCLI:
         """Verify --preset and --profile are mutually exclusive."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output"),
             preset="slow",
             profile="some-profile",
             vmaf_target=95.0,
@@ -539,7 +511,6 @@ class TestValidateArgsCLI:
         """Verify --preset and --multi-profile-search are mutually exclusive."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output"),
             preset="slow",
             multi_profile_search=["group1"],
             vmaf_target=95.0,
@@ -553,7 +524,6 @@ class TestValidateArgsCLI:
         """Verify --profile and --multi-profile-search are mutually exclusive."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output"),
             profile="some-profile",
             multi_profile_search=["group1"],
             vmaf_target=95.0,
@@ -565,7 +535,6 @@ class TestValidateArgsCLI:
         """Verify --preset with --encoder is valid (with required targets)."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output"),
             preset="slow",
             encoder="x265",
             vmaf_target=95.0,
@@ -580,7 +549,6 @@ class TestValidateArgsCLI:
         """Verify --preset with --assessment-only is valid (no targets required)."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output"),
             preset="medium",
             encoder="x265",
             assessment_only=True,
@@ -595,7 +563,6 @@ class TestValidateArgsCLI:
         """Verify --preset without --encoder errors."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output"),
             preset="slow",
             vmaf_target=95.0,
         )
@@ -618,7 +585,6 @@ class TestValidateArgsCLI:
         monkeypatch.setattr("videotuner.profiles.load_profiles", _load_sample)
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output"),
             multi_profile_search=["Film (x265)"],
             vmaf_target=93.0,
         )
@@ -627,3 +593,67 @@ class TestValidateArgsCLI:
         assert result.selected_profile is None
         # But multi_profile_list should be populated
         assert len(result.multi_profile_list) > 0
+
+
+def _src(
+    name: str,
+    *,
+    duration: float = 2700.0,
+    width: int = 3840,
+    height: int = 2160,
+    fps: float = 24.0,
+    trc: str | None = "smpte2084",
+) -> tuple[Path, VideoInfo]:
+    return (
+        Path(f"{name}.mkv"),
+        VideoInfo(
+            fps=fps, duration=duration, width=width, height=height, color_trc=trc
+        ),
+    )
+
+
+class TestCheckSourcesCompatible:
+    """Whether several files can be spliced into the one source a job reads."""
+
+    def test_matching_sources_have_no_problems(self) -> None:
+        assert check_sources_compatible([_src("one"), _src("two")]) == []
+
+    def test_resolution_mismatch_is_reported(self) -> None:
+        problems = check_sources_compatible(
+            [_src("one"), _src("two", width=1920, height=1080)]
+        )
+
+        assert len(problems) == 1
+        assert "two.mkv" in problems[0]
+
+    def test_frame_rate_mismatch_is_reported(self) -> None:
+        problems = check_sources_compatible([_src("one"), _src("two", fps=25.0)])
+
+        assert len(problems) == 1
+        assert "two.mkv" in problems[0]
+
+    def test_hdr_mismatch_is_reported(self) -> None:
+        """Base layers only, so an SDR file cannot join an HDR source."""
+        problems = check_sources_compatible([_src("one"), _src("two", trc="bt709")])
+
+        assert len(problems) == 1
+        assert "two.mkv" in problems[0]
+
+    def test_a_file_consumed_by_its_guard_bands_is_reported(self) -> None:
+        """A 45-second extra against a 60-second guard contributes nothing."""
+        problems = check_sources_compatible(
+            [_src("one"), _src("short", duration=45.0)], guard_seconds=60.0
+        )
+
+        assert len(problems) == 1
+        assert "short.mkv" in problems[0]
+
+    def test_every_problem_is_reported_not_just_the_first(self) -> None:
+        problems = check_sources_compatible(
+            [_src("one"), _src("two", fps=25.0), _src("three", trc="bt709")]
+        )
+
+        assert len(problems) == 2
+
+    def test_a_single_source_is_always_compatible(self) -> None:
+        assert check_sources_compatible([_src("only")]) == []

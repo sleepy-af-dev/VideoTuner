@@ -316,13 +316,10 @@ def _encode_crf_metric(
 
         try:
             bitstream_path = encode_concatenated_distorted(
-                source_path=ctx.input_path,
+                sources=ctx.sources,
                 output_path=output_path,
                 interval_frames=metric_params.interval_frames,
                 region_frames=metric_params.region_frames,
-                guard_start_frames=ctx.guard_start_frames,
-                guard_end_frames=ctx.guard_end_frames,
-                total_frames=ctx.total_frames,
                 fps=ctx.info.fps,
                 profile=ctx.selected_profile,
                 video_info=ctx.info,
@@ -394,7 +391,7 @@ def run_single_crf_iteration(
         Tuple of (scores_dict, vmaf_results, ssim2_results, predicted_bitrate_kbps,
                   vmaf_distorted_path, ssim2_distorted_path)
     """
-    from .pipeline_types import get_distorted_dir
+    from .pipeline_types import get_profile_dir
     from .pipeline_validation import validate_assessment_results
     from .utils import log_section
 
@@ -410,7 +407,7 @@ def run_single_crf_iteration(
         ):
             shared_params = calculate_metric_params(ctx, "vmaf")  # Same as ssim2
             shared_output_path = (
-                get_distorted_dir(ctx.workdir, ctx.selected_profile)
+                get_profile_dir(ctx.workdir, ctx.selected_profile)
                 / f"shared_distorted_crf{crf:.1f}_iter{iteration}.mkv"
             )
 
@@ -434,7 +431,7 @@ def run_single_crf_iteration(
         if ctx.args.vmaf and ctx.vmaf_ref_path:
             vmaf_params = calculate_metric_params(ctx, "vmaf")
             vmaf_output_path = (
-                get_distorted_dir(ctx.workdir, ctx.selected_profile)
+                get_profile_dir(ctx.workdir, ctx.selected_profile)
                 / f"vmaf_distorted_crf{crf:.1f}_iter{iteration}.mkv"
             )
 
@@ -452,7 +449,7 @@ def run_single_crf_iteration(
         if ctx.args.ssim2 and ctx.ssim2_ref_path:
             ssim2_params = calculate_metric_params(ctx, "ssim2")
             ssim2_output_path = (
-                get_distorted_dir(ctx.workdir, ctx.selected_profile)
+                get_profile_dir(ctx.workdir, ctx.selected_profile)
                 / f"ssim2_distorted_crf{crf:.1f}_iter{iteration}.mkv"
             )
 
@@ -522,7 +519,7 @@ def run_single_bitrate_iteration(
         Tuple of (scores_dict, vmaf_results, ssim2_results, predicted_bitrate_kbps,
                   vmaf_distorted_path, ssim2_distorted_path)
     """
-    from .pipeline_types import get_distorted_dir
+    from .pipeline_types import get_profile_dir
     from .profiles import ProfileError
     from .utils import log_section
 
@@ -561,23 +558,19 @@ def run_single_bitrate_iteration(
         shared_stats_file: Path | None = None
         shared_analysis_file: Path | None = None
         if is_multipass:
-            shared_stats_file = (
-                ctx.workdir / f"{ctx.input_path.stem}_bitrate_stats_shared"
-            )
+            shared_stats_file = ctx.workdir / "bitrate_stats_shared"
         has_multipass_opt = profile.settings.get(
             "multi-pass-opt-analysis", False
         ) or profile.settings.get("multi-pass-opt-distortion", False)
         if is_multipass and has_multipass_opt:
-            shared_analysis_file = (
-                ctx.workdir / f"{ctx.input_path.stem}_bitrate_analysis_shared.dat"
-            )
+            shared_analysis_file = ctx.workdir / "bitrate_analysis_shared.dat"
 
         if (ctx.args.vmaf or ctx.args.ssim2) and (
             ctx.vmaf_ref_path or ctx.ssim2_ref_path
         ):
             shared_params = calculate_metric_params(ctx, "vmaf")  # Same as ssim2
             shared_distorted_path = (
-                get_distorted_dir(ctx.workdir, profile)
+                get_profile_dir(ctx.workdir, profile)
                 / f"shared_distorted_bitrate{bitrate_kbps}_iter{iteration}.mkv"
             )
 
@@ -624,10 +617,8 @@ def run_single_bitrate_iteration(
         vmaf_stats_file: Path | None = None
         ssim2_stats_file: Path | None = None
         if is_multipass:
-            vmaf_stats_file = ctx.workdir / f"{ctx.input_path.stem}_bitrate_stats_vmaf"
-            ssim2_stats_file = (
-                ctx.workdir / f"{ctx.input_path.stem}_bitrate_stats_ssim2"
-            )
+            vmaf_stats_file = ctx.workdir / "bitrate_stats_vmaf"
+            ssim2_stats_file = ctx.workdir / "bitrate_stats_ssim2"
 
         # Create analysis files if multi-pass optimization is enabled
         vmaf_analysis_file: Path | None = None
@@ -636,18 +627,14 @@ def run_single_bitrate_iteration(
             "multi-pass-opt-analysis", False
         ) or profile.settings.get("multi-pass-opt-distortion", False)
         if is_multipass and has_multipass_opt:
-            vmaf_analysis_file = (
-                ctx.workdir / f"{ctx.input_path.stem}_bitrate_analysis_vmaf.dat"
-            )
-            ssim2_analysis_file = (
-                ctx.workdir / f"{ctx.input_path.stem}_bitrate_analysis_ssim2.dat"
-            )
+            vmaf_analysis_file = ctx.workdir / "bitrate_analysis_vmaf.dat"
+            ssim2_analysis_file = ctx.workdir / "bitrate_analysis_ssim2.dat"
 
         # Encode VMAF concatenated distorted file
         if ctx.args.vmaf and ctx.vmaf_ref_path:
             vmaf_params = calculate_metric_params(ctx, "vmaf")
             vmaf_distorted_path = (
-                get_distorted_dir(ctx.workdir, profile)
+                get_profile_dir(ctx.workdir, profile)
                 / f"vmaf_distorted_bitrate{bitrate_kbps}_iter{iteration}.mkv"
             )
 
@@ -690,7 +677,7 @@ def run_single_bitrate_iteration(
         if ctx.args.ssim2 and ctx.ssim2_ref_path:
             ssim2_params = calculate_metric_params(ctx, "ssim2")
             ssim2_distorted_path = (
-                get_distorted_dir(ctx.workdir, profile)
+                get_profile_dir(ctx.workdir, profile)
                 / f"ssim2_distorted_bitrate{bitrate_kbps}_iter{iteration}.mkv"
             )
 
@@ -818,13 +805,10 @@ def _encode_bitrate_metric(
                 pass1_output = output_path.parent / f"pass1_{output_path.name}"
 
             _ = encode_concatenated_bitrate(
-                source_path=ctx.input_path,
+                sources=ctx.sources,
                 output_path=pass1_output,
                 interval_frames=metric_params.interval_frames,
                 region_frames=metric_params.region_frames,
-                guard_start_frames=ctx.guard_start_frames,
-                guard_end_frames=ctx.guard_end_frames,
-                total_frames=ctx.total_frames,
                 fps=ctx.info.fps,
                 profile=pass1_profile,
                 video_info=ctx.info,
@@ -871,13 +855,10 @@ def _encode_bitrate_metric(
                     pass3_output = output_path.parent / f"pass3_{output_path.name}"
 
                 _ = encode_concatenated_bitrate(
-                    source_path=ctx.input_path,
+                    sources=ctx.sources,
                     output_path=pass3_output,
                     interval_frames=metric_params.interval_frames,
                     region_frames=metric_params.region_frames,
-                    guard_start_frames=ctx.guard_start_frames,
-                    guard_end_frames=ctx.guard_end_frames,
-                    total_frames=ctx.total_frames,
                     fps=ctx.info.fps,
                     profile=pass3_profile,
                     video_info=ctx.info,
@@ -921,13 +902,10 @@ def _encode_bitrate_metric(
             )
 
             _ = encode_concatenated_bitrate(
-                source_path=ctx.input_path,
+                sources=ctx.sources,
                 output_path=output_path,
                 interval_frames=metric_params.interval_frames,
                 region_frames=metric_params.region_frames,
-                guard_start_frames=ctx.guard_start_frames,
-                guard_end_frames=ctx.guard_end_frames,
-                total_frames=ctx.total_frames,
                 fps=ctx.info.fps,
                 profile=pass2_profile,
                 video_info=ctx.info,
@@ -956,13 +934,10 @@ def _encode_bitrate_metric(
             )
 
             _ = encode_concatenated_bitrate(
-                source_path=ctx.input_path,
+                sources=ctx.sources,
                 output_path=output_path,
                 interval_frames=metric_params.interval_frames,
                 region_frames=metric_params.region_frames,
-                guard_start_frames=ctx.guard_start_frames,
-                guard_end_frames=ctx.guard_end_frames,
-                total_frames=ctx.total_frames,
                 fps=ctx.info.fps,
                 profile=profile,
                 video_info=ctx.info,

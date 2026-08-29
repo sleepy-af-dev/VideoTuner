@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import math
 import os
@@ -10,15 +11,29 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TextIO
 
-from .constants import LOG_SEPARATOR_CHAR, LOG_SEPARATOR_WIDTH
+from .constants import (
+    LOG_SEPARATOR_CHAR,
+    LOG_SEPARATOR_WIDTH,
+    MAX_USABLE_PATH,
+    PATH_FILENAME_MARGIN,
+    RESERVED_JOB_SUBDIRS,
+)
 
 logger = logging.getLogger(__name__)
 
 LineCallback = Callable[[str], bool] | None
 
 
+_warned_long_dirs: set[str] = set()
+
+
 def ensure_dir(path: Path) -> Path:
     """Create directory (and parents) if it doesn't exist, then return it.
+
+    Warns once per directory that is already so deep no reasonable filename
+    will fit inside the path budget. This is the backstop for the budget
+    calculated when a job folder is named: it catches an over-long path
+    whatever produced it, without every filename site having to remember.
 
     Args:
         path: Directory path to create
@@ -27,7 +42,107 @@ def ensure_dir(path: Path) -> Path:
         The same path, for chaining
     """
     path.mkdir(parents=True, exist_ok=True)
+
+    budget = MAX_USABLE_PATH - PATH_FILENAME_MARGIN
+    key = str(path)
+    if len(key) > budget and key not in _warned_long_dirs:
+        _warned_long_dirs.add(key)
+        logger.warning(
+            "Directory path is %d characters, over the %d budget; tools that are"
+            + " not long-path aware may fail to write here: %s",
+            len(key),
+            budget,
+            key,
+        )
     return path
+
+
+def fit_path_segment(name: str, budget: int) -> str:
+    """Shorten a single path segment to fit ``budget`` characters.
+
+    Deliberately dumb: it never inspects what the name contains, so nothing
+    here depends on how source files happen to be named. A shortened segment
+    gains a hash of the full original name, which keeps it unique without
+    depending on the order names were processed in, and marks the name as
+    shortened. Names that already fit are returned untouched.
+
+    Args:
+        name: Segment to fit
+        budget: Maximum characters the segment may occupy
+
+    Returns:
+        The original name, or a truncated form with a hash suffix
+    """
+    if len(name) <= budget:
+        return name
+    digest = hashlib.blake2b(name.encode("utf-8"), digest_size=3).hexdigest()
+    keep = max(1, budget - len(digest) - 1)
+    return f"{name[:keep]}~{digest}"
+
+
+def display_path(path: Path, root: Path) -> str:
+    """Render a path for logging: relative to ``root``, or absolute if outside it.
+
+    Output can live anywhere now that ``--workdir`` sets the parent, and a
+    relative path that climbs out of the app root is both longer and harder to
+    read than the absolute one it replaces.
+
+    Args:
+        path: Path to render
+        root: Directory paths are shown relative to when they sit inside it
+
+    Returns:
+        The relative path, or the absolute path when it lies outside ``root``
+    """
+    try:
+        relative = os.path.relpath(path, root)
+    except ValueError:
+        # Different drive on Windows: no relative form exists.
+        return str(path)
+    return str(path) if relative.startswith("..") else relative
+
+
+def resolve_run_folder(
+    jobs_root: Path, name: str, timestamp: str, profile_slugs: Iterable[str]
+) -> tuple[Path, str]:
+    """Work out the folder a single run writes to, shortening the name to fit.
+
+    Args:
+        jobs_root: Parent the run folder is created in
+        name: Sanitized source name
+        timestamp: Run timestamp, which identifies the run and is never cut
+        profile_slugs: Profile directory names that may appear inside the run
+
+    Returns:
+        The run folder, and the name actually used, which differs from ``name``
+        when it had to be shortened.
+    """
+    budget = job_folder_budget(jobs_root, profile_slugs) - len(timestamp) - 1
+    fitted = fit_path_segment(name, budget)
+    return jobs_root / f"{fitted}_{timestamp}", fitted
+
+
+def job_folder_budget(parent: Path, profile_slugs: Iterable[str]) -> int:
+    """Characters available for a job folder name directly under ``parent``.
+
+    Reserves room for the deepest directory the pipeline creates inside a job
+    folder and for the filename that goes in it.
+
+    Args:
+        parent: Directory the job folder will be created in
+        profile_slugs: Profile directory names that may appear inside the job
+
+    Returns:
+        Budget in characters, which may be zero or negative if parent is deep
+    """
+    # Profile directories sit directly inside the job folder, beside the fixed
+    # ones, so the deepest is whichever name is longer: parent \ job \ <deepest>
+    deepest = max(
+        max(len(n) for n in RESERVED_JOB_SUBDIRS),
+        max((len(s) for s in profile_slugs), default=0),
+    )
+    overhead = len(str(parent)) + 2 + deepest
+    return MAX_USABLE_PATH - PATH_FILENAME_MARGIN - overhead
 
 
 def _is_nuitka_compiled() -> bool:
@@ -121,6 +236,35 @@ def format_command_error(returncode: int, cmd: list[str], output: str = "") -> s
     if output:
         msg += f"\n\n{output}"
     return msg
+
+
+def configure_logging(*, verbose: bool = False, quiet: bool = False) -> int:
+    """Set the root logger level for this run and return it.
+
+    No handlers are installed: console output goes through Rich, and each job
+    attaches its own file handler. Deliberately not ``basicConfig(force=True)``,
+    which closes every existing root handler - in a batch that would tear down
+    the batch log the moment the first job started.
+
+    Args:
+        verbose: Log at DEBUG
+        quiet: Log at WARNING (affects the log file only; the terminal is
+            driven by Rich and is unchanged)
+
+    Returns:
+        The level that was set.
+    """
+    level = logging.INFO
+    if quiet:
+        level = logging.WARNING
+    elif verbose:
+        level = logging.DEBUG
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    if not root.handlers:
+        root.addHandler(logging.NullHandler())
+    return level
 
 
 def log_section(log: logging.Logger, title: str) -> None:

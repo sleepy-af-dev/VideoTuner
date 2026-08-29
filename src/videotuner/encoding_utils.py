@@ -8,7 +8,7 @@ import shlex
 import subprocess
 import tempfile
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from io import TextIOWrapper
 from pathlib import Path
@@ -38,6 +38,45 @@ class CropValues:
     right: int
     top: int
     bottom: int
+
+
+@dataclass(frozen=True)
+class SampledSource:
+    """One file a job reads, with everything needed to sample it.
+
+    Attributes:
+        path: Source video path
+        cache_file: FFMS2 index for that source
+        usable_range: Frames left after this file's own guard bands
+    """
+
+    path: Path
+    cache_file: Path
+    usable_range: UsableRange
+
+
+def combine_crop_values(values: Sequence[CropValues]) -> CropValues:
+    """Reconcile crops measured on files that make up one source.
+
+    Splicing requires every clip to share dimensions, so the most aggressive
+    crop wins on each edge independently. The result may therefore be a crop no
+    single file measured, which is the safe direction: it can only remove more
+    border, never reinstate content another file cropped away.
+
+    Args:
+        values: Crop measured for each file, in any order
+
+    Returns:
+        The combined crop, or no crop at all when given nothing
+    """
+    if not values:
+        return CropValues(left=0, right=0, top=0, bottom=0)
+    return CropValues(
+        left=max(v.left for v in values),
+        right=max(v.right for v in values),
+        top=max(v.top for v in values),
+        bottom=max(v.bottom for v in values),
+    )
 
 
 HDR_TRANSFER_CHARACTERISTICS: set[str] = {
@@ -475,9 +514,7 @@ def calculate_sample_count(
 
 
 def build_sampling_vpy_script(
-    source_path: Path,
-    cache_file: Path,
-    usable_range: UsableRange,
+    sources: Sequence[SampledSource],
     interval_frames: int,
     region_frames: int,
     fps: float,
@@ -487,12 +524,17 @@ def build_sampling_vpy_script(
     """Build VapourSynth script for periodic frame sampling.
 
     Generates a script that uses SelectEvery to sample frames at regular
-    intervals from the usable range of the video.
+    intervals from the usable range of each source.
+
+    Several sources are sampled individually and their samples joined, rather
+    than joined and then sampled. Each file keeps its own guard bands, so every
+    intro and set of credits is skipped rather than only the outermost; every
+    file is guaranteed to contribute, which a grid laid across a joined
+    timeline cannot promise for a short one; and no sample region can straddle
+    a file boundary and capture a cut that exists in no source.
 
     Args:
-        source_path: Input source video path
-        cache_file: FFMS2 cache file path
-        usable_range: Frame range to sample from
+        sources: Files to sample, in playback order, each with its own range
         interval_frames: Sample every N frames
         region_frames: Consecutive frames per sample
         fps: Video framerate
@@ -502,23 +544,43 @@ def build_sampling_vpy_script(
     Returns:
         VapourSynth script content as string
     """
-    abs_source_path = resolve_absolute_path(source_path, cwd)
-    abs_cache_file = resolve_absolute_path(cache_file, cwd)
     fps_num = int(fps * 1000)
 
     vpy_lines = [
         "import vapoursynth as vs",
         "core = vs.core",
         "",
-        f'clip = core.ffms2.Source(r"{abs_source_path}", cachefile=r"{abs_cache_file}")',  # noqa: E501  # TODO(E501): shorten line
-        "",
-        "# Trim to usable range (skip guard bands)",
-        f"usable = clip[{usable_range.start}:{usable_range.end}]",
-        "",
         "# Select periodic samples using SelectEvery",
         f"# Every {interval_frames} frames, take {region_frames} consecutive frames",
         f"offsets = list(range({region_frames}))",
-        f"sampled = usable.std.SelectEvery({interval_frames}, offsets)",
+        "",
+    ]
+
+    names: list[str] = []
+    for index, source in enumerate(sources):
+        abs_source_path = resolve_absolute_path(source.path, cwd)
+        abs_cache_file = resolve_absolute_path(source.cache_file, cwd)
+        name = f"sampled{index}"
+        names.append(name)
+        load = f'core.ffms2.Source(r"{abs_source_path}", cachefile=r"{abs_cache_file}")'
+        trim = f"[{source.usable_range.start}:{source.usable_range.end}]"
+        vpy_lines += [
+            f"clip{index} = {load}",
+            "# Trim to usable range (skip guard bands)",
+            f"usable{index} = clip{index}{trim}",
+            f"{name} = usable{index}.std.SelectEvery({interval_frames}, offsets)",
+            "",
+        ]
+
+    if len(names) == 1:
+        vpy_lines.append(f"sampled = {names[0]}")
+    else:
+        vpy_lines += [
+            "# Join each file's samples into one clip",
+            f"sampled = core.std.Splice([{', '.join(names)}])",
+        ]
+
+    vpy_lines += [
         "",
         "# Reset FPS to original rate (SelectEvery preserves timestamps, creating gaps)",  # noqa: E501  # TODO(E501): shorten line
         "# This renumbers frames sequentially at the original FPS",

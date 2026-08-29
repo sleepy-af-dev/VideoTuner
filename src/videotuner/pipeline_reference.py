@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from .encoding_utils import SampledSource
+
 if TYPE_CHECKING:
     from .encoding_utils import CropValues
     from .media import VideoInfo
@@ -41,42 +43,35 @@ def are_sampling_params_equal(args: PipelineArgs) -> bool:
 
 @dataclass(frozen=True)
 class MetricSamplingParams:
-    """Parameters for periodic sampling of a metric."""
+    """How a metric samples the source a job reads.
+
+    The source may be several files, each with its own usable range: guard
+    bands are a fraction of a file's length, so they differ per file. Each is
+    sampled on its own and the samples joined, so the totals below sum across
+    every file.
+    """
 
     interval_frames: int
     region_frames: int
-    guard_start_frames: int
-    guard_end_frames: int
-    total_frames: int
-
-    @property
-    def usable_frames(self) -> int:
-        """Number of frames available for sampling (excluding guard bands)."""
-        return self.total_frames - self.guard_start_frames - self.guard_end_frames
+    sources: tuple[SampledSource, ...]
 
     @property
     def num_samples(self) -> int:
-        """Number of samples that will be generated."""
-        return (
-            self.usable_frames + self.interval_frames - self.region_frames
-        ) // self.interval_frames
+        """Number of samples that will be generated across every file."""
+        return sum(
+            (s.usable_range.frame_count + self.interval_frames - self.region_frames)
+            // self.interval_frames
+            for s in self.sources
+        )
 
     @property
     def total_sample_frames(self) -> int:
         """Total number of frames across all samples."""
         return self.num_samples * self.region_frames
 
-    @property
-    def coverage_percent(self) -> float:
-        """Percentage of video covered by samples."""
-        if self.total_frames == 0:
-            return 0.0
-        return (self.total_sample_frames / self.total_frames) * 100
-
 
 def generate_metric_reference(
     metric_type: Literal["vmaf", "ssim2", "shared"],
-    source_path: Path,
     output_dir: Path,
     sampling_params: MetricSamplingParams,
     fps: float,
@@ -97,7 +92,6 @@ def generate_metric_reference(
 
     Args:
         metric_type: Type of metric ("vmaf" or "ssim2")
-        source_path: Path to source video
         output_dir: Directory for reference output
         sampling_params: Parameters controlling periodic sampling
         fps: Video frame rate
@@ -139,13 +133,10 @@ def generate_metric_reference(
 
         try:
             bitstream_path = encode_concatenated_reference(
-                source_path=source_path,
+                sources=sampling_params.sources,
                 output_path=ref_path,
                 interval_frames=sampling_params.interval_frames,
                 region_frames=sampling_params.region_frames,
-                guard_start_frames=sampling_params.guard_start_frames,
-                guard_end_frames=sampling_params.guard_end_frames,
-                total_frames=sampling_params.total_frames,
                 fps=fps,
                 profile=lossless_profile,
                 video_info=video_info,

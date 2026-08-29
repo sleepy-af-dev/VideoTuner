@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import io
+import logging
 import re
 from collections.abc import Callable, Generator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from types import TracebackType
+from typing import override
 
 from rich.console import Console
 from rich.panel import Panel
@@ -38,13 +41,81 @@ from .version import __version__
 
 LineHandler = Callable[[str], bool]
 
+#: Logger the terminal transcript is written to. The job log handler formats
+#: records from this logger without the timestamp/level prefix, so tables and
+#: panels survive into the log looking as they did on screen.
+TRANSCRIPT_LOGGER = "videotuner.transcript"
+
+#: Transcript render width. Pinned rather than taken from the terminal so two
+#: runs of the same job produce identically shaped logs. Wide enough that a
+#: maximum-length Windows path plus a label still fits on one line: wrapping a
+#: path across lines makes a log hard to read and impossible to grep.
+TRANSCRIPT_WIDTH = 320
+
+
+class TeeConsole(Console):
+    """Console that also records everything it prints to the log.
+
+    Rich progress bars refresh by printing ``Control`` sequences, which render
+    to no visible text. Those are dropped, so a job's log holds the output a
+    user would have read, not one line per animation frame.
+    """
+
+    # Prefixed to stay clear of Console's own _buffer / _record_buffer.
+    _tee_log: logging.Logger
+    _tee_sink: io.StringIO
+    _tee_recorder: Console
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._tee_log = logging.getLogger(TRANSCRIPT_LOGGER)
+        self._tee_sink = io.StringIO()
+        self._tee_recorder = Console(
+            file=self._tee_sink,
+            width=TRANSCRIPT_WIDTH,
+            no_color=True,
+            emoji=False,
+            highlight=False,
+            soft_wrap=True,
+        )
+
+    # Narrowed to what this codebase actually calls: renderables, no kwargs.
+    @override
+    def print(self, *objects: object) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]
+        super().print(*objects)
+        _ = self._tee_sink.seek(0)
+        _ = self._tee_sink.truncate()
+        self._tee_recorder.print(*objects)
+        text = self._tee_sink.getvalue().rstrip("\n")
+        if text.strip():
+            self._tee_log.info(text)
+
+
+class TranscriptFormatter(logging.Formatter):
+    """Job log formatter: bare text for the transcript, prefixes for records.
+
+    Welding a timestamp and level onto every row of a Rich table makes the log
+    unreadable, so transcript lines are written as they appeared on screen.
+    Warnings and above keep the prefix wherever they come from, since those are
+    the lines worth locating in time.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("%(asctime)s %(levelname)s: %(message)s")
+
+    @override
+    def format(self, record: logging.LogRecord) -> str:
+        if record.name == TRANSCRIPT_LOGGER and record.levelno < logging.WARNING:
+            return record.getMessage()
+        return super().format(record)
+
 
 @dataclass
 class PipelineDisplay:
     """Top-level helper that renders the app title and builds stages."""
 
     title: str = "VideoTuner"
-    console: Console = field(default_factory=Console)
+    console: Console = field(default_factory=TeeConsole)
     show_title: bool = True
 
     def __post_init__(self) -> None:

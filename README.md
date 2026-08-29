@@ -157,7 +157,7 @@ The percentage above sets a **budget**. When a run exceeds it, `--show-best-with
 
 Candidates are every encode the job actually ran, not just each profile's optimum. A CRF search walks through cheaper rate factors on its way to the answer, and those are real measurements that simply missed a target, so a pure CRF run has options to offer. A profile that never converged still contributes what it measured. One meeting every target is preferred; otherwise the highest scoring on your targeted metrics wins.
 
-By default this only reports what was already encoded, which may sit well under the budget rather than close to it. `--continue-budget-search` runs further encodes to find the lowest CRF that still fits, which is the highest quality available within the budget. It searches every CRF profile, capped at six extra encodes each, so on a two-profile comparison expect a run to take noticeably longer.
+By default this only reports what was already encoded, which may sit well under the budget rather than close to it. `--continue-budget-search` runs further encodes to find the lowest CRF that still fits, which is the highest quality available within the budget. It searches every CRF profile, capped at 6 extra encodes each, so on a two-profile comparison expect a run to take noticeably longer.
 
 If nothing fits, that is stated instead, and the message distinguishes "nothing tested fits" from "even the CRF ceiling exceeds the budget".
 

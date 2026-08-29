@@ -561,16 +561,12 @@ def run_single_bitrate_iteration(
         shared_stats_file: Path | None = None
         shared_analysis_file: Path | None = None
         if is_multipass:
-            shared_stats_file = (
-                ctx.workdir / f"{ctx.input_path.stem}_bitrate_stats_shared"
-            )
+            shared_stats_file = ctx.workdir / "bitrate_stats_shared"
         has_multipass_opt = profile.settings.get(
             "multi-pass-opt-analysis", False
         ) or profile.settings.get("multi-pass-opt-distortion", False)
         if is_multipass and has_multipass_opt:
-            shared_analysis_file = (
-                ctx.workdir / f"{ctx.input_path.stem}_bitrate_analysis_shared.dat"
-            )
+            shared_analysis_file = ctx.workdir / "bitrate_analysis_shared.dat"
 
         if (ctx.args.vmaf or ctx.args.ssim2) and (
             ctx.vmaf_ref_path or ctx.ssim2_ref_path
@@ -624,10 +620,8 @@ def run_single_bitrate_iteration(
         vmaf_stats_file: Path | None = None
         ssim2_stats_file: Path | None = None
         if is_multipass:
-            vmaf_stats_file = ctx.workdir / f"{ctx.input_path.stem}_bitrate_stats_vmaf"
-            ssim2_stats_file = (
-                ctx.workdir / f"{ctx.input_path.stem}_bitrate_stats_ssim2"
-            )
+            vmaf_stats_file = ctx.workdir / "bitrate_stats_vmaf"
+            ssim2_stats_file = ctx.workdir / "bitrate_stats_ssim2"
 
         # Create analysis files if multi-pass optimization is enabled
         vmaf_analysis_file: Path | None = None
@@ -636,12 +630,8 @@ def run_single_bitrate_iteration(
             "multi-pass-opt-analysis", False
         ) or profile.settings.get("multi-pass-opt-distortion", False)
         if is_multipass and has_multipass_opt:
-            vmaf_analysis_file = (
-                ctx.workdir / f"{ctx.input_path.stem}_bitrate_analysis_vmaf.dat"
-            )
-            ssim2_analysis_file = (
-                ctx.workdir / f"{ctx.input_path.stem}_bitrate_analysis_ssim2.dat"
-            )
+            vmaf_analysis_file = ctx.workdir / "bitrate_analysis_vmaf.dat"
+            ssim2_analysis_file = ctx.workdir / "bitrate_analysis_ssim2.dat"
 
         # Encode VMAF concatenated distorted file
         if ctx.args.vmaf and ctx.vmaf_ref_path:

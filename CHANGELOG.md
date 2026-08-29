@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Batch summary table with one row per file, carrying a column for each quality target that was set
 - `batch.log` at the batch folder root, holding batch-level events and the summary
 - Terminal output is now written to the job log, so a log reads the way the run looked
+- Job and batch folder names are shortened when the output location would otherwise push a file past the Windows 260-character path limit. A shortened name keeps a readable prefix and gains a short hash of the original, and the shortening is reported on the terminal
+- The full source path is recorded in the job log, so a shortened folder name never loses the link back to its input
+- A warning when a directory is created that is already too deep for the files that go in it, naming the path rather than letting a tool fail silently later
 - `CONTEXT.md`, a glossary of the project's domain vocabulary
 
 ### Changed
@@ -25,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A job's log is now a single narrative. Log statements that restated console output in different words are gone; section banners and warnings keep a timestamp prefix, transcript lines do not
 - A batch prints the title banner once and a `[N/M]` header per job
 - Jobs in a batch run sequentially, and the run exits non-zero if any job failed
+- Assessment and encode output folders drop their redundant affixes: `distorted/profile_<Profile>/` and `vmaf/<Profile>_profile/` are now both `distorted/<Profile>/` and `vmaf/<Profile>/`, which also makes the two subtrees consistent
+- Bitrate stats and analysis files no longer repeat the source name, which the job folder they sit in already carries. This alone took the longest path from 343 to 225 characters
+- Profile names and run identifiers such as `iter1` or `crf16.0` are never shortened, so results stay attributable
 
 ### Removed
 

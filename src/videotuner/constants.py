@@ -113,3 +113,26 @@ METRIC_PRIORITY: tuple[str, ...] = (
     "ssim2_95pct",
     "ssim2_median",
 )
+
+
+# =============================================================================
+# Path length budget
+# =============================================================================
+
+# Windows MAX_PATH is 260 including the terminating null, so 259 is the longest
+# usable path. Treated as a budget rather than trusting each tool: not every
+# bundled binary is long-path aware, and libvmaf in particular writes its log
+# with a plain fopen that fails silently past the limit.
+MAX_USABLE_PATH: int = 259
+
+# Headroom reserved for the filename inside a job directory. The longest name
+# the pipeline writes today is 42 characters.
+PATH_FILENAME_MARGIN: int = 60
+
+# Longest directory name created directly inside a job folder, used when
+# working out how much room a job folder name may take.
+LONGEST_JOB_SUBDIR: str = "ssimulacra2"
+
+# A job folder shortened below this stops being recognisable, so the batch
+# folder gives up characters instead.
+JOB_FOLDER_MIN_CHARS: int = 40

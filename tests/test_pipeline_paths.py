@@ -72,7 +72,7 @@ class TestGetDistortedDir:
 
             assert dist_dir.exists()
             assert dist_dir.is_dir()
-            assert dist_dir == workdir / "distorted" / "profile_TestProfile"
+            assert dist_dir == workdir / "distorted" / "TestProfile"
 
     def test_sanitizes_profile_name_with_spaces(self):
         """Test replaces spaces in profile name with underscores."""
@@ -87,7 +87,7 @@ class TestGetDistortedDir:
 
             dist_dir = get_distorted_dir(workdir, profile)
 
-            assert dist_dir == workdir / "distorted" / "profile_Film_High_Quality"
+            assert dist_dir == workdir / "distorted" / "Film_High_Quality"
             assert dist_dir.exists()
 
     def test_sanitizes_profile_name_with_forward_slash(self):
@@ -103,7 +103,7 @@ class TestGetDistortedDir:
 
             dist_dir = get_distorted_dir(workdir, profile)
 
-            assert dist_dir == workdir / "distorted" / "profile_Film_Animation"
+            assert dist_dir == workdir / "distorted" / "Film_Animation"
             assert dist_dir.exists()
 
     def test_sanitizes_profile_name_with_backslash(self):
@@ -120,7 +120,7 @@ class TestGetDistortedDir:
             dist_dir = get_distorted_dir(workdir, profile)
 
             # Backslash should be replaced with underscore
-            assert "profile_Film_Animation" in str(dist_dir)
+            assert "Film_Animation" in str(dist_dir)
             assert dist_dir.exists()
 
     def test_returns_existing_distorted_directory(self):
@@ -133,7 +133,7 @@ class TestGetDistortedDir:
                 settings={},
                 encoder=EncoderType.X265,
             )
-            expected_dir = workdir / "distorted" / "profile_TestProfile"
+            expected_dir = workdir / "distorted" / "TestProfile"
             expected_dir.mkdir(parents=True, exist_ok=True)
 
             dist_dir = get_distorted_dir(workdir, profile)
@@ -160,7 +160,7 @@ class TestGetVmafDir:
 
             assert vmaf_dir.exists()
             assert vmaf_dir.is_dir()
-            assert vmaf_dir == workdir / "vmaf" / "TestProfile_profile"
+            assert vmaf_dir == workdir / "vmaf" / "TestProfile"
 
     def test_sanitizes_profile_name_with_spaces(self):
         """Test replaces spaces in profile name with underscores."""
@@ -175,7 +175,7 @@ class TestGetVmafDir:
 
             vmaf_dir = get_vmaf_dir(workdir, profile)
 
-            assert vmaf_dir == workdir / "vmaf" / "Film_High_Quality_profile"
+            assert vmaf_dir == workdir / "vmaf" / "Film_High_Quality"
             assert vmaf_dir.exists()
 
     def test_sanitizes_profile_name_with_forward_slash(self):
@@ -191,7 +191,7 @@ class TestGetVmafDir:
 
             vmaf_dir = get_vmaf_dir(workdir, profile)
 
-            assert vmaf_dir == workdir / "vmaf" / "Film_Animation_profile"
+            assert vmaf_dir == workdir / "vmaf" / "Film_Animation"
             assert vmaf_dir.exists()
 
     def test_sanitizes_profile_name_with_backslash(self):
@@ -207,7 +207,7 @@ class TestGetVmafDir:
 
             vmaf_dir = get_vmaf_dir(workdir, profile)
 
-            assert "Test_Profile_profile" in str(vmaf_dir)
+            assert "Test_Profile" in str(vmaf_dir)
             assert vmaf_dir.exists()
 
     def test_returns_existing_vmaf_directory(self):
@@ -220,7 +220,7 @@ class TestGetVmafDir:
                 settings={},
                 encoder=EncoderType.X265,
             )
-            expected_dir = workdir / "vmaf" / "TestProfile_profile"
+            expected_dir = workdir / "vmaf" / "TestProfile"
             expected_dir.mkdir(parents=True, exist_ok=True)
 
             vmaf_dir = get_vmaf_dir(workdir, profile)
@@ -247,7 +247,7 @@ class TestGetSsim2Dir:
 
             assert ssim2_dir.exists()
             assert ssim2_dir.is_dir()
-            assert ssim2_dir == workdir / "ssimulacra2" / "TestProfile_profile"
+            assert ssim2_dir == workdir / "ssimulacra2" / "TestProfile"
 
     def test_sanitizes_profile_name_with_spaces(self):
         """Test replaces spaces in profile name with underscores."""
@@ -262,7 +262,7 @@ class TestGetSsim2Dir:
 
             ssim2_dir = get_ssim2_dir(workdir, profile)
 
-            assert ssim2_dir == workdir / "ssimulacra2" / "Animation_Ultra_profile"
+            assert ssim2_dir == workdir / "ssimulacra2" / "Animation_Ultra"
             assert ssim2_dir.exists()
 
     def test_sanitizes_profile_name_with_forward_slash(self):
@@ -278,7 +278,7 @@ class TestGetSsim2Dir:
 
             ssim2_dir = get_ssim2_dir(workdir, profile)
 
-            assert ssim2_dir == workdir / "ssimulacra2" / "CGI_Anime_profile"
+            assert ssim2_dir == workdir / "ssimulacra2" / "CGI_Anime"
             assert ssim2_dir.exists()
 
     def test_sanitizes_profile_name_with_backslash(self):
@@ -294,7 +294,7 @@ class TestGetSsim2Dir:
 
             ssim2_dir = get_ssim2_dir(workdir, profile)
 
-            assert "Test_Profile_profile" in str(ssim2_dir)
+            assert "Test_Profile" in str(ssim2_dir)
             assert ssim2_dir.exists()
 
     def test_returns_existing_ssim2_directory(self):
@@ -307,7 +307,7 @@ class TestGetSsim2Dir:
                 settings={},
                 encoder=EncoderType.X265,
             )
-            expected_dir = workdir / "ssimulacra2" / "TestProfile_profile"
+            expected_dir = workdir / "ssimulacra2" / "TestProfile"
             expected_dir.mkdir(parents=True, exist_ok=True)
 
             ssim2_dir = get_ssim2_dir(workdir, profile)

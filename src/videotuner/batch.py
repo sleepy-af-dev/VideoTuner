@@ -14,6 +14,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
+from .constants import JOB_FOLDER_MIN_CHARS
 from .encoder_type import EncoderType
 from .encoding_utils import is_hdr_video
 from .media import InvalidVideoFileError, parse_video_info
@@ -25,7 +26,9 @@ from .progress import PipelineDisplay, TranscriptFormatter
 from .utils import (
     configure_logging,
     ensure_dir,
+    fit_path_segment,
     get_app_root,
+    job_folder_budget,
     log_section,
     sanitize_filename,
 )
@@ -54,16 +57,20 @@ def discover_videos(folder: Path) -> list[Path]:
     )
 
 
-def job_folder_names(videos: list[Path]) -> list[str]:
-    """Map each input to a unique job folder name.
+def job_folder_names(videos: list[Path], budget: int | None = None) -> list[str]:
+    """Map each input to a unique job folder name, fitted to ``budget``.
 
     ``clip.mkv`` and ``clip.mp4`` both sanitize to ``clip``, so later
     collisions get a numeric suffix rather than overwriting the earlier job.
+    Shortening happens first, so the suffix disambiguates the name that is
+    actually used.
     """
     names: list[str] = []
     seen: dict[str, int] = {}
     for video in videos:
         base = sanitize_filename(video.stem)
+        if budget is not None:
+            base = fit_path_segment(base, budget)
         count = seen.get(base, 0)
         seen[base] = count + 1
         names.append(base if count == 0 else f"{base}_{count + 1}")
@@ -138,15 +145,35 @@ def run_batch(args: PipelineArgs, run_job: Callable[[PipelineArgs], JobResult]) 
         else validation.multi_profile_list
     )
     x264_profile_names = [p.name for p in candidates if p.encoder == EncoderType.X264]
+    slugs = [p.name for p in candidates]
 
     repo_root = get_app_root()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
     if args.workdir:
         batch_folder = args.workdir
     else:
+        jobs_root = repo_root / "jobs"
         folder_name = sanitize_filename(input_folder.resolve().name) or "batch"
-        batch_folder = repo_root / "jobs" / f"{folder_name}_{timestamp}"
+        batch_folder = jobs_root / f"{folder_name}_{timestamp}"
+        # The batch folder is shared by every job, so it can only be shortened
+        # once, here, before any job folder is named.
+        if job_folder_budget(batch_folder, slugs) < JOB_FOLDER_MIN_CHARS:
+            shortfall = JOB_FOLDER_MIN_CHARS - job_folder_budget(batch_folder, slugs)
+            folder_name = fit_path_segment(
+                folder_name, max(1, len(folder_name) - shortfall)
+            )
+            batch_folder = jobs_root / f"{folder_name}_{timestamp}"
     _ = ensure_dir(batch_folder)
+
+    # Job folder names are fitted against the batch folder actually chosen.
+    budget = job_folder_budget(batch_folder, slugs)
+    if budget < JOB_FOLDER_MIN_CHARS:
+        warning = (
+            f"⚠ {batch_folder} leaves only {budget} characters for job folder "
+            f"names. Paths may exceed the Windows limit; use a shorter --workdir."
+        )
+        display.console.print(f"[bold yellow]{warning}[/bold yellow]")
 
     # Batch-level output and job output both reach the root logger through the
     # same console, so the batch handler is muted while a job runs. That detail
@@ -169,7 +196,7 @@ def run_batch(args: PipelineArgs, run_job: Callable[[PipelineArgs], JobResult]) 
 
         results: list[JobResult] = []
         for index, (video, folder_name) in enumerate(
-            zip(videos, job_folder_names(videos), strict=True), start=1
+            zip(videos, job_folder_names(videos, budget), strict=True), start=1
         ):
             display.console.print(
                 f"[bold]\\[{index}/{len(videos)}][/bold] [cyan]{video.name}[/cyan]"

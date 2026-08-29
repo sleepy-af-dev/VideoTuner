@@ -58,7 +58,9 @@ from .ssimulacra2_assessment import SSIM2Result
 from .utils import (
     configure_logging,
     ensure_dir,
+    fit_path_segment,
     get_app_root,
+    job_folder_budget,
     log_section,
     sanitize_filename,
 )
@@ -141,9 +143,21 @@ def _run_pipeline_body(args: PipelineArgs, *, show_title: bool = True) -> JobRes
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_stem = sanitize_filename(input_path.stem)
     if args.workdir:
+        # User-chosen location: respect it as given. ensure_dir still warns if
+        # it leaves no room for the files that go inside.
         workdir: Path = args.workdir
     else:
-        workdir = repo_root / "jobs" / f"{safe_stem}_{timestamp}"
+        jobs_root = repo_root / "jobs"
+        slugs = [p.name for p in ([selected_profile] if selected_profile else [])]
+        slugs += [p.name for p in multi_profile_list]
+        # The timestamp identifies the run, so only the name part is shortened.
+        budget = job_folder_budget(jobs_root, slugs) - len(timestamp) - 1
+        fitted = fit_path_segment(safe_stem, budget)
+        if fitted != safe_stem:
+            note = f"Job folder name shortened to fit the path limit: {fitted}"
+            display.console.print(f"[yellow]{note}[/yellow]")
+        safe_stem = fitted
+        workdir = jobs_root / f"{safe_stem}_{timestamp}"
     _ = ensure_dir(workdir)
 
     # Create temp subdirectory for temporary files
@@ -181,6 +195,8 @@ def _run_pipeline_body(args: PipelineArgs, *, show_title: bool = True) -> JobRes
     try:
         log.info("Log file: %s", _rel(log_file))
         log.info("Job folder: %s", _rel(workdir))
+        # Recorded in full because the job folder name may have been shortened.
+        log.info("Source: %s", input_path.resolve())
     except OSError as e:
         log.warning("Failed to log file/job folder paths due to OSError: %s", e)
 

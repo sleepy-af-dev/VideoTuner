@@ -55,6 +55,7 @@ quality metrics to find the optimal rate factor for video encoding.
 - [Output](#output)
   - [Job folder](#job-folder)
   - [Batch folder](#batch-folder)
+  - [Path length](#path-length)
   - [Logs](#logs)
 - [Development](#development)
   - [Building Releases](#building-releases)
@@ -660,14 +661,14 @@ jobs/<input_name>_<timestamp>/
 │   ├── vmaf_reference_concatenated.mkv
 │   └── ssim2_reference_concatenated.mkv
 ├── distorted/                                # Encoded samples, by profile
-│   └── profile_<ProfileName>/
+│   └── <ProfileName>/
 │       ├── vmaf_crf_*.mkv                    # VMAF distorted at each CRF iteration
 │       └── ssim2_crf_*.mkv                   # SSIM2 distorted at each CRF iteration
 ├── vmaf/                                     # VMAF assessment results
-│   └── <ProfileName>_profile/
+│   └── <ProfileName>/
 │       └── vmaf_concatenated_iter*.json
 ├── ssimulacra2/                              # SSIMULACRA2 assessment results
-│   └── <ProfileName>_profile/
+│   └── <ProfileName>/
 │       └── ssim2_concatenated_iter*.json
 ├── temp/                                     # VapourSynth scripts, encoder bitstreams
 └── <input_name>.log                          # Job log
@@ -694,6 +695,20 @@ jobs/<input_folder_name>_<timestamp>/
 ```
 
 Two inputs whose names differ only by extension (`clip.mkv` and `clip.mp4`) would collide on one job folder name, so the second gets a numeric suffix rather than overwriting the first.
+
+### Path length
+
+Windows caps a path at 260 characters, and not every bundled tool handles more even when long paths are enabled system-wide. VideoTuner keeps every file it writes inside that limit.
+
+Before a job folder is created, its name is measured against the room left by the output location, the deepest subfolder and the profile name. If it does not fit, the name is shortened and a short hash of the original is appended:
+
+```text
+a-long-example-input-filename-that-does-not-fit-the-path-budget
+                          becomes
+a-long-example-input-filename-that-doe~cdc179
+```
+
+The full source path is always recorded in the job log, so a shortened name never loses the link back to its input. Shortening is reported on the terminal when it happens, and profile names and run identifiers such as `iter1` or `crf16.0` are never shortened. If the output location is so deep that even a shortened name will not fit, VideoTuner warns at startup rather than failing partway through; a shorter `--workdir` is the fix.
 
 ### Logs
 

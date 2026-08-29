@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import math
 import os
@@ -10,15 +11,29 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TextIO
 
-from .constants import LOG_SEPARATOR_CHAR, LOG_SEPARATOR_WIDTH
+from .constants import (
+    LOG_SEPARATOR_CHAR,
+    LOG_SEPARATOR_WIDTH,
+    LONGEST_JOB_SUBDIR,
+    MAX_USABLE_PATH,
+    PATH_FILENAME_MARGIN,
+)
 
 logger = logging.getLogger(__name__)
 
 LineCallback = Callable[[str], bool] | None
 
 
+_warned_long_dirs: set[str] = set()
+
+
 def ensure_dir(path: Path) -> Path:
     """Create directory (and parents) if it doesn't exist, then return it.
+
+    Warns once per directory that is already so deep no reasonable filename
+    will fit inside the path budget. This is the backstop for the budget
+    calculated when a job folder is named: it catches an over-long path
+    whatever produced it, without every filename site having to remember.
 
     Args:
         path: Directory path to create
@@ -27,7 +42,61 @@ def ensure_dir(path: Path) -> Path:
         The same path, for chaining
     """
     path.mkdir(parents=True, exist_ok=True)
+
+    budget = MAX_USABLE_PATH - PATH_FILENAME_MARGIN
+    key = str(path)
+    if len(key) > budget and key not in _warned_long_dirs:
+        _warned_long_dirs.add(key)
+        logger.warning(
+            "Directory path is %d characters, over the %d budget; tools that are"
+            + " not long-path aware may fail to write here: %s",
+            len(key),
+            budget,
+            key,
+        )
     return path
+
+
+def fit_path_segment(name: str, budget: int) -> str:
+    """Shorten a single path segment to fit ``budget`` characters.
+
+    Deliberately dumb: it never inspects what the name contains, so nothing
+    here depends on how source files happen to be named. A shortened segment
+    gains a hash of the full original name, which keeps it unique without
+    depending on the order names were processed in, and marks the name as
+    shortened. Names that already fit are returned untouched.
+
+    Args:
+        name: Segment to fit
+        budget: Maximum characters the segment may occupy
+
+    Returns:
+        The original name, or a truncated form with a hash suffix
+    """
+    if len(name) <= budget:
+        return name
+    digest = hashlib.blake2b(name.encode("utf-8"), digest_size=3).hexdigest()
+    keep = max(1, budget - len(digest) - 1)
+    return f"{name[:keep]}~{digest}"
+
+
+def job_folder_budget(parent: Path, profile_slugs: Iterable[str]) -> int:
+    """Characters available for a job folder name directly under ``parent``.
+
+    Reserves room for the deepest directory the pipeline creates inside a job
+    folder and for the filename that goes in it.
+
+    Args:
+        parent: Directory the job folder will be created in
+        profile_slugs: Profile directory names that may appear inside the job
+
+    Returns:
+        Budget in characters, which may be zero or negative if parent is deep
+    """
+    longest_slug = max((len(s) for s in profile_slugs), default=0)
+    # parent \ job \ ssimulacra2 \ slug
+    overhead = len(str(parent)) + 3 + len(LONGEST_JOB_SUBDIR) + longest_slug
+    return MAX_USABLE_PATH - PATH_FILENAME_MARGIN - overhead
 
 
 def _is_nuitka_compiled() -> bool:

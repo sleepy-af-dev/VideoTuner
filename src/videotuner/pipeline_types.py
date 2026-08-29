@@ -148,7 +148,7 @@ def get_distorted_dir(workdir: Path, profile: Profile) -> Path:
     Returns:
         Path to distorted files directory for this profile
     """
-    dist_dir = workdir / "distorted" / f"profile_{_profile_slug(profile)}"
+    dist_dir = workdir / "distorted" / _profile_slug(profile)
     return ensure_dir(dist_dir)
 
 
@@ -162,7 +162,7 @@ def get_vmaf_dir(workdir: Path, profile: Profile) -> Path:
     Returns:
         Path to VMAF assessment output directory
     """
-    vmaf_dir = workdir / "vmaf" / f"{_profile_slug(profile)}_profile"
+    vmaf_dir = workdir / "vmaf" / _profile_slug(profile)
     return ensure_dir(vmaf_dir)
 
 
@@ -176,5 +176,5 @@ def get_ssim2_dir(workdir: Path, profile: Profile) -> Path:
     Returns:
         Path to SSIMULACRA2 assessment output directory
     """
-    ssim2_dir = workdir / "ssimulacra2" / f"{_profile_slug(profile)}_profile"
+    ssim2_dir = workdir / "ssimulacra2" / _profile_slug(profile)
     return ensure_dir(ssim2_dir)

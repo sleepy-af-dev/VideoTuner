@@ -48,7 +48,7 @@ class TestDiscoverVideos:
 
     def test_top_level_only(self, tmp_path: Path) -> None:
         _touch(tmp_path, "top.mkv")
-        nested = tmp_path / "season1"
+        nested = tmp_path / "subfolder"
         nested.mkdir()
         _touch(nested, "buried.mkv")
         assert [p.name for p in discover_videos(tmp_path)] == ["top.mkv"]
@@ -69,6 +69,16 @@ class TestJobFolderNames:
     def test_collisions_are_suffixed_not_overwritten(self, tmp_path: Path) -> None:
         videos = [tmp_path / "clip.mkv", tmp_path / "clip.mp4", tmp_path / "other.mkv"]
         assert batch.job_folder_names(videos) == ["clip", "clip_2", "other"]
+
+    def test_names_are_fitted_to_the_budget(self, tmp_path: Path) -> None:
+        videos = [tmp_path / (("long" * 40) + ".mkv")]
+        assert all(len(n) <= 50 for n in batch.job_folder_names(videos, 50))
+
+    def test_truncated_names_do_not_collide(self, tmp_path: Path) -> None:
+        shared = "shared-leading-portion-of-two-input-names-"
+        videos = [tmp_path / f"{shared}first.mkv", tmp_path / f"{shared}second.mkv"]
+        names = batch.job_folder_names(videos, 45)
+        assert len(set(names)) == 2, "two sources must not share one job folder"
 
 
 class TestRunBatch:

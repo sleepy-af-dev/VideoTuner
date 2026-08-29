@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
+from itertools import count
 from pathlib import Path
 
-from .budget_search import select_within_budget
+from .budget_search import run_budget_search, select_within_budget
 from .constants import (
     CRF_SEARCH_MAX_ITERATIONS,
     METRIC_DECIMALS,
@@ -83,6 +84,68 @@ from .utils import (
     sanitize_filename,
 )
 from .vmaf_assessment import VMAFResult
+
+
+def _budget_encoder(
+    profile_name: str,
+    ctx: IterationContext,
+    display: PipelineDisplay,
+    log: logging.Logger,
+    first_iteration: int,
+) -> Callable[[float], BudgetPoint]:
+    """Build the callable the budget search runs one encode with.
+
+    A factory rather than a closure written inside the caller's loop, so each
+    profile gets its own iteration counter without capturing a loop variable.
+    """
+    counter = count(first_iteration)
+
+    def encode(crf: float) -> BudgetPoint:
+        display.console.print(
+            f"[bold cyan]Budget Search: {profile_name} at CRF {crf:.1f}[/bold cyan]"
+        )
+        log.info("Budget search encode: %s at CRF %.1f", profile_name, crf)
+        scores, _vmaf, _ssim2, predicted, _vpath, _spath = run_single_crf_iteration(
+            ctx, crf, iteration=next(counter)
+        )
+        return BudgetPoint(
+            profile_name=profile_name,
+            crf=crf,
+            scores=scores,
+            predicted_bitrate_kbps=predicted,
+        )
+
+    return encode
+
+
+def _search_within_budget(
+    searchable: list[tuple[str, IterationContext, tuple[BudgetPoint, ...]]],
+    cap_kbps: float,
+    interval: float,
+    display: PipelineDisplay,
+    log: logging.Logger,
+) -> list[BudgetPoint]:
+    """Spend extra encodes, per profile, closing in on the budget.
+
+    Every CRF profile is searched rather than only the winner: the profile that
+    is cheapest at its own optimum is not necessarily the best one at the budget.
+    """
+    display.console.print()
+    display.console.print(
+        "[bold]Searching for the best result within budget "
+        + f"(<= {cap_kbps:,.0f} kbps)[/bold]"
+    )
+    log.info("Budget search: looking for encodes at or below %.0f kbps", cap_kbps)
+
+    extra: list[BudgetPoint] = []
+    for profile_name, ctx, points in searchable:
+        encode = _budget_encoder(profile_name, ctx, display, log, len(points) + 1)
+        extra.extend(run_budget_search(list(points), cap_kbps, interval, encode))
+
+    if not extra:
+        display.console.print("[dim]Nothing further to encode[/dim]")
+
+    return extra
 
 
 def run_pipeline(
@@ -613,8 +676,10 @@ def _run_pipeline_body(
     optimal_crf: float | None = None
     _predicted_bitrate: float = 0.0
     optimal_predicted_bitrate: float = 0.0
-    # Every encode a single-profile CRF search runs, for the budget search
+    # Every encode a single-profile CRF search runs, for the budget search,
+    # with the context it would need to run more of them
     single_tested_points: list[BudgetPoint] = []
+    budget_ctx: IterationContext | None = None
 
     # This job's summary row. Overwritten by the multi-profile branch with the
     # winning profile; otherwise filled in from the single-profile search below.
@@ -727,6 +792,7 @@ def _run_pipeline_body(
             sharing_samples=sharing_samples,
         )
 
+        budget_ctx = ctx
         iteration = 0
         current_crf: float = args.crf_start_value
         max_iterations = CRF_SEARCH_MAX_ITERATIONS
@@ -960,11 +1026,56 @@ def _run_pipeline_body(
         # Rank results
         ranked_results = rank_profile_results(profile_results, targets)
 
+        warn_percent = args.predicted_bitrate_warning_percent
+        budget_kbps = (
+            info.video_bitrate_kbps * warn_percent / 100.0
+            if info.video_bitrate_kbps and warn_percent
+            else None
+        )
+
+        def report_within_budget() -> None:
+            """Offer the best measured encode fitting the budget, if any."""
+            if budget_kbps is None:
+                return
+            assert warn_percent is not None and info.video_bitrate_kbps is not None
+            pooled = [p for r in profile_results for p in r.tested_points]
+            if args.continue_budget_search:
+                by_name = {p.name: p for p in multi_profile_list}
+                searchable = [
+                    (
+                        r.profile_name,
+                        ctx_factory(by_name[r.profile_name]),
+                        r.tested_points,
+                    )
+                    for r in profile_results
+                    if r.profile_name in by_name
+                    and not by_name[r.profile_name].is_bitrate_mode
+                ]
+                pooled += _search_within_budget(
+                    searchable, budget_kbps, args.crf_interval, display, log
+                )
+            display_best_within_budget(
+                display.console,
+                log,
+                select_within_budget(pooled, budget_kbps, targets),
+                info.video_bitrate_kbps,
+                warn_percent,
+                targets,
+                args.metric_decimals,
+                name_profile=True,
+                searched=args.continue_budget_search,
+            )
+
         if not ranked_results:
             display.console.print(
                 "[bold red]No profiles produced valid results[/bold red]"
             )
             log.error("Multi-profile search failed - no valid results")
+            # Nothing met the targets, which is exactly when what *is* reachable
+            # within budget is worth knowing. The job still failed.
+            if args.show_best_within_budget:
+                display.console.print("[yellow]No profile met your targets[/yellow]")
+                report_within_budget()
             return JobResult.failure(input_path, "no profile produced valid results")
 
         winner = ranked_results[0]
@@ -1000,28 +1111,9 @@ def _run_pipeline_body(
         )
 
         # The winner busted the budget, so offer the closest encode that fits
-        # it: the reader decides whether its metrics are close enough. Points
-        # are pooled from profile_results, not ranked_results, so a profile
-        # that never converged still contributes what it measured.
-        warn_percent = args.predicted_bitrate_warning_percent
-        if (
-            warned
-            and args.show_best_within_budget
-            and info.video_bitrate_kbps
-            and warn_percent
-        ):
-            cap_kbps = info.video_bitrate_kbps * warn_percent / 100.0
-            pooled = [p for r in profile_results for p in r.tested_points]
-            display_best_within_budget(
-                display.console,
-                log,
-                select_within_budget(pooled, cap_kbps, targets),
-                info.video_bitrate_kbps,
-                warn_percent,
-                targets,
-                args.metric_decimals,
-                name_profile=True,
-            )
+        # it: the reader decides whether its metrics are close enough.
+        if warned and args.show_best_within_budget:
+            report_within_budget()
 
         if winner.optimal_crf is not None:
             log.info(
@@ -1132,16 +1224,27 @@ def _run_pipeline_body(
             and info.video_bitrate_kbps
             and warn_percent
         ):
+            assert selected_profile is not None
             cap_kbps = info.video_bitrate_kbps * warn_percent / 100.0
+            pooled = list(single_tested_points)
+            if args.continue_budget_search and budget_ctx is not None:
+                pooled += _search_within_budget(
+                    [(selected_profile.name, budget_ctx, tuple(single_tested_points))],
+                    cap_kbps,
+                    args.crf_interval,
+                    display,
+                    log,
+                )
             display_best_within_budget(
                 display.console,
                 log,
-                select_within_budget(single_tested_points, cap_kbps, targets),
+                select_within_budget(pooled, cap_kbps, targets),
                 info.video_bitrate_kbps,
                 warn_percent,
                 targets,
                 args.metric_decimals,
                 name_profile=False,
+                searched=args.continue_budget_search,
             )
 
     log_section(log, "Results")

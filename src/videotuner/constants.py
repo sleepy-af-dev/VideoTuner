@@ -13,6 +13,11 @@ CRF_MAX: float = 51.0
 # Maximum iterations for CRF search (safety limit to prevent infinite loops)
 CRF_SEARCH_MAX_ITERATIONS: int = 20
 
+# Extra encodes one profile may spend closing in on the bitrate budget. Small
+# because these run after a search that already used its own allowance, and
+# interpolation usually brackets the boundary in two or three.
+BUDGET_SEARCH_MAX_ITERATIONS: int = 6
+
 # CRF value used when quality floor is reached
 CRF_FLOOR_VALUE: float = 51.0
 

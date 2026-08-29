@@ -1,6 +1,12 @@
 """Tests for budget search: choosing and finding encodes within a bitrate budget."""
 
-from videotuner.budget_search import select_within_budget
+import math
+
+from videotuner.budget_search import (
+    next_budget_crf,
+    run_budget_search,
+    select_within_budget,
+)
 from videotuner.crf_search import QualityTarget
 from videotuner.pipeline_types import BudgetPoint
 
@@ -93,3 +99,122 @@ class TestSelectWithinBudget:
         over = _point("alpha", 78000.0, {"vmaf_mean": 96.0}, crf=18.0)
 
         assert select_within_budget([over], 70000.0, []) is None
+
+
+class TestNextBudgetCrf:
+    """Choosing the next CRF to encode when closing in on the budget."""
+
+    def test_interpolates_between_the_bracketing_points(self):
+        """Bitrate falls geometrically with CRF, so interpolate on its logarithm.
+
+        Bracketed by CRF 18 at 78,000 kbps and CRF 26 at 30,000 kbps, against a
+        43,000 kbps budget. Working the log-linear formula by hand:
+        t = ln(43000/78000) / ln(30000/78000) = 0.623, so 18 + 0.623 * 8 = 22.98,
+        which rounds to 23.0 on a 0.5 interval. Bisection would have said 22.0.
+        """
+        points = [
+            _point("alpha", 78000.0, {"vmaf_mean": 99.0}, crf=18.0),
+            _point("alpha", 30000.0, {"vmaf_mean": 95.0}, crf=26.0),
+        ]
+
+        assert next_budget_crf(points, 43000.0, 0.5) == 23.0
+
+    def test_extrapolates_upward_when_nothing_fits_yet(self):
+        """With every encode over budget there is no upper bracket to bisect.
+
+        From CRF 18 at 78,000 kbps and CRF 22 at 60,000 kbps, the slope of
+        ln(bitrate) is (ln 60000 - ln 78000) / 4 = -0.0656 per CRF. Reaching
+        43,000 kbps from CRF 22 needs (ln 43000 - ln 60000) / -0.0656 = 5.08
+        more, giving 27.08, which rounds to 27.0.
+        """
+        points = [
+            _point("alpha", 78000.0, {"vmaf_mean": 99.0}, crf=18.0),
+            _point("alpha", 60000.0, {"vmaf_mean": 97.0}, crf=22.0),
+        ]
+
+        assert next_budget_crf(points, 43000.0, 0.5) == 27.0
+
+    def test_never_proposes_a_crf_already_encoded(self):
+        """A point just over the budget pulls the interpolation onto itself.
+
+        CRF 23 sits at 43,500 kbps against a 43,000 kbps budget, so
+        interpolating between it and CRF 26 lands back on 23.0. Re-encoding a
+        CRF already measured would spend an encode to learn nothing, so it
+        falls back to the midpoint of the bracket.
+        """
+        points = [
+            _point("alpha", 78000.0, {"vmaf_mean": 99.0}, crf=18.0),
+            _point("alpha", 43500.0, {"vmaf_mean": 96.0}, crf=23.0),
+            _point("alpha", 30000.0, {"vmaf_mean": 95.0}, crf=26.0),
+        ]
+
+        assert next_budget_crf(points, 43000.0, 0.5) == 24.5
+
+    def test_stops_once_the_bracket_is_within_the_interval(self):
+        """Nothing encodable lies between adjacent CRFs, so the boundary is found."""
+        points = [
+            _point("alpha", 43500.0, {"vmaf_mean": 96.0}, crf=21.5),
+            _point("alpha", 42800.0, {"vmaf_mean": 95.8}, crf=22.0),
+        ]
+
+        assert next_budget_crf(points, 43000.0, 0.5) is None
+
+    def test_stops_at_the_crf_ceiling(self):
+        """Even the cheapest rate factor the encoder offers is over budget."""
+        points = [
+            _point("alpha", 90000.0, {"vmaf_mean": 99.0}, crf=48.0),
+            _point("alpha", 80000.0, {"vmaf_mean": 98.0}, crf=51.0),
+        ]
+
+        assert next_budget_crf(points, 43000.0, 0.5) is None
+
+    def test_ignores_bitrate_mode_encodes(self):
+        """A bitrate-mode encode has no rate factor, so it cannot bracket a CRF."""
+        points = [_point("alpha", 78000.0, {"vmaf_mean": 99.0}, crf=None)]
+
+        assert next_budget_crf(points, 43000.0, 0.5) is None
+
+
+class TestRunBudgetSearch:
+    """The loop that spends encodes closing in on the budget."""
+
+    def test_closes_the_boundary_without_running_forever(self):
+        """A stub encoder stands in for real encoding, proving the loop ends.
+
+        Bitrate is modelled as falling geometrically with CRF, crossing the
+        43,000 kbps budget at CRF 21.95. The search should bracket that to
+        within the 0.5 interval and stop, well inside its iteration cap.
+        """
+        encoded: list[float] = []
+
+        def encode(crf: float) -> BudgetPoint:
+            encoded.append(crf)
+            return _point(
+                "alpha",
+                200000.0 * math.exp(-0.07 * crf),
+                {"vmaf_mean": 99.0 - crf * 0.1},
+                crf=crf,
+            )
+
+        start = [encode(18.0)]
+
+        found = run_budget_search(start, 43000.0, 0.5, encode)
+
+        assert found, "the search should have run at least one encode"
+        assert len(found) <= 6, "the iteration cap should bound the encodes"
+        assert any(p.predicted_bitrate_kbps <= 43000.0 for p in found)
+        # Resolved: nothing further is worth encoding
+        assert next_budget_crf(start + found, 43000.0, 0.5) is None
+
+    def test_runs_nothing_when_the_boundary_is_already_known(self):
+        """No encode is spent when the existing points already bracket it."""
+
+        def encode(crf: float) -> BudgetPoint:
+            raise AssertionError(f"should not have encoded CRF {crf}")
+
+        points = [
+            _point("alpha", 43500.0, {"vmaf_mean": 96.0}, crf=21.5),
+            _point("alpha", 42800.0, {"vmaf_mean": 95.8}, crf=22.0),
+        ]
+
+        assert run_budget_search(points, 43000.0, 0.5, encode) == []

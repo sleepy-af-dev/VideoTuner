@@ -410,6 +410,7 @@ def display_best_within_budget(
     metric_decimals: int,
     *,
     name_profile: bool,
+    searched: bool = False,
 ) -> None:
     """Show the best encode that fits the budget, if one was measured.
 
@@ -427,15 +428,26 @@ def display_best_within_budget(
         metric_decimals: Decimal places for metric display
         name_profile: Whether to name the profile, which only distinguishes
             anything when more than one was compared
+        searched: Whether further encodes were run to close in on the budget,
+            which changes what the output can honestly claim
     """
+    from .crf_search import CRF_CEILING
+
     cap_kbps = input_bitrate_kbps * threshold_percent / 100.0
 
     if chosen is None:
-        subject = "No profile" if name_profile else "No CRF"
-        console.print(
-            f"[dim]{subject} came in at or below {threshold_percent:.0f}% of input "
-            + f"({cap_kbps:,.0f} kbps)[/dim]"
-        )
+        if searched:
+            # The search went as far as the encoder goes, so this is settled
+            console.print(
+                f"[dim]No CRF fits the budget: even CRF {CRF_CEILING:.1f} exceeds "
+                + f"{threshold_percent:.0f}% of input ({cap_kbps:,.0f} kbps)[/dim]"
+            )
+        else:
+            subject = "No profile" if name_profile else "No CRF"
+            console.print(
+                f"[dim]{subject} came in at or below {threshold_percent:.0f}% of input "
+                + f"({cap_kbps:,.0f} kbps)[/dim]"
+            )
         log.info(
             "Nothing within %.0f%% of input bitrate (%.0f kbps)",
             threshold_percent,
@@ -456,10 +468,13 @@ def display_best_within_budget(
     console.print()
     console.print(f"[bold cyan]Best within budget: {headline}[/bold cyan]")
     console.print(f"[cyan]Predicted Bitrate: {bitrate_display}[/cyan]")
-    console.print(
-        "[dim]Chosen from the CRF values the search tested, which do not cover"
-        + " every rate factor[/dim]"
-    )
+    if not searched:
+        # Without --continue-budget-search this is the best of what the quality
+        # search happened to encode, not the closest CRF that fits.
+        console.print(
+            "[dim]Chosen from the CRF values the search tested, which do not cover"
+            + " every rate factor[/dim]"
+        )
     log.info("Best within budget: %s (%s)", headline, bitrate_display)
 
     # Copies, so the shared targets keep the winner's values for anything after this.

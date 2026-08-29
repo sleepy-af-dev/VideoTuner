@@ -7,6 +7,7 @@ assessment summaries, and multi-profile comparison results.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol
 
 from rich.console import Console
@@ -17,7 +18,7 @@ from .crf_search import QualityTarget
 from .pipeline_cli import DEFAULT_CRF_INTERVAL, DEFAULT_CRF_START_VALUE, get_default
 
 if TYPE_CHECKING:
-    from .pipeline_types import JobResult, MultiProfileResult
+    from .pipeline_types import BudgetPoint, JobResult, MultiProfileResult
 
 #: Metric key to display name, in the order metrics are shown. Single source of
 #: truth for both the per-job assessment summary and the batch summary.
@@ -346,7 +347,7 @@ def check_and_display_bitrate_warning(
     input_bitrate_kbps: float | None,
     threshold_percent: float | None,
     profile_name: str | None = None,
-) -> None:
+) -> bool:
     """Check if predicted bitrate exceeds threshold and display warning.
 
     Args:
@@ -356,17 +357,21 @@ def check_and_display_bitrate_warning(
         input_bitrate_kbps: Input video bitrate (None if unavailable)
         threshold_percent: Warning threshold as percentage (1-100, None if disabled)
         profile_name: Optional profile name for warning message
+
+    Returns:
+        True if the warning was shown, so a caller can follow it with an
+        alternative that fits the threshold.
     """
     if threshold_percent is None:
-        return  # Feature disabled
+        return False  # Feature disabled
 
     if input_bitrate_kbps is None or input_bitrate_kbps <= 0:
         log.debug("Predicted bitrate warning skipped: input bitrate unavailable")
-        return
+        return False
 
     if predicted_bitrate_kbps <= 0:
         log.debug("Predicted bitrate warning skipped: predicted bitrate unavailable")
-        return
+        return False
 
     # Calculate percentage
     bitrate_percent = (predicted_bitrate_kbps / input_bitrate_kbps) * 100.0
@@ -380,6 +385,85 @@ def check_and_display_bitrate_warning(
             + f"of input bitrate ({input_bitrate_kbps:,.0f} kbps)[/bold yellow]"
         )
         console.print(f"[yellow]  Predicted: {bitrate_percent:.1f}% of input[/yellow]")
+        return True
+
+    return False
+
+
+def display_best_within_budget(
+    console: Console,
+    log: logging.Logger,
+    chosen: BudgetPoint | None,
+    input_bitrate_kbps: float,
+    threshold_percent: float,
+    targets: list[QualityTarget],
+    metric_decimals: int,
+    *,
+    name_profile: bool,
+) -> None:
+    """Show the best encode that fits the budget, if one was measured.
+
+    Displayed under the warning raised by
+    :func:`check_and_display_bitrate_warning`, so someone whose budget is out
+    of reach can judge whether the closest thing that does fit is good enough.
+
+    Args:
+        console: Rich console for output
+        log: Logger, recording the alternative alongside the warning
+        chosen: Best measured encode within the budget, or None if nothing fits
+        input_bitrate_kbps: Input video bitrate
+        threshold_percent: Warning threshold as percentage
+        targets: Quality targets, shown as deltas against the chosen encode
+        metric_decimals: Decimal places for metric display
+        name_profile: Whether to name the profile, which only distinguishes
+            anything when more than one was compared
+    """
+    cap_kbps = input_bitrate_kbps * threshold_percent / 100.0
+
+    if chosen is None:
+        subject = "No profile" if name_profile else "No CRF"
+        console.print(
+            f"[dim]{subject} came in at or below {threshold_percent:.0f}% of input "
+            + f"({cap_kbps:,.0f} kbps)[/dim]"
+        )
+        log.info(
+            "Nothing within %.0f%% of input bitrate (%.0f kbps)",
+            threshold_percent,
+            cap_kbps,
+        )
+        return
+
+    if chosen.crf is None:
+        headline = f"{chosen.profile_name} (Bitrate mode)"
+    elif name_profile:
+        headline = f"{chosen.profile_name} at CRF {chosen.crf:.1f}"
+    else:
+        headline = f"CRF {chosen.crf:.1f}"
+
+    bitrate_display = format_bitrate_percentage(
+        chosen.predicted_bitrate_kbps, input_bitrate_kbps
+    )
+    console.print()
+    console.print(f"[bold cyan]Best within budget: {headline}[/bold cyan]")
+    console.print(f"[cyan]Predicted Bitrate: {bitrate_display}[/cyan]")
+    console.print(
+        "[dim]Chosen from the CRF values the search tested, which do not cover"
+        + " every rate factor[/dim]"
+    )
+    log.info("Best within budget: %s (%s)", headline, bitrate_display)
+
+    # Copies, so the shared targets keep the winner's values for anything after this.
+    scored_targets = [
+        replace(t, current_value=chosen.scores.get(t.metric_name)) for t in targets
+    ]
+    display_assessment_summary(
+        console,
+        chosen.scores,
+        targets=scored_targets,
+        targets_only=bool(targets),
+        custom_title=f"Within Budget: {headline}",
+        metric_decimals=metric_decimals,
+    )
 
 
 def display_multi_profile_results(

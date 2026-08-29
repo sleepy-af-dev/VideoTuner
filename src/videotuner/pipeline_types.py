@@ -90,6 +90,21 @@ class JobResult:
 
 
 @dataclass(frozen=True)
+class BudgetPoint:
+    """One encode that was actually run and scored, at a known predicted bitrate.
+
+    The unit the budget search chooses between. Every CRF iteration produces one,
+    as does each bitrate-mode encode, so a point is raw measurement: whether it
+    met the quality targets is derived from ``scores``, never stored.
+    """
+
+    profile_name: str
+    crf: float | None  # None for a bitrate-mode encode, which has no rate factor
+    scores: dict[str, float | None]
+    predicted_bitrate_kbps: float
+
+
+@dataclass(frozen=True)
 class MultiProfileResult:
     """Results from a single profile in multi-profile mode (CRF search or bitrate).
 
@@ -106,6 +121,9 @@ class MultiProfileResult:
     predicted_bitrate_kbps: float  # Predicted bitrate across all samples
     converged: bool  # True if search converged successfully
     meets_all_targets: bool | None = None  # True/False for CRF, None for bitrate (N/A)
+    # Every encode this profile ran, not just the optimal one. A profile that
+    # never converged still contributes its measurements to the budget search.
+    tested_points: tuple[BudgetPoint, ...] = ()
 
     @property
     def is_bitrate_mode(self) -> bool:

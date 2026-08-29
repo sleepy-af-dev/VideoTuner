@@ -44,6 +44,7 @@ class PipelineArgs:
     preset: str | None = None  # None means use default "slow"
     crf_start_value: float = DEFAULT_CRF_START_VALUE
     crf_interval: float = DEFAULT_CRF_INTERVAL
+    carry_crf: bool = False
 
     # Mode flags
     assessment_only: bool = False
@@ -175,6 +176,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         metavar="CRF",
         default=_get_default("crf_start_value"),
         help=f"Starting CRF for search (default: {_get_default('crf_start_value')})",
+    )
+    _ = encoding_group.add_argument(
+        "--carry-crf",
+        action="store_true",
+        default=_get_default("carry_crf"),
+        help=(
+            "Batch mode: start each job at the CRF the previous job settled on, "
+            "instead of --crf-start-value"
+        ),
     )
     _ = encoding_group.add_argument(
         "--crf-interval",

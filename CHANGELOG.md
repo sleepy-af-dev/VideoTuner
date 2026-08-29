@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Job and batch folder names are shortened when the output location would otherwise push a file past the Windows 260-character path limit. A shortened name keeps a readable prefix and gains a short hash of the original, and the shortening is reported on the terminal
 - The full source path is recorded in the job log, so a shortened folder name never loses the link back to its input
 - A warning when a directory is created that is already too deep for the files that go in it, naming the path rather than letting a tool fail silently later
+- `--carry-crf`, which starts each job in a batch at the CRF the previous job settled on rather than `--crf-start-value`. Off by default. The first job uses `--crf-start-value`, a job that fails or does not converge leaves the carried value untouched, and the carried value sets only where the search begins
 - `CONTEXT.md`, a glossary of the project's domain vocabulary
 
 ### Changed

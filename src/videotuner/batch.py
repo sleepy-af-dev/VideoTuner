@@ -195,21 +195,34 @@ def run_batch(args: PipelineArgs, run_job: Callable[[PipelineArgs], JobResult]) 
         _prescan(videos, display, x264_profile_names, args.ffprobe_bin)
 
         results: list[JobResult] = []
+        # --carry-crf: the CRF the previous job settled on, used as the next
+        # job's starting point. Left untouched by a job that fails or does not
+        # converge, so the next job starts from the last CRF that was found.
+        carried_crf: float | None = None
+
         for index, (video, folder_name) in enumerate(
             zip(videos, job_folder_names(videos, budget), strict=True), start=1
         ):
             display.console.print(
                 f"[bold]\\[{index}/{len(videos)}][/bold] [cyan]{video.name}[/cyan]"
             )
+            start_crf = carried_crf if carried_crf is not None else args.crf_start_value
+            if carried_crf is not None:
+                note = f"Starting at CRF {start_crf:.1f} carried from the previous job"
+                display.console.print(f"[dim]{note}[/dim]")
             job_args = replace(
                 args,
                 input=video,
                 workdir=batch_folder / folder_name,
                 log_file=None,
+                crf_start_value=start_crf,
             )
             in_job = True
             try:
-                results.append(run_job(job_args))
+                result = run_job(job_args)
+                results.append(result)
+                if args.carry_crf and result.optimal_crf is not None:
+                    carried_crf = result.optimal_crf
             except Exception as e:
                 # One job's crash must not take the rest of the batch with it.
                 in_job = False

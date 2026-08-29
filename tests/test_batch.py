@@ -176,6 +176,53 @@ class TestRunBatch:
         assert logging.getLogger().handlers == before
 
 
+class TestCarryCrf:
+    """--carry-crf starts each job where the previous one settled."""
+
+    @staticmethod
+    def _collect(
+        tmp_path: Path, carry: bool, optimal: list[float | None]
+    ) -> list[float]:
+        """Run a batch and return the CRF each job was told to start at."""
+        source = tmp_path / "src"
+        source.mkdir()
+        _touch(source, *[f"{chr(ord('a') + i)}.mkv" for i in range(len(optimal))])
+        starts: list[float] = []
+        remaining = list(optimal)
+
+        def runner(args: PipelineArgs) -> JobResult:
+            starts.append(args.crf_start_value)
+            crf = remaining.pop(0)
+            if crf is None:
+                return JobResult.failure(args.input, "no convergence")
+            return JobResult(input_path=args.input, ok=True, optimal_crf=crf)
+
+        job_args = _args(source, tmp_path / "out")
+        job_args.crf_start_value = 28.0
+        job_args.carry_crf = carry
+        _ = run_batch(job_args, runner)
+        return starts
+
+    def test_disabled_by_default_every_job_uses_the_start_value(
+        self, tmp_path: Path
+    ) -> None:
+        starts = self._collect(tmp_path, carry=False, optimal=[20.0, 22.0, 24.0])
+        assert starts == [28.0, 28.0, 28.0]
+
+    def test_each_job_starts_where_the_previous_one_landed(
+        self, tmp_path: Path
+    ) -> None:
+        starts = self._collect(tmp_path, carry=True, optimal=[20.0, 22.0, 24.0])
+        assert starts == [28.0, 20.0, 22.0]
+
+    def test_a_job_without_a_result_does_not_reset_the_carried_value(
+        self, tmp_path: Path
+    ) -> None:
+        """A failed job shouldn't throw away the best guess we already had."""
+        starts = self._collect(tmp_path, carry=True, optimal=[20.0, None, 24.0])
+        assert starts == [28.0, 20.0, 20.0]
+
+
 class TestJobLogHandlerLifecycle:
     """The leak that would put job 1's log inside job 20's.
 

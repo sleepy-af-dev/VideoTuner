@@ -327,6 +327,16 @@ videotuner ./season1 --multi-profile-search Film,Grain --vmaf-target 95
 - Jobs run one at a time. The encoders already use every core, so running two at once makes both slower.
 - The batch ends with a summary table, one row per file, and exits non-zero if any job failed.
 
+**Carrying the CRF between jobs:** `--carry-crf` starts each job at the CRF the previous job settled on, instead of `--crf-start-value`. It is off by default.
+
+```bash
+videotuner ./folder --profile Film --vmaf-target 95 --carry-crf
+```
+
+The first job uses `--crf-start-value`, since there is no previous result. A job that fails or does not converge leaves the carried value untouched, so the next job starts from the last CRF that was found. In multi-profile mode it is the winning profile's CRF that carries, whichever profile won.
+
+The carried value only sets where the search begins; it does not constrain where the search ends, so each job still converges on its own answer.
+
 **Note:** batch mode writes an `.ffindex` file next to each source video, the same as a single-file run. They are reused on later runs over the same folder, which is the largest available time saving when re-running a batch.
 
 ### Quality Targets
@@ -550,6 +560,7 @@ Run `videotuner --help` for complete options. Key options include:
 | `--preset PRESET`        | `slow`  | Encoder preset (mutually exclusive with `--profile`)         |
 | `--profile NAME`         | -       | Profile name from `profiles.yaml`                            |
 | `--crf-start-value CRF`  | `28`   | Starting CRF for search                                      |
+| `--carry-crf`            | off    | Batch mode: start each job at the CRF the previous job settled on |
 | `--crf-interval STEP`    | `0.5`  | Minimum CRF step size                                        |
 
 ### CropDetect Options

@@ -1004,7 +1004,12 @@ def _run_pipeline_body(
         # are pooled from profile_results, not ranked_results, so a profile
         # that never converged still contributes what it measured.
         warn_percent = args.predicted_bitrate_warning_percent
-        if warned and info.video_bitrate_kbps and warn_percent:
+        if (
+            warned
+            and args.show_best_within_budget
+            and info.video_bitrate_kbps
+            and warn_percent
+        ):
             cap_kbps = info.video_bitrate_kbps * warn_percent / 100.0
             pooled = [p for r in profile_results for p in r.tested_points]
             display_best_within_budget(
@@ -1122,6 +1127,7 @@ def _run_pipeline_body(
         warn_percent = args.predicted_bitrate_warning_percent
         if (
             warned
+            and args.show_best_within_budget
             and not args.assessment_only
             and info.video_bitrate_kbps
             and warn_percent

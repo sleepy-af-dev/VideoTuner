@@ -58,6 +58,8 @@ class PipelineArgsProtocol(Protocol):
     guard_end_percent: float
     guard_seconds: float
     predicted_bitrate_warning_percent: float | None
+    show_best_within_budget: bool
+    continue_budget_search: bool
     vmaf_target: float | None
     vmaf_hmean_target: float | None
     vmaf_1pct_target: float | None
@@ -178,6 +180,14 @@ def display_settings_summary(
         console.print(
             f"  Bitrate Warning: {args.predicted_bitrate_warning_percent:.0f}%"
         )
+        if args.show_best_within_budget:
+            # Names both, so an implied --show-best-within-budget is visible
+            within_budget = (
+                "show best, continuing the search"
+                if args.continue_budget_search
+                else "show best"
+            )
+            console.print(f"  Within Budget: {within_budget}")
 
     # Log quality targets if specified
     target_parts: list[str] = []

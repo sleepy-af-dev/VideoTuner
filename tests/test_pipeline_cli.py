@@ -35,6 +35,62 @@ def _parse(*extra: str):
     return parse_cli(["input.mkv", *extra])
 
 
+class TestBudgetFlags:
+    """The opt-in flags for showing, and searching for, the best within budget."""
+
+    def test_both_off_by_default(self) -> None:
+        args = _parse()
+        assert args.show_best_within_budget is False
+        assert args.continue_budget_search is False
+
+    def test_continuing_the_search_implies_showing_the_result(self) -> None:
+        """Asking for the search is asking to be shown what it found."""
+        assert _parse("--continue-budget-search").show_best_within_budget is True
+
+    def test_showing_requires_a_budget_to_measure_against(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with pytest.raises(SystemExit):
+            _ = main(["input.mkv", "--vmaf-target", "95", "--show-best-within-budget"])
+
+        assert "--predicted-bitrate-warning-percent" in capsys.readouterr().err
+
+    def test_assessment_only_rejects_showing(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with pytest.raises(SystemExit):
+            _ = main(
+                [
+                    "input.mkv",
+                    "--assessment-only",
+                    "--predicted-bitrate-warning-percent",
+                    "70",
+                    "--show-best-within-budget",
+                ]
+            )
+
+        error = capsys.readouterr().err
+        assert "--show-best-within-budget" in error
+        assert "--assessment-only" in error
+
+    def test_assessment_only_rejects_continuing_by_its_own_name(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The error names the flag that was typed, not the one it implied."""
+        with pytest.raises(SystemExit):
+            _ = main(
+                [
+                    "input.mkv",
+                    "--assessment-only",
+                    "--predicted-bitrate-warning-percent",
+                    "70",
+                    "--continue-budget-search",
+                ]
+            )
+
+        assert "--continue-budget-search" in capsys.readouterr().err
+
+
 class TestAsOneSourceFlag:
     """Reading every file in a batch folder as one source."""
 

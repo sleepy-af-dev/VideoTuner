@@ -32,16 +32,20 @@ jobs:
           import re
           import sys
           sys.path.insert(0, "src")
-          from videotuner.version import __version__, RELEASE_NOTES
+          from videotuner.version import __version__
 
           # Write to GitHub outputs
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"version={__version__}\n")
 
-          # Extract only the current version's release notes
-          # Matches from "## X.X.X" until the next "## " or end of string
-          pattern = rf"## {re.escape(__version__)}.*?(?=\n## |\Z)"
-          match = re.search(pattern, RELEASE_NOTES, re.DOTALL)
+          # Extract this version's section from CHANGELOG.md, which is the only
+          # place release notes are written. Matches from "## [X.Y.Z]" up to the
+          # next "## " heading or the link definitions at the end of the file.
+          with open("CHANGELOG.md", encoding="utf-8") as f:
+              changelog = f.read()
+
+          pattern = rf"## \[{re.escape(__version__)}\].*?(?=\n## |\n\[|\Z)"
+          match = re.search(pattern, changelog, re.DOTALL)
 
           if match:
               current_notes = match.group(0).strip()

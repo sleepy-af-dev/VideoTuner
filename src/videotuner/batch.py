@@ -115,8 +115,15 @@ def _prescan(
     display.console.print()
 
 
-def run_batch(args: PipelineArgs, run_job: Callable[[PipelineArgs], JobResult]) -> int:
+def run_batch(
+    args: PipelineArgs, run_job: Callable[[PipelineArgs, Path], JobResult]
+) -> int:
     """Run every video in ``args.input`` as a job. Returns a process exit code.
+
+    ``run_job`` takes the job's arguments and the exact folder it must write to.
+    The folder is passed explicitly rather than through ``args.workdir`` because
+    that is the parent a run folder is created in, and a job inside a batch has
+    already had its folder named and fitted here.
 
     ``run_job`` is passed in rather than imported so this module does not depend
     on the pipeline it drives - which also lets the tests stub it out.
@@ -150,20 +157,20 @@ def run_batch(args: PipelineArgs, run_job: Callable[[PipelineArgs], JobResult]) 
     repo_root = get_app_root()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    if args.workdir:
-        batch_folder = args.workdir
-    else:
-        jobs_root = repo_root / "jobs"
-        folder_name = sanitize_filename(input_folder.resolve().name) or "batch"
+    # --workdir is the parent that run folders go in, never the batch folder
+    # itself, so every run gets its own timestamped folder and repeat runs
+    # cannot overwrite each other.
+    jobs_root = args.workdir if args.workdir else repo_root / "jobs"
+    folder_name = sanitize_filename(input_folder.resolve().name) or "batch"
+    batch_folder = jobs_root / f"{folder_name}_{timestamp}"
+    # The batch folder is shared by every job, so it can only be shortened
+    # once, here, before any job folder is named.
+    if job_folder_budget(batch_folder, slugs) < JOB_FOLDER_MIN_CHARS:
+        shortfall = JOB_FOLDER_MIN_CHARS - job_folder_budget(batch_folder, slugs)
+        folder_name = fit_path_segment(
+            folder_name, max(1, len(folder_name) - shortfall)
+        )
         batch_folder = jobs_root / f"{folder_name}_{timestamp}"
-        # The batch folder is shared by every job, so it can only be shortened
-        # once, here, before any job folder is named.
-        if job_folder_budget(batch_folder, slugs) < JOB_FOLDER_MIN_CHARS:
-            shortfall = JOB_FOLDER_MIN_CHARS - job_folder_budget(batch_folder, slugs)
-            folder_name = fit_path_segment(
-                folder_name, max(1, len(folder_name) - shortfall)
-            )
-            batch_folder = jobs_root / f"{folder_name}_{timestamp}"
     _ = ensure_dir(batch_folder)
 
     # Job folder names are fitted against the batch folder actually chosen.
@@ -213,13 +220,12 @@ def run_batch(args: PipelineArgs, run_job: Callable[[PipelineArgs], JobResult]) 
             job_args = replace(
                 args,
                 input=video,
-                workdir=batch_folder / folder_name,
                 log_file=None,
                 crf_start_value=start_crf,
             )
             in_job = True
             try:
-                result = run_job(job_args)
+                result = run_job(job_args, batch_folder / folder_name)
                 results.append(result)
                 if args.carry_crf and result.optimal_crf is not None:
                     carried_crf = result.optimal_crf

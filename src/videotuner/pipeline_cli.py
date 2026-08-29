@@ -441,7 +441,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="DIR",
         default=_get_default("workdir"),
-        help="Working directory (default: jobs/<name>_<timestamp>)",
+        help=(
+            "Parent folder for run folders. Each run creates "
+            "<workdir>/<name>_<timestamp>/ inside it (default: jobs)"
+        ),
     )
     _ = paths_group.add_argument(
         "--ffmpeg",

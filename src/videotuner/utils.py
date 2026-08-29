@@ -80,6 +80,26 @@ def fit_path_segment(name: str, budget: int) -> str:
     return f"{name[:keep]}~{digest}"
 
 
+def resolve_run_folder(
+    jobs_root: Path, name: str, timestamp: str, profile_slugs: Iterable[str]
+) -> tuple[Path, str]:
+    """Work out the folder a single run writes to, shortening the name to fit.
+
+    Args:
+        jobs_root: Parent the run folder is created in
+        name: Sanitized source name
+        timestamp: Run timestamp, which identifies the run and is never cut
+        profile_slugs: Profile directory names that may appear inside the run
+
+    Returns:
+        The run folder, and the name actually used, which differs from ``name``
+        when it had to be shortened.
+    """
+    budget = job_folder_budget(jobs_root, profile_slugs) - len(timestamp) - 1
+    fitted = fit_path_segment(name, budget)
+    return jobs_root / f"{fitted}_{timestamp}", fitted
+
+
 def job_folder_budget(parent: Path, profile_slugs: Iterable[str]) -> int:
     """Characters available for a job folder name directly under ``parent``.
 

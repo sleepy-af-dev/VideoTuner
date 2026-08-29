@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Job folders group under a batch folder in batch mode. A job folder is identical inside whether it came from a single run or a batch
 - The job log is named after the input rather than the input plus a timestamp, which the job folder already carries
-- `--workdir` names the batch folder in batch mode, and the job folder otherwise
+- **Breaking:** `--workdir` is now the parent that run folders are created in, not the run folder itself. `--workdir C:\vt` gives `C:\vt\<name>_<timestamp>\` rather than writing straight into `C:\vt`. Previously an explicit `--workdir` replaced the timestamped folder entirely, so a second run into the same path overwrote the first without warning. The default is unchanged: `jobs`, giving `jobs/<name>_<timestamp>/`
 - A job's log is now a single narrative. Log statements that restated console output in different words are gone; section banners and warnings keep a timestamp prefix, transcript lines do not
 - A batch prints the title banner once and a `[N/M]` header per job
 - Jobs in a batch run sequentially, and the run exits non-zero if any job failed

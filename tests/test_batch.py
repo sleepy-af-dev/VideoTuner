@@ -33,7 +33,14 @@ def _args(input_path: Path, workdir: Path) -> PipelineArgs:
     )
 
 
-def _ok(args: PipelineArgs) -> JobResult:
+def _run_folder(workdir: Path) -> Path:
+    """The single timestamped run folder a batch creates inside --workdir."""
+    children = [p for p in workdir.iterdir() if p.is_dir()]
+    assert len(children) == 1, f"expected one run folder, found {children}"
+    return children[0]
+
+
+def _ok(args: PipelineArgs, _folder: Path) -> JobResult:
     return JobResult(input_path=args.input, ok=True, profile_name="preset-slow")
 
 
@@ -94,9 +101,9 @@ class TestRunBatch:
         _touch(source, "a.mkv", "b.mkv")
         seen: list[Path] = []
 
-        def runner(args: PipelineArgs) -> JobResult:
+        def runner(args: PipelineArgs, folder: Path) -> JobResult:
             seen.append(args.input)
-            return _ok(args)
+            return _ok(args, folder)
 
         assert run_batch(_args(source, tmp_path / "out"), runner) == 0
         assert [p.name for p in seen] == ["a.mkv", "b.mkv"]
@@ -107,11 +114,11 @@ class TestRunBatch:
         _touch(source, "a.mkv", "b.mkv", "c.mkv")
         seen: list[str] = []
 
-        def runner(args: PipelineArgs) -> JobResult:
+        def runner(args: PipelineArgs, folder: Path) -> JobResult:
             seen.append(args.input.name)
             if args.input.name == "b.mkv":
                 return JobResult.failure(args.input, "invalid video file")
-            return _ok(args)
+            return _ok(args, folder)
 
         exit_code = run_batch(_args(source, tmp_path / "out"), runner)
         assert seen == ["a.mkv", "b.mkv", "c.mkv"]
@@ -123,48 +130,64 @@ class TestRunBatch:
         _touch(source, "a.mkv", "b.mkv", "c.mkv")
         seen: list[str] = []
 
-        def runner(args: PipelineArgs) -> JobResult:
+        def runner(args: PipelineArgs, folder: Path) -> JobResult:
             seen.append(args.input.name)
             if args.input.name == "b.mkv":
                 raise RuntimeError("encoder died")
-            return _ok(args)
+            return _ok(args, folder)
 
         exit_code = run_batch(_args(source, tmp_path / "out"), runner)
         assert seen == ["a.mkv", "b.mkv", "c.mkv"]
         assert exit_code == 1
 
-    def test_each_job_gets_its_own_folder_under_the_batch(self, tmp_path: Path) -> None:
-        """The mechanism that makes a batched job folder identical to a single one.
+    def test_each_job_is_told_the_exact_folder_to_write_to(
+        self, tmp_path: Path
+    ) -> None:
+        """A job's folder is named by the batch and handed over explicitly.
 
-        Each job is handed a workdir of ``<batch>/<stem>`` and no explicit log
-        file, so it names its log ``<stem>.log`` inside that folder by exactly
-        the same code path a single-file run takes.
+        It must not arrive as ``args.workdir``: that is the parent a run folder
+        is created in, so the job would nest a second timestamped folder inside
+        the one the batch already made for it.
         """
         source = tmp_path / "src"
         source.mkdir()
         _touch(source, "a.mkv", "b.mkv")
-        batch_folder = tmp_path / "out"
-        handed: list[PipelineArgs] = []
+        workdir = tmp_path / "out"
+        handed: list[tuple[PipelineArgs, Path]] = []
 
-        def runner(args: PipelineArgs) -> JobResult:
-            handed.append(args)
-            return _ok(args)
+        def runner(args: PipelineArgs, folder: Path) -> JobResult:
+            handed.append((args, folder))
+            return _ok(args, folder)
 
-        _ = run_batch(_args(source, batch_folder), runner)
-        assert [a.workdir for a in handed] == [
+        _ = run_batch(_args(source, workdir), runner)
+        batch_folder = _run_folder(workdir)
+        assert [folder for _, folder in handed] == [
             batch_folder / "a",
             batch_folder / "b",
         ]
-        assert all(a.log_file is None for a in handed)
+        assert all(a.log_file is None for a, _ in handed)
 
     def test_batch_log_is_written_to_the_batch_folder(self, tmp_path: Path) -> None:
         source = tmp_path / "src"
         source.mkdir()
         _touch(source, "a.mkv")
-        batch_folder = tmp_path / "out"
+        workdir = tmp_path / "out"
 
-        _ = run_batch(_args(source, batch_folder), _ok)
-        assert (batch_folder / "batch.log").exists()
+        _ = run_batch(_args(source, workdir), _ok)
+        assert (_run_folder(workdir) / "batch.log").exists()
+
+    def test_workdir_is_a_parent_not_the_run_folder(self, tmp_path: Path) -> None:
+        """--workdir holds run folders, so repeat runs cannot overwrite each other."""
+        source = tmp_path / "src"
+        source.mkdir()
+        _touch(source, "a.mkv")
+        workdir = tmp_path / "out"
+
+        _ = run_batch(_args(source, workdir), _ok)
+
+        run_folder = _run_folder(workdir)
+        assert run_folder.parent == workdir
+        assert run_folder.name.startswith("src_"), "run folder carries name and stamp"
 
     def test_batch_log_handler_is_removed_afterwards(self, tmp_path: Path) -> None:
         source = tmp_path / "src"
@@ -190,7 +213,7 @@ class TestCarryCrf:
         starts: list[float] = []
         remaining = list(optimal)
 
-        def runner(args: PipelineArgs) -> JobResult:
+        def runner(args: PipelineArgs, _folder: Path) -> JobResult:
             starts.append(args.crf_start_value)
             crf = remaining.pop(0)
             if crf is None:

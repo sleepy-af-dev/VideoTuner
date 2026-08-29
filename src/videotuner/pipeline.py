@@ -58,16 +58,17 @@ from .ssimulacra2_assessment import SSIM2Result
 from .utils import (
     configure_logging,
     ensure_dir,
-    fit_path_segment,
     get_app_root,
-    job_folder_budget,
     log_section,
+    resolve_run_folder,
     sanitize_filename,
 )
 from .vmaf_assessment import VMAFResult
 
 
-def run_pipeline(args: PipelineArgs, *, show_title: bool = True) -> JobResult:
+def run_pipeline(
+    args: PipelineArgs, *, show_title: bool = True, job_folder: Path | None = None
+) -> JobResult:
     """Run one job, guaranteeing its log handler is detached afterwards.
 
     ``show_title`` is False for jobs inside a batch, which prints the banner
@@ -81,7 +82,7 @@ def run_pipeline(args: PipelineArgs, *, show_title: bool = True) -> JobResult:
     root = logging.getLogger()
     pre_existing = set(map(id, root.handlers))
     try:
-        return _run_pipeline_body(args, show_title=show_title)
+        return _run_pipeline_body(args, show_title=show_title, job_folder=job_folder)
     finally:
         for handler in list(root.handlers):
             if id(handler) not in pre_existing:
@@ -89,7 +90,9 @@ def run_pipeline(args: PipelineArgs, *, show_title: bool = True) -> JobResult:
                 handler.close()
 
 
-def _run_pipeline_body(args: PipelineArgs, *, show_title: bool = True) -> JobResult:
+def _run_pipeline_body(
+    args: PipelineArgs, *, show_title: bool = True, job_folder: Path | None = None
+) -> JobResult:
     parser = build_arg_parser()
 
     # Validate arguments and resolve profiles
@@ -142,22 +145,23 @@ def _run_pipeline_body(args: PipelineArgs, *, show_title: bool = True) -> JobRes
     # so never appeared in any log.
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_stem = sanitize_filename(input_path.stem)
-    if args.workdir:
-        # User-chosen location: respect it as given. ensure_dir still warns if
-        # it leaves no room for the files that go inside.
-        workdir: Path = args.workdir
+    if job_folder is not None:
+        # A batch has already named this folder and fitted it against the batch
+        # folder it sits in, so it is used exactly as given.
+        workdir = job_folder
+        safe_stem = job_folder.name
     else:
-        jobs_root = repo_root / "jobs"
+        # --workdir is the parent that run folders go in, never the run folder
+        # itself, so every run gets its own timestamped folder and repeat runs
+        # cannot overwrite each other.
+        jobs_root = args.workdir if args.workdir else repo_root / "jobs"
         slugs = [p.name for p in ([selected_profile] if selected_profile else [])]
         slugs += [p.name for p in multi_profile_list]
-        # The timestamp identifies the run, so only the name part is shortened.
-        budget = job_folder_budget(jobs_root, slugs) - len(timestamp) - 1
-        fitted = fit_path_segment(safe_stem, budget)
+        workdir, fitted = resolve_run_folder(jobs_root, safe_stem, timestamp, slugs)
         if fitted != safe_stem:
             note = f"Job folder name shortened to fit the path limit: {fitted}"
             display.console.print(f"[yellow]{note}[/yellow]")
         safe_stem = fitted
-        workdir = jobs_root / f"{safe_stem}_{timestamp}"
     _ = ensure_dir(workdir)
 
     # Create temp subdirectory for temporary files
@@ -1046,8 +1050,12 @@ def main(argv: Iterable[str] | None = None) -> int:
     if Path(args.input).is_dir():
         from .batch import run_batch
 
-        # The batch prints the banner once; jobs get a [N/M] header instead.
-        return run_batch(args, lambda a: run_pipeline(a, show_title=False))
+        # The batch prints the banner once; jobs get a [N/M] header instead,
+        # and each job is told the exact folder the batch named for it.
+        return run_batch(
+            args,
+            lambda a, folder: run_pipeline(a, show_title=False, job_folder=folder),
+        )
 
     return 0 if run_pipeline(args).ok else 1
 

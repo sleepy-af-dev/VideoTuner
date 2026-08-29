@@ -13,6 +13,7 @@ from videotuner.utils import (
     fit_path_segment,
     job_folder_budget,
     parse_master_display_metadata,
+    resolve_run_folder,
 )
 
 
@@ -169,6 +170,44 @@ class TestJobFolderBudget:
             tmp_path / fitted / "ssimulacra2" / slug / "ssim2_concatenated_iter1.json"
         )
         assert len(str(deepest)) <= MAX_USABLE_PATH
+
+
+class TestResolveRunFolder:
+    """Naming the folder a single run writes to, under a given parent."""
+
+    STAMP = "20260829_130000"
+
+    def test_short_name_is_used_as_is(self, tmp_path: Path) -> None:
+        folder, fitted = resolve_run_folder(tmp_path, "input", self.STAMP, ["P"])
+        assert fitted == "input"
+        assert folder == tmp_path / f"input_{self.STAMP}"
+
+    def test_run_folder_is_created_under_the_parent_given(self, tmp_path: Path) -> None:
+        folder, _ = resolve_run_folder(tmp_path, "input", self.STAMP, ["P"])
+        assert folder.parent == tmp_path
+
+    def test_timestamp_survives_shortening(self, tmp_path: Path) -> None:
+        folder, fitted = resolve_run_folder(tmp_path, "z" * 300, self.STAMP, ["P"])
+        assert folder.name.endswith(f"_{self.STAMP}"), "the run identifier is kept"
+        assert fitted != "z" * 300
+
+    def test_the_deepest_file_stays_under_the_limit(self, tmp_path: Path) -> None:
+        slug = "Example Profile (x265)"
+        folder, _ = resolve_run_folder(tmp_path, "z" * 300, self.STAMP, [slug])
+        deepest = folder / "ssimulacra2" / slug / "ssim2_concatenated_iter1.json"
+        assert len(str(deepest)) <= MAX_USABLE_PATH
+
+    def test_a_deep_parent_leaves_a_shorter_name(self, tmp_path: Path) -> None:
+        """The parent must be the folder the run goes in, not one already inside it.
+
+        Passing something deeper collapses the budget, which is how a name ends
+        up as a single character plus its hash.
+        """
+        shallow, _ = resolve_run_folder(tmp_path, "y" * 300, self.STAMP, ["P"])
+        deep, _ = resolve_run_folder(
+            tmp_path / ("d" * 100), "y" * 300, self.STAMP, ["P"]
+        )
+        assert len(deep.name) < len(shallow.name)
 
 
 class TestEnsureDirWarnsOnLongPaths:

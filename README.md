@@ -638,7 +638,7 @@ Run `videotuner --help` for complete options. Key options include:
 
 | Option            | Default                   | Description                    |
 | ----------------- | ------------------------- | ------------------------------ |
-| `--workdir`       | `jobs/<name>_<timestamp>` | Job folder; the batch folder in batch mode |
+| `--workdir`       | `jobs`                    | Parent folder that run folders are created in |
 | `--ffmpeg`        | `ffmpeg`                  | FFmpeg binary                  |
 | `--ffprobe`       | `ffprobe`                 | FFprobe binary                 |
 | `--mkvmerge`      | `mkvmerge`                | MKVmerge binary                |
@@ -662,7 +662,9 @@ Both `-v` and `-q` affect the log file only; terminal output is unchanged.
 One job is one source video processed end to end. Its output all lands in one folder.
 
 - Default location: `jobs/<input_name>_<timestamp>`
-- Override with `--workdir <path>`
+- `--workdir <path>` changes the parent, giving `<path>/<input_name>_<timestamp>`
+
+`--workdir` names the folder that run folders go in, never a run folder itself. Every run always gets its own `<name>_<timestamp>` folder, so pointing several runs at the same `--workdir` is safe and they cannot overwrite each other. A short `--workdir` is the simplest way to buy headroom against the path limit below.
 
 **Folder Structure:**
 
@@ -695,7 +697,7 @@ jobs/<input_name>_<timestamp>/
 A batch groups the job folders of every video in one input folder. A job folder is identical inside whether it came from a single run or from a batch.
 
 - Default location: `jobs/<input_folder_name>_<timestamp>`
-- Override with `--workdir <path>`, which names the batch folder in batch mode
+- `--workdir <path>` changes the parent, giving `<path>/<input_folder_name>_<timestamp>`
 
 ```text
 jobs/<input_folder_name>_<timestamp>/

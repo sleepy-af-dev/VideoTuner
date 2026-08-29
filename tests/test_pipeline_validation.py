@@ -14,11 +14,13 @@ if TYPE_CHECKING:
 import pytest
 
 from videotuner.crf_search import QualityTarget
+from videotuner.media import VideoInfo
 from videotuner.pipeline_cli import PipelineArgs, build_arg_parser, validate_args
 from videotuner.pipeline_validation import (
     AssessmentError,
     build_targets,
     check_scores_meet_targets,
+    check_sources_compatible,
     has_targets,
     validate_assessment_results,
     validate_metric_sampling,
@@ -591,3 +593,67 @@ class TestValidateArgsCLI:
         assert result.selected_profile is None
         # But multi_profile_list should be populated
         assert len(result.multi_profile_list) > 0
+
+
+def _src(
+    name: str,
+    *,
+    duration: float = 2700.0,
+    width: int = 3840,
+    height: int = 2160,
+    fps: float = 24.0,
+    trc: str | None = "smpte2084",
+) -> tuple[Path, VideoInfo]:
+    return (
+        Path(f"{name}.mkv"),
+        VideoInfo(
+            fps=fps, duration=duration, width=width, height=height, color_trc=trc
+        ),
+    )
+
+
+class TestCheckSourcesCompatible:
+    """Whether several files can be spliced into the one source a job reads."""
+
+    def test_matching_sources_have_no_problems(self) -> None:
+        assert check_sources_compatible([_src("one"), _src("two")]) == []
+
+    def test_resolution_mismatch_is_reported(self) -> None:
+        problems = check_sources_compatible(
+            [_src("one"), _src("two", width=1920, height=1080)]
+        )
+
+        assert len(problems) == 1
+        assert "two.mkv" in problems[0]
+
+    def test_frame_rate_mismatch_is_reported(self) -> None:
+        problems = check_sources_compatible([_src("one"), _src("two", fps=25.0)])
+
+        assert len(problems) == 1
+        assert "two.mkv" in problems[0]
+
+    def test_hdr_mismatch_is_reported(self) -> None:
+        """Base layers only, so an SDR file cannot join an HDR source."""
+        problems = check_sources_compatible([_src("one"), _src("two", trc="bt709")])
+
+        assert len(problems) == 1
+        assert "two.mkv" in problems[0]
+
+    def test_a_file_consumed_by_its_guard_bands_is_reported(self) -> None:
+        """A 45-second extra against a 60-second guard contributes nothing."""
+        problems = check_sources_compatible(
+            [_src("one"), _src("short", duration=45.0)], guard_seconds=60.0
+        )
+
+        assert len(problems) == 1
+        assert "short.mkv" in problems[0]
+
+    def test_every_problem_is_reported_not_just_the_first(self) -> None:
+        problems = check_sources_compatible(
+            [_src("one"), _src("two", fps=25.0), _src("three", trc="bt709")]
+        )
+
+        assert len(problems) == 2
+
+    def test_a_single_source_is_always_compatible(self) -> None:
+        assert check_sources_compatible([_src("only")]) == []

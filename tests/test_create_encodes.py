@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from videotuner.create_encodes import calculate_cropdetect_values
-from videotuner.encoding_utils import CropValues
+from videotuner.encoding_utils import CropValues, combine_crop_values
 from videotuner.tool_parsers import CROPDETECT_RE
 
 _TEST_PATH = Path("test.mkv")
@@ -353,3 +353,34 @@ class TestCalculateCropdetectValues:
         vf_arg = cmd[vf_idx + 1]
         # Default mode (black) should not be explicitly passed
         assert "mode=" not in vf_arg
+
+
+class TestCombineCropValues:
+    """Reconciling crops when files in one source disagree on active area.
+
+    Splicing needs every clip the same size, so the most aggressive crop wins
+    on each edge independently.
+    """
+
+    def test_single_value_is_returned_unchanged(self) -> None:
+        crop = CropValues(left=0, right=0, top=140, bottom=140)
+        assert combine_crop_values([crop]) == crop
+
+    def test_most_aggressive_edge_wins(self) -> None:
+        a = CropValues(left=0, right=0, top=140, bottom=140)
+        b = CropValues(left=0, right=0, top=132, bottom=132)
+
+        assert combine_crop_values([a, b]) == a
+
+    def test_edges_are_combined_independently(self) -> None:
+        """The result can be a crop no single file measured."""
+        a = CropValues(left=8, right=0, top=140, bottom=0)
+        b = CropValues(left=0, right=12, top=0, bottom=136)
+
+        combined = combine_crop_values([a, b])
+
+        assert combined == CropValues(left=8, right=12, top=140, bottom=136)
+        assert combined not in (a, b)
+
+    def test_no_values_means_no_crop(self) -> None:
+        assert combine_crop_values([]) == CropValues(left=0, right=0, top=0, bottom=0)

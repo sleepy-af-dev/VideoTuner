@@ -7,6 +7,7 @@ from pathlib import Path
 from videotuner.media import (
     VideoFormat,
     VideoInfo,
+    combine_video_info,
     get_bit_depth_from_pix_fmt,
     get_frame_count,
     get_video_format,
@@ -213,3 +214,75 @@ class TestGetFrameCount:
         info = VideoInfo(fps=0.001, duration=0.001)
         result = get_frame_count(Path("/nonexistent/video.mkv"), info)
         assert result >= 1
+
+
+def _info(
+    duration: float,
+    *,
+    frame_count: int | None = None,
+    bitrate: float | None = None,
+    width: int = 3840,
+    height: int = 2160,
+    fps: float = 24.0,
+) -> VideoInfo:
+    return VideoInfo(
+        fps=fps,
+        duration=duration,
+        width=width,
+        height=height,
+        pix_fmt="yuv420p10le",
+        color_trc="smpte2084",
+        frame_count=frame_count,
+        video_bitrate_kbps=bitrate,
+    )
+
+
+class TestCombineVideoInfo:
+    """Describing several files as the one source a job reads."""
+
+    def test_a_single_info_is_returned_unchanged(self) -> None:
+        info = _info(100.0, frame_count=2400, bitrate=50_000)
+        assert combine_video_info([info]) == info
+
+    def test_duration_and_frame_count_are_summed(self) -> None:
+        combined = combine_video_info(
+            [_info(100.0, frame_count=2400), _info(50.0, frame_count=1200)]
+        )
+
+        assert combined.duration == 150.0
+        assert combined.frame_count == 3600
+
+    def test_format_facts_come_from_the_first_file(self) -> None:
+        combined = combine_video_info([_info(100.0), _info(50.0)])
+
+        assert combined.fps == 24.0
+        assert combined.width == 3840
+        assert combined.height == 2160
+        assert combined.pix_fmt == "yuv420p10le"
+        assert combined.color_trc == "smpte2084"
+
+    def test_bitrate_is_weighted_by_duration(self) -> None:
+        """A short high-bitrate file must not outweigh a long one."""
+        combined = combine_video_info(
+            [_info(100.0, bitrate=10_000), _info(300.0, bitrate=50_000)]
+        )
+
+        # (10000*100 + 50000*300) / 400 = 40000
+        assert combined.video_bitrate_kbps == 40_000
+
+    def test_files_without_a_bitrate_are_left_out_of_the_weighting(self) -> None:
+        combined = combine_video_info(
+            [_info(100.0, bitrate=10_000), _info(100.0, bitrate=None)]
+        )
+
+        assert combined.video_bitrate_kbps == 10_000
+
+    def test_no_bitrate_anywhere_stays_unknown(self) -> None:
+        combined = combine_video_info([_info(100.0), _info(50.0)])
+        assert combined.video_bitrate_kbps is None
+
+    def test_an_unknown_frame_count_makes_the_total_unknown(self) -> None:
+        combined = combine_video_info(
+            [_info(100.0, frame_count=2400), _info(50.0, frame_count=None)]
+        )
+        assert combined.frame_count is None

@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from .encoding_utils import (
     CropValues,
     EncoderPaths,
+    SampledSource,
     SamplingParams,
     VapourSynthEnv,
     build_encoder_command,
@@ -397,9 +398,11 @@ def encode_concatenated_reference(
     cache_file = source_path.parent / f"{source_path.stem}.ffindex"
     effective_crop = crop_values if enable_cropdetect else None
     vpy_content = build_sampling_vpy_script(
-        source_path=source_path,
-        cache_file=cache_file,
-        usable_range=usable_range,
+        sources=[
+            SampledSource(
+                path=source_path, cache_file=cache_file, usable_range=usable_range
+            )
+        ],
         interval_frames=interval_frames,
         region_frames=region_frames,
         fps=fps,
@@ -557,9 +560,11 @@ def encode_concatenated_distorted(
     cache_file = source_path.parent / f"{source_path.stem}.ffindex"
     effective_crop = crop_values if enable_cropdetect else None
     vpy_content = build_sampling_vpy_script(
-        source_path=source_path,
-        cache_file=cache_file,
-        usable_range=usable_range,
+        sources=[
+            SampledSource(
+                path=source_path, cache_file=cache_file, usable_range=usable_range
+            )
+        ],
         interval_frames=interval_frames,
         region_frames=region_frames,
         fps=fps,
@@ -756,9 +761,11 @@ def encode_concatenated_bitrate(
     cache_file = source_path.parent / f"{source_path.stem}.ffindex"
     effective_crop = crop_values if enable_cropdetect else None
     vpy_content = build_sampling_vpy_script(
-        source_path=source_path,
-        cache_file=cache_file,
-        usable_range=usable_range,
+        sources=[
+            SampledSource(
+                path=source_path, cache_file=cache_file, usable_range=usable_range
+            )
+        ],
         interval_frames=interval_frames,
         region_frames=region_frames,
         fps=fps,

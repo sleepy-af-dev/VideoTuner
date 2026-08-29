@@ -211,11 +211,13 @@ def _run_pipeline_body(
     # Create temp subdirectory for temporary files
     temp_dir = ensure_dir(workdir / "temp")
 
-    # Add file logger (default in job folder). The folder carries the timestamp,
-    # so the log inside it does not repeat it - and a job folder looks the same
-    # whether it came from a single run or from a batch.
+    # Add file logger (default in job folder). The folder already names the job,
+    # so the log does not repeat it: a name repeated inside itself is the only
+    # filename that grows with the job name, and it outran the path budget's
+    # filename margin on long names. A job folder looks the same inside whether
+    # it came from a single run or from a batch.
     if not args.log_file:
-        log_file: Path = workdir / f"{safe_stem}.log"
+        log_file: Path = workdir / "job.log"
     else:
         log_file = Path(args.log_file)
         try:

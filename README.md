@@ -692,7 +692,7 @@ jobs/<input_name>_<timestamp>/
 │   ├── vmaf_concatenated_iter*.json          # VMAF assessment results
 │   └── ssim2_concatenated_iter*.json         # SSIMULACRA2 assessment results
 ├── temp/                                     # VapourSynth scripts, encoder bitstreams
-└── <input_name>.log                          # Job log
+└── job.log                                   # Job log
 ```
 
 **Notes:**

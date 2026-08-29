@@ -159,6 +159,21 @@ class TestNextBudgetCrf:
 
         assert next_budget_crf(points, 43000.0, 0.5) is None
 
+    def test_extrapolating_upward_never_repeats_the_highest_tested_crf(self):
+        """A point barely over the budget extrapolates back onto itself.
+
+        CRF 22 at 43,100 kbps is only 100 kbps above a 43,000 budget, so the
+        slope says to move 0.016 of a CRF, which rounds to nothing. Returning
+        22.0 would spend an encode re-measuring it and leave the next pass with
+        two points at the same CRF, and so no slope at all.
+        """
+        points = [
+            _point("alpha", 78000.0, {"vmaf_mean": 99.0}, crf=18.0),
+            _point("alpha", 43100.0, {"vmaf_mean": 96.0}, crf=22.0),
+        ]
+
+        assert next_budget_crf(points, 43000.0, 0.5) == 22.5
+
     def test_stops_at_the_crf_ceiling(self):
         """Even the cheapest rate factor the encoder offers is over budget."""
         points = [
@@ -205,6 +220,28 @@ class TestRunBudgetSearch:
         assert any(p.predicted_bitrate_kbps <= 43000.0 for p in found)
         # Resolved: nothing further is worth encoding
         assert next_budget_crf(start + found, 43000.0, 0.5) is None
+
+    def test_survives_a_boundary_that_barely_moves(self):
+        """An encoder whose bitrate hardly responds must not loop or divide by zero.
+
+        The pathological case: every extra encode comes back just over budget,
+        so the search never gets an upper bracket. It should spend its cap and
+        stop, not crash.
+        """
+
+        def encode(crf: float) -> BudgetPoint:
+            return _point("alpha", 43100.0, {"vmaf_mean": 96.0}, crf=crf)
+
+        points = [
+            _point("alpha", 78000.0, {"vmaf_mean": 99.0}, crf=18.0),
+            _point("alpha", 43100.0, {"vmaf_mean": 96.0}, crf=22.0),
+        ]
+
+        found = run_budget_search(points, 43000.0, 0.5, encode)
+
+        assert len(found) <= 6
+        crfs = [p.crf for p in found]
+        assert len(crfs) == len(set(crfs)), f"re-encoded a CRF already known: {crfs}"
 
     def test_runs_nothing_when_the_boundary_is_already_known(self):
         """No encode is spent when the existing points already bracket it."""

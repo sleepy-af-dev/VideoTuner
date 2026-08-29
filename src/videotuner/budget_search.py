@@ -11,7 +11,8 @@ from __future__ import annotations
 from math import log
 from typing import TYPE_CHECKING
 
-from .constants import BUDGET_SEARCH_MAX_ITERATIONS
+from .constants import BUDGET_SEARCH_BLIND_STEP, BUDGET_SEARCH_MAX_ITERATIONS
+from .crf_search import CRF_CEILING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -25,7 +26,6 @@ def run_budget_search(
     cap_kbps: float,
     interval: float,
     encode: Callable[[float], BudgetPoint],
-    max_iterations: int = BUDGET_SEARCH_MAX_ITERATIONS,
 ) -> list[BudgetPoint]:
     """Encode further CRF values for one profile until the boundary is resolved.
 
@@ -38,7 +38,6 @@ def run_budget_search(
         cap_kbps: Highest predicted bitrate that fits the budget
         interval: CRF granularity, from --crf-interval
         encode: Runs one encode at a CRF and returns what it measured
-        max_iterations: Most extra encodes this profile may spend
 
     Returns:
         The points this search added, which may be empty
@@ -46,7 +45,7 @@ def run_budget_search(
     known = list(points)
     added: list[BudgetPoint] = []
 
-    for _ in range(max_iterations):
+    for _ in range(BUDGET_SEARCH_MAX_ITERATIONS):
         crf = next_budget_crf(known, cap_kbps, interval)
         if crf is None:
             break
@@ -69,6 +68,10 @@ def next_budget_crf(
     the bracketing points are interpolated on the logarithm of bitrate, which
     lands far closer than bisection and saves whole encodes.
 
+    The search only ever looks upward, never below the cheapest CRF already
+    measured, so a profile whose every encode already fits the budget is left
+    alone. See the note at the ``over`` filter for when that loses anything.
+
     Args:
         points: Encodes already measured for one profile
         cap_kbps: Highest predicted bitrate that fits the budget
@@ -77,23 +80,38 @@ def next_budget_crf(
     Returns:
         The CRF to encode next, or None when the boundary is already resolved
     """
-    rated = [p for p in points if p.crf is not None and p.predicted_bitrate_kbps > 0]
+    # Paired with their rate factor, so the CRF is a plain float from here on
+    rated = [
+        (p.crf, p) for p in points if p.crf is not None and p.predicted_bitrate_kbps > 0
+    ]
 
-    over = [p for p in rated if p.predicted_bitrate_kbps > cap_kbps]
-    under = [p for p in rated if p.predicted_bitrate_kbps <= cap_kbps]
+    over = [item for item in rated if item[1].predicted_bitrate_kbps > cap_kbps]
+    under = [item for item in rated if item[1].predicted_bitrate_kbps <= cap_kbps]
     if not over:
-        # Only reached with a point above the budget, which is what raised the
-        # warning in the first place, so there is no boundary to find here.
+        # Everything measured already fits, so there is no boundary above to
+        # close in on. A lower CRF might fit too and score better, but this
+        # deliberately does not go looking for it.
+        #
+        # Reaching here at all is narrow. Every profile is searched, not just
+        # the one that raised the warning, but a profile that converged is
+        # ranked in the tier the winner came from and sorted by bitrate ahead
+        # of it, so its optimum is over the budget whenever the winner's is.
+        # A profile that stopped at the CRF floor has measured down to CRF 1.0,
+        # where its bitrate is highest, so if that fits it is already both the
+        # cheapest and the best point there is.
+        #
+        # What is left is a profile that failed to converge without reaching
+        # the floor, by exhausting its iterations or being sent back to a CRF
+        # already tested. That one has unexplored ground below, and is not
+        # explored: it missed the targets everywhere it looked, so a lower CRF
+        # would most likely miss them too, and finding out costs real encodes.
         return None
 
-    low = max(over, key=lambda p: p.crf or 0.0)
     if not under:
         return _extrapolate_upward(over, cap_kbps, interval)
 
-    high = min(under, key=lambda p: p.crf or 0.0)
-
-    crf_low = low.crf or 0.0
-    crf_high = high.crf or 0.0
+    crf_low, low = max(over, key=lambda item: item[0])
+    crf_high, high = min(under, key=lambda item: item[0])
     if crf_high - crf_low <= interval:
         return None  # Boundary resolved to the interval
 
@@ -112,37 +130,44 @@ def next_budget_crf(
 
 
 def _extrapolate_upward(
-    over: list[BudgetPoint],
+    over: list[tuple[float, BudgetPoint]],
     cap_kbps: float,
     interval: float,
 ) -> float | None:
     """Estimate where bitrate crosses the budget, above every CRF tested so far.
 
-    Two points give the slope of ln(bitrate) against CRF; one gives nothing to
-    extrapolate from, so it steps by a fixed amount instead.
-    """
-    from .crf_search import CRF_CEILING
+    Two points at different CRFs give the slope of ln(bitrate) against CRF.
+    Without that, or when the slope says nothing useful, it steps blindly.
 
-    ranked = sorted(over, key=lambda p: p.crf or 0.0)
-    highest = ranked[-1]
-    crf_highest = highest.crf or 0.0
+    Whatever the estimate, the result must be a CRF above every one already
+    measured. A point only just over the budget estimates a step of almost
+    nothing, which would round back onto itself: that spends an encode learning
+    nothing, and leaves two points at one CRF and so no slope to divide by.
+    """
+    ranked = sorted(over, key=lambda item: item[0])
+    crf_highest, highest = ranked[-1]
     if crf_highest >= CRF_CEILING:
         return None  # Nowhere left to go
 
-    if len(ranked) < 2:
-        return min(_round_to_interval(crf_highest + 2.0, interval), CRF_CEILING)
+    step = BUDGET_SEARCH_BLIND_STEP
+    if len(ranked) >= 2:
+        crf_previous, previous = ranked[-2]
+        if crf_previous != crf_highest:
+            slope = (
+                log(highest.predicted_bitrate_kbps)
+                - log(previous.predicted_bitrate_kbps)
+            ) / (crf_highest - crf_previous)
+            if slope < 0:
+                step = (log(cap_kbps) - log(highest.predicted_bitrate_kbps)) / slope
 
-    previous = ranked[-2]
-    crf_previous = previous.crf or 0.0
-    slope = (
-        log(highest.predicted_bitrate_kbps) - log(previous.predicted_bitrate_kbps)
-    ) / (crf_highest - crf_previous)
-    if slope >= 0:
-        # Bitrate did not fall with CRF, so the model says nothing useful
-        return min(_round_to_interval(crf_highest + 2.0, interval), CRF_CEILING)
+    candidate = _round_to_interval(crf_highest + step, interval)
+    if candidate <= crf_highest:
+        # Estimate rounded away to nothing, so advance by the smallest step
+        # the search can actually resolve.
+        candidate = _round_to_interval(crf_highest + interval, interval)
 
-    needed = (log(cap_kbps) - log(highest.predicted_bitrate_kbps)) / slope
-    return min(_round_to_interval(crf_highest + needed, interval), CRF_CEILING)
+    candidate = min(candidate, CRF_CEILING)
+    return candidate if candidate > crf_highest else None
 
 
 def _round_to_interval(crf: float, interval: float) -> float:

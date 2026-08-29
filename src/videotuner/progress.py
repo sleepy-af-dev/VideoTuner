@@ -47,8 +47,10 @@ LineHandler = Callable[[str], bool]
 TRANSCRIPT_LOGGER = "videotuner.transcript"
 
 #: Transcript render width. Pinned rather than taken from the terminal so two
-#: runs of the same job produce identically shaped logs.
-TRANSCRIPT_WIDTH = 100
+#: runs of the same job produce identically shaped logs. Wide enough that a
+#: maximum-length Windows path plus a label still fits on one line: wrapping a
+#: path across lines makes a log hard to read and impossible to grep.
+TRANSCRIPT_WIDTH = 320
 
 
 class TeeConsole(Console):
@@ -74,7 +76,7 @@ class TeeConsole(Console):
             no_color=True,
             emoji=False,
             highlight=False,
-            soft_wrap=False,
+            soft_wrap=True,
         )
 
     # Narrowed to what this codebase actually calls: renderables, no kwargs.

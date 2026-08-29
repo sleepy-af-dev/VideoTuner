@@ -242,10 +242,10 @@ def assess_ssim2_concatenated(
     Returns:
         List containing single SSIM2Result for the concatenated comparison
     """
-    from .pipeline_types import get_ssim2_dir
+    from .pipeline_types import get_profile_dir
 
     ssim2_log_path = (
-        get_ssim2_dir(workdir, profile) / f"ssim2_concatenated_iter{iteration}.json"
+        get_profile_dir(workdir, profile) / f"ssim2_concatenated_iter{iteration}.json"
     )
 
     # Get frame count for progress tracking

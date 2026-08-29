@@ -626,10 +626,10 @@ def assess_vmaf_concatenated(
     Returns:
         List containing single VMAFResult for the concatenated comparison
     """
-    from .pipeline_types import get_vmaf_dir
+    from .pipeline_types import get_profile_dir
 
     vmaf_log_path = (
-        get_vmaf_dir(workdir, profile) / f"vmaf_concatenated_iter{iteration}.json"
+        get_profile_dir(workdir, profile) / f"vmaf_concatenated_iter{iteration}.json"
     )
 
     # Get frame count for progress tracking

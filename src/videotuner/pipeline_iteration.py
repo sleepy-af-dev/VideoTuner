@@ -391,7 +391,7 @@ def run_single_crf_iteration(
         Tuple of (scores_dict, vmaf_results, ssim2_results, predicted_bitrate_kbps,
                   vmaf_distorted_path, ssim2_distorted_path)
     """
-    from .pipeline_types import get_distorted_dir
+    from .pipeline_types import get_profile_dir
     from .pipeline_validation import validate_assessment_results
     from .utils import log_section
 
@@ -407,7 +407,7 @@ def run_single_crf_iteration(
         ):
             shared_params = calculate_metric_params(ctx, "vmaf")  # Same as ssim2
             shared_output_path = (
-                get_distorted_dir(ctx.workdir, ctx.selected_profile)
+                get_profile_dir(ctx.workdir, ctx.selected_profile)
                 / f"shared_distorted_crf{crf:.1f}_iter{iteration}.mkv"
             )
 
@@ -431,7 +431,7 @@ def run_single_crf_iteration(
         if ctx.args.vmaf and ctx.vmaf_ref_path:
             vmaf_params = calculate_metric_params(ctx, "vmaf")
             vmaf_output_path = (
-                get_distorted_dir(ctx.workdir, ctx.selected_profile)
+                get_profile_dir(ctx.workdir, ctx.selected_profile)
                 / f"vmaf_distorted_crf{crf:.1f}_iter{iteration}.mkv"
             )
 
@@ -449,7 +449,7 @@ def run_single_crf_iteration(
         if ctx.args.ssim2 and ctx.ssim2_ref_path:
             ssim2_params = calculate_metric_params(ctx, "ssim2")
             ssim2_output_path = (
-                get_distorted_dir(ctx.workdir, ctx.selected_profile)
+                get_profile_dir(ctx.workdir, ctx.selected_profile)
                 / f"ssim2_distorted_crf{crf:.1f}_iter{iteration}.mkv"
             )
 
@@ -519,7 +519,7 @@ def run_single_bitrate_iteration(
         Tuple of (scores_dict, vmaf_results, ssim2_results, predicted_bitrate_kbps,
                   vmaf_distorted_path, ssim2_distorted_path)
     """
-    from .pipeline_types import get_distorted_dir
+    from .pipeline_types import get_profile_dir
     from .profiles import ProfileError
     from .utils import log_section
 
@@ -570,7 +570,7 @@ def run_single_bitrate_iteration(
         ):
             shared_params = calculate_metric_params(ctx, "vmaf")  # Same as ssim2
             shared_distorted_path = (
-                get_distorted_dir(ctx.workdir, profile)
+                get_profile_dir(ctx.workdir, profile)
                 / f"shared_distorted_bitrate{bitrate_kbps}_iter{iteration}.mkv"
             )
 
@@ -634,7 +634,7 @@ def run_single_bitrate_iteration(
         if ctx.args.vmaf and ctx.vmaf_ref_path:
             vmaf_params = calculate_metric_params(ctx, "vmaf")
             vmaf_distorted_path = (
-                get_distorted_dir(ctx.workdir, profile)
+                get_profile_dir(ctx.workdir, profile)
                 / f"vmaf_distorted_bitrate{bitrate_kbps}_iter{iteration}.mkv"
             )
 
@@ -677,7 +677,7 @@ def run_single_bitrate_iteration(
         if ctx.args.ssim2 and ctx.ssim2_ref_path:
             ssim2_params = calculate_metric_params(ctx, "ssim2")
             ssim2_distorted_path = (
-                get_distorted_dir(ctx.workdir, profile)
+                get_profile_dir(ctx.workdir, profile)
                 / f"ssim2_distorted_bitrate{bitrate_kbps}_iter{iteration}.mkv"
             )
 

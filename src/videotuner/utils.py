@@ -14,9 +14,9 @@ from typing import TextIO
 from .constants import (
     LOG_SEPARATOR_CHAR,
     LOG_SEPARATOR_WIDTH,
-    LONGEST_JOB_SUBDIR,
     MAX_USABLE_PATH,
     PATH_FILENAME_MARGIN,
+    RESERVED_JOB_SUBDIRS,
 )
 
 logger = logging.getLogger(__name__)
@@ -138,7 +138,8 @@ def job_folder_budget(parent: Path, profile_slugs: Iterable[str]) -> int:
     # Profile directories sit directly inside the job folder, beside the fixed
     # ones, so the deepest is whichever name is longer: parent \ job \ <deepest>
     deepest = max(
-        len(LONGEST_JOB_SUBDIR), max((len(s) for s in profile_slugs), default=0)
+        max(len(n) for n in RESERVED_JOB_SUBDIRS),
+        max((len(s) for s in profile_slugs), default=0),
     )
     overhead = len(str(parent)) + 2 + deepest
     return MAX_USABLE_PATH - PATH_FILENAME_MARGIN - overhead

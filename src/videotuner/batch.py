@@ -165,8 +165,8 @@ def run_batch(
     batch_folder = jobs_root / f"{folder_name}_{timestamp}"
     # The batch folder is shared by every job, so it can only be shortened
     # once, here, before any job folder is named.
-    if job_folder_budget(batch_folder, slugs) < JOB_FOLDER_MIN_CHARS:
-        shortfall = JOB_FOLDER_MIN_CHARS - job_folder_budget(batch_folder, slugs)
+    shortfall = JOB_FOLDER_MIN_CHARS - job_folder_budget(batch_folder, slugs)
+    if shortfall > 0:
         folder_name = fit_path_segment(
             folder_name, max(1, len(folder_name) - shortfall)
         )

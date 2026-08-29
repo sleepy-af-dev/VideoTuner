@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .constants import RESERVED_JOB_SUBDIRS
 from .encoding_utils import CropValues, SampledSource
 from .media import VideoInfo
 from .pipeline_cli import PipelineArgs
@@ -123,11 +124,6 @@ class MultiProfileResult:
 # Path management utilities
 
 
-#: Directories a job creates for its own use. A profile directory sits beside
-#: them, so a profile named after one of these is renamed to keep them apart.
-RESERVED_JOB_SUBDIRS: frozenset[str] = frozenset({"reference", "temp"})
-
-
 def _profile_slug(profile: Profile) -> str:
     """Convert profile name to filesystem-safe slug."""
     slug = profile.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
@@ -166,18 +162,3 @@ def get_profile_dir(workdir: Path, profile: Profile) -> Path:
         Path to this profile's directory
     """
     return ensure_dir(workdir / _profile_slug(profile))
-
-
-def get_distorted_dir(workdir: Path, profile: Profile) -> Path:
-    """Get path to distorted files for a profile, creating the directory."""
-    return get_profile_dir(workdir, profile)
-
-
-def get_vmaf_dir(workdir: Path, profile: Profile) -> Path:
-    """Get path to VMAF results for a profile, creating the directory."""
-    return get_profile_dir(workdir, profile)
-
-
-def get_ssim2_dir(workdir: Path, profile: Profile) -> Path:
-    """Get path to SSIMULACRA2 results for a profile, creating the directory."""
-    return get_profile_dir(workdir, profile)

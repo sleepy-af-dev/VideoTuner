@@ -11,10 +11,8 @@ from videotuner.encoder_type import EncoderType
 from videotuner.pipeline_cli import PipelineArgs
 from videotuner.pipeline_types import (
     IterationContext,
-    get_distorted_dir,
+    get_profile_dir,
     get_reference_dir,
-    get_ssim2_dir,
-    get_vmaf_dir,
 )
 from videotuner.profiles import Profile
 
@@ -68,7 +66,7 @@ class TestGetDistortedDir:
                 encoder=EncoderType.X265,
             )
 
-            dist_dir = get_distorted_dir(workdir, profile)
+            dist_dir = get_profile_dir(workdir, profile)
 
             assert dist_dir.exists()
             assert dist_dir.is_dir()
@@ -85,7 +83,7 @@ class TestGetDistortedDir:
                 encoder=EncoderType.X265,
             )
 
-            dist_dir = get_distorted_dir(workdir, profile)
+            dist_dir = get_profile_dir(workdir, profile)
 
             assert dist_dir == workdir / "Film_High_Quality"
             assert dist_dir.exists()
@@ -101,7 +99,7 @@ class TestGetDistortedDir:
                 encoder=EncoderType.X265,
             )
 
-            dist_dir = get_distorted_dir(workdir, profile)
+            dist_dir = get_profile_dir(workdir, profile)
 
             assert dist_dir == workdir / "Film_Animation"
             assert dist_dir.exists()
@@ -117,7 +115,7 @@ class TestGetDistortedDir:
                 encoder=EncoderType.X265,
             )
 
-            dist_dir = get_distorted_dir(workdir, profile)
+            dist_dir = get_profile_dir(workdir, profile)
 
             # Backslash should be replaced with underscore
             assert "Film_Animation" in str(dist_dir)
@@ -136,7 +134,7 @@ class TestGetDistortedDir:
             expected_dir = workdir / "TestProfile"
             expected_dir.mkdir(parents=True, exist_ok=True)
 
-            dist_dir = get_distorted_dir(workdir, profile)
+            dist_dir = get_profile_dir(workdir, profile)
 
             assert dist_dir == expected_dir
             assert dist_dir.exists()
@@ -156,7 +154,7 @@ class TestGetVmafDir:
                 encoder=EncoderType.X265,
             )
 
-            vmaf_dir = get_vmaf_dir(workdir, profile)
+            vmaf_dir = get_profile_dir(workdir, profile)
 
             assert vmaf_dir.exists()
             assert vmaf_dir.is_dir()
@@ -173,7 +171,7 @@ class TestGetVmafDir:
                 encoder=EncoderType.X265,
             )
 
-            vmaf_dir = get_vmaf_dir(workdir, profile)
+            vmaf_dir = get_profile_dir(workdir, profile)
 
             assert vmaf_dir == workdir / "Film_High_Quality"
             assert vmaf_dir.exists()
@@ -189,7 +187,7 @@ class TestGetVmafDir:
                 encoder=EncoderType.X265,
             )
 
-            vmaf_dir = get_vmaf_dir(workdir, profile)
+            vmaf_dir = get_profile_dir(workdir, profile)
 
             assert vmaf_dir == workdir / "Film_Animation"
             assert vmaf_dir.exists()
@@ -205,7 +203,7 @@ class TestGetVmafDir:
                 encoder=EncoderType.X265,
             )
 
-            vmaf_dir = get_vmaf_dir(workdir, profile)
+            vmaf_dir = get_profile_dir(workdir, profile)
 
             assert "Test_Profile" in str(vmaf_dir)
             assert vmaf_dir.exists()
@@ -223,7 +221,7 @@ class TestGetVmafDir:
             expected_dir = workdir / "TestProfile"
             expected_dir.mkdir(parents=True, exist_ok=True)
 
-            vmaf_dir = get_vmaf_dir(workdir, profile)
+            vmaf_dir = get_profile_dir(workdir, profile)
 
             assert vmaf_dir == expected_dir
             assert vmaf_dir.exists()
@@ -243,7 +241,7 @@ class TestGetSsim2Dir:
                 encoder=EncoderType.X265,
             )
 
-            ssim2_dir = get_ssim2_dir(workdir, profile)
+            ssim2_dir = get_profile_dir(workdir, profile)
 
             assert ssim2_dir.exists()
             assert ssim2_dir.is_dir()
@@ -260,7 +258,7 @@ class TestGetSsim2Dir:
                 encoder=EncoderType.X265,
             )
 
-            ssim2_dir = get_ssim2_dir(workdir, profile)
+            ssim2_dir = get_profile_dir(workdir, profile)
 
             assert ssim2_dir == workdir / "Animation_Ultra"
             assert ssim2_dir.exists()
@@ -276,7 +274,7 @@ class TestGetSsim2Dir:
                 encoder=EncoderType.X265,
             )
 
-            ssim2_dir = get_ssim2_dir(workdir, profile)
+            ssim2_dir = get_profile_dir(workdir, profile)
 
             assert ssim2_dir == workdir / "CGI_Anime"
             assert ssim2_dir.exists()
@@ -292,7 +290,7 @@ class TestGetSsim2Dir:
                 encoder=EncoderType.X265,
             )
 
-            ssim2_dir = get_ssim2_dir(workdir, profile)
+            ssim2_dir = get_profile_dir(workdir, profile)
 
             assert "Test_Profile" in str(ssim2_dir)
             assert ssim2_dir.exists()
@@ -310,7 +308,7 @@ class TestGetSsim2Dir:
             expected_dir = workdir / "TestProfile"
             expected_dir.mkdir(parents=True, exist_ok=True)
 
-            ssim2_dir = get_ssim2_dir(workdir, profile)
+            ssim2_dir = get_profile_dir(workdir, profile)
 
             assert ssim2_dir == expected_dir
             assert ssim2_dir.exists()
@@ -328,9 +326,9 @@ class TestPathConsistency:
             )
 
             ref_dir = get_reference_dir(workdir)
-            dist_dir = get_distorted_dir(workdir, profile)
-            vmaf_dir = get_vmaf_dir(workdir, profile)
-            ssim2_dir = get_ssim2_dir(workdir, profile)
+            dist_dir = get_profile_dir(workdir, profile)
+            vmaf_dir = get_profile_dir(workdir, profile)
+            ssim2_dir = get_profile_dir(workdir, profile)
 
             assert ref_dir.exists()
             assert dist_dir.exists()
@@ -348,9 +346,9 @@ class TestPathConsistency:
                 encoder=EncoderType.X265,
             )
 
-            dist_dir = get_distorted_dir(workdir, profile)
-            vmaf_dir = get_vmaf_dir(workdir, profile)
-            ssim2_dir = get_ssim2_dir(workdir, profile)
+            dist_dir = get_profile_dir(workdir, profile)
+            vmaf_dir = get_profile_dir(workdir, profile)
+            ssim2_dir = get_profile_dir(workdir, profile)
 
             # All should sanitize the profile name the same way
             assert "Film_High_Quality" in str(dist_dir)
@@ -492,7 +490,7 @@ class TestReservedProfileNames:
         with tempfile.TemporaryDirectory() as tmpdir:
             workdir = Path(tmpdir)
             ref_dir = get_reference_dir(workdir)
-            prof_dir = get_distorted_dir(workdir, self._profile("reference"))
+            prof_dir = get_profile_dir(workdir, self._profile("reference"))
 
             assert prof_dir != ref_dir
             assert prof_dir.exists()
@@ -500,7 +498,7 @@ class TestReservedProfileNames:
     def test_profile_named_temp_does_not_collide(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             workdir = Path(tmpdir)
-            prof_dir = get_distorted_dir(workdir, self._profile("temp"))
+            prof_dir = get_profile_dir(workdir, self._profile("temp"))
 
             assert prof_dir.name != "temp"
 
@@ -508,14 +506,14 @@ class TestReservedProfileNames:
         """Windows treats Reference and reference as one directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
             workdir = Path(tmpdir)
-            prof_dir = get_distorted_dir(workdir, self._profile("Reference"))
+            prof_dir = get_profile_dir(workdir, self._profile("Reference"))
 
             assert prof_dir != get_reference_dir(workdir)
 
     def test_ordinary_names_are_untouched(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             workdir = Path(tmpdir)
-            prof_dir = get_distorted_dir(workdir, self._profile("Film"))
+            prof_dir = get_profile_dir(workdir, self._profile("Film"))
 
             assert prof_dir == workdir / "Film"
 
@@ -526,7 +524,7 @@ class TestReservedProfileNames:
             profile = self._profile("Film")
 
             assert (
-                get_distorted_dir(workdir, profile)
-                == get_vmaf_dir(workdir, profile)
-                == get_ssim2_dir(workdir, profile)
+                get_profile_dir(workdir, profile)
+                == get_profile_dir(workdir, profile)
+                == get_profile_dir(workdir, profile)
             )

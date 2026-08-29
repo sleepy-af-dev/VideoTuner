@@ -7,7 +7,7 @@ pipeline modules to avoid circular imports.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .encoding_utils import CropValues
@@ -60,6 +60,29 @@ class IterationContext:
     def usable_frames(self) -> int:
         """Number of frames available for sampling (excluding guard bands)."""
         return self.total_frames - self.guard_start_frames - self.guard_end_frames
+
+
+@dataclass(frozen=True)
+class JobResult:
+    """Outcome of one job, for the caller's exit code and the batch summary.
+
+    A job is one source video processed end to end. ``ok`` drives the exit code;
+    ``status`` is the human-readable cell shown in the batch summary table.
+    """
+
+    input_path: Path
+    ok: bool
+    status: str = "ok"
+    profile_name: str | None = None
+    optimal_crf: float | None = None
+    predicted_bitrate_kbps: float = 0.0
+    source_bitrate_kbps: float | None = None
+    scores: dict[str, float | None] = field(default_factory=dict)
+
+    @classmethod
+    def failure(cls, input_path: Path, status: str) -> JobResult:
+        """Build a failed result. ``status`` is shown verbatim in the summary."""
+        return cls(input_path=input_path, ok=False, status=status)
 
 
 @dataclass(frozen=True)

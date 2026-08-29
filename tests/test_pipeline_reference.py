@@ -21,7 +21,6 @@ class TestAreSamplingParamsEqual:
         """Test returns True when both metrics enabled with matching params."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=True,
             ssim2=True,
             vmaf_interval_frames=1600,
@@ -35,7 +34,6 @@ class TestAreSamplingParamsEqual:
         """Test returns True with default sampling parameters (1600/20)."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=True,
             ssim2=True,
             # Using defaults: interval=1600, region=20 for both
@@ -46,7 +44,6 @@ class TestAreSamplingParamsEqual:
         """Test returns False when VMAF is disabled."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=False,
             ssim2=True,
             vmaf_interval_frames=1600,
@@ -60,7 +57,6 @@ class TestAreSamplingParamsEqual:
         """Test returns False when SSIM2 is disabled."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=True,
             ssim2=False,
             vmaf_interval_frames=1600,
@@ -74,7 +70,6 @@ class TestAreSamplingParamsEqual:
         """Test returns False when both metrics are disabled."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=False,
             ssim2=False,
         )
@@ -84,7 +79,6 @@ class TestAreSamplingParamsEqual:
         """Test returns False when interval_frames differ between metrics."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=True,
             ssim2=True,
             vmaf_interval_frames=1600,
@@ -98,7 +92,6 @@ class TestAreSamplingParamsEqual:
         """Test returns False when region_frames differ between metrics."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=True,
             ssim2=True,
             vmaf_interval_frames=1600,
@@ -112,7 +105,6 @@ class TestAreSamplingParamsEqual:
         """Test returns False when both interval and region differ."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=True,
             ssim2=True,
             vmaf_interval_frames=1600,
@@ -126,7 +118,6 @@ class TestAreSamplingParamsEqual:
         """Test returns True with custom matching params (not defaults)."""
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             vmaf=True,
             ssim2=True,
             vmaf_interval_frames=3200,

@@ -123,6 +123,35 @@ def format_command_error(returncode: int, cmd: list[str], output: str = "") -> s
     return msg
 
 
+def configure_logging(*, verbose: bool = False, quiet: bool = False) -> int:
+    """Set the root logger level for this run and return it.
+
+    No handlers are installed: console output goes through Rich, and each job
+    attaches its own file handler. Deliberately not ``basicConfig(force=True)``,
+    which closes every existing root handler - in a batch that would tear down
+    the batch log the moment the first job started.
+
+    Args:
+        verbose: Log at DEBUG
+        quiet: Log at WARNING (affects the log file only; the terminal is
+            driven by Rich and is unchanged)
+
+    Returns:
+        The level that was set.
+    """
+    level = logging.INFO
+    if quiet:
+        level = logging.WARNING
+    elif verbose:
+        level = logging.DEBUG
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    if not root.handlers:
+        root.addHandler(logging.NullHandler())
+    return level
+
+
 def log_section(log: logging.Logger, title: str) -> None:
     """Log a visual section separator with a title."""
     separator = LOG_SEPARATOR_CHAR * LOG_SEPARATOR_WIDTH

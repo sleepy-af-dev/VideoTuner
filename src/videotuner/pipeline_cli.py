@@ -28,7 +28,6 @@ DEFAULT_CRF_INTERVAL: float = 0.5
 @dataclass
 class PipelineArgs:
     input: Path
-    output: Path | None
 
     # Periodic sampling parameters
     vmaf_interval_frames: int = 1600
@@ -111,12 +110,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
 
     # Positional arguments
-    _ = p.add_argument("input", type=Path, help="Input video path")
     _ = p.add_argument(
-        "output",
+        "input",
         type=Path,
-        nargs="?",
-        help="Output directory (default: jobs/<name>_<timestamp>)",
+        help="Input video file, or a folder of videos to process as a batch",
     )
 
     # -------------------------------------------------------------------------

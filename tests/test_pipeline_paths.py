@@ -377,7 +377,7 @@ class TestIterationContext:
             guard_end_frames=100,
             vmaf_ref_path=None,
             ssim2_ref_path=None,
-            args=PipelineArgs(input=Path("test.mkv"), output=Path("output.mkv")),
+            args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),
         )
@@ -399,7 +399,7 @@ class TestIterationContext:
             guard_end_frames=100,
             vmaf_ref_path=None,
             ssim2_ref_path=None,
-            args=PipelineArgs(input=Path("test.mkv"), output=Path("output.mkv")),
+            args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),
             sharing_samples=True,
@@ -422,7 +422,7 @@ class TestIterationContext:
             guard_end_frames=200,
             vmaf_ref_path=None,
             ssim2_ref_path=None,
-            args=PipelineArgs(input=Path("test.mkv"), output=Path("output.mkv")),
+            args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),
         )
@@ -445,7 +445,7 @@ class TestIterationContext:
             guard_end_frames=0,
             vmaf_ref_path=None,
             ssim2_ref_path=None,
-            args=PipelineArgs(input=Path("test.mkv"), output=Path("output.mkv")),
+            args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),
         )
@@ -467,7 +467,7 @@ class TestIterationContext:
             guard_end_frames=100,
             vmaf_ref_path=None,
             ssim2_ref_path=None,
-            args=PipelineArgs(input=Path("test.mkv"), output=Path("output.mkv")),
+            args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),
         )

@@ -37,7 +37,7 @@ class TestPipelineArgs:
 
     def test_predicted_bitrate_warning_percent_default(self):
         """Test that predicted_bitrate_warning_percent defaults to None."""
-        args = PipelineArgs(input=Path("test.mkv"), output=Path("output.mkv"))
+        args = PipelineArgs(input=Path("test.mkv"))
         assert args.predicted_bitrate_warning_percent is None
 
     def test_predicted_bitrate_warning_percent_valid_values(self):
@@ -45,7 +45,6 @@ class TestPipelineArgs:
         # Test minimum valid value
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             predicted_bitrate_warning_percent=1.0,
         )
         assert args.predicted_bitrate_warning_percent == 1.0
@@ -53,7 +52,6 @@ class TestPipelineArgs:
         # Test maximum valid value
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             predicted_bitrate_warning_percent=100.0,
         )
         assert args.predicted_bitrate_warning_percent == 100.0
@@ -61,7 +59,6 @@ class TestPipelineArgs:
         # Test middle value
         args = PipelineArgs(
             input=Path("test.mkv"),
-            output=Path("output.mkv"),
             predicted_bitrate_warning_percent=50.0,
         )
         assert args.predicted_bitrate_warning_percent == 50.0
@@ -519,11 +516,9 @@ class TestIgnoredArgsWarning:
     def test_no_warning_when_no_bitrate_profiles(self):
         """Test that no warning is displayed when no profiles are bitrate mode."""
         console, buffer = _make_console()
-        log = logging.getLogger("test")
 
         display_ignored_args_warnings(
             console,
-            log,
             bitrate_profile_names=[],
             crf_start_value=15.0,  # Non-default
             crf_interval=0.25,  # Non-default
@@ -535,11 +530,9 @@ class TestIgnoredArgsWarning:
     def test_warning_for_non_default_crf_start_value(self):
         """Test that warning is displayed when CRF start value differs from default."""
         console, buffer = _make_console()
-        log = logging.getLogger("test")
 
         display_ignored_args_warnings(
             console,
-            log,
             bitrate_profile_names=["Streaming 1080p"],
             crf_start_value=15.0,  # Non-default
             crf_interval=DEFAULT_CRF_INTERVAL,
@@ -554,11 +547,9 @@ class TestIgnoredArgsWarning:
     def test_warning_for_non_default_crf_interval(self):
         """Test that warning is displayed when CRF interval differs from default."""
         console, buffer = _make_console()
-        log = logging.getLogger("test")
 
         display_ignored_args_warnings(
             console,
-            log,
             bitrate_profile_names=["Streaming 1080p"],
             crf_start_value=DEFAULT_CRF_START_VALUE,
             crf_interval=0.25,  # Non-default
@@ -573,11 +564,9 @@ class TestIgnoredArgsWarning:
     def test_no_warning_with_default_values(self):
         """Test that no warning is displayed when using default CRF values."""
         console, buffer = _make_console()
-        log = logging.getLogger("test")
 
         display_ignored_args_warnings(
             console,
-            log,
             bitrate_profile_names=["Streaming 1080p"],
             crf_start_value=DEFAULT_CRF_START_VALUE,
             crf_interval=DEFAULT_CRF_INTERVAL,
@@ -589,11 +578,9 @@ class TestIgnoredArgsWarning:
     def test_multiple_warnings_combined(self):
         """Test that multiple warnings are displayed together."""
         console, buffer = _make_console()
-        log = logging.getLogger("test")
 
         display_ignored_args_warnings(
             console,
-            log,
             bitrate_profile_names=["Streaming 1080p"],
             crf_start_value=15.0,  # Non-default
             crf_interval=0.25,  # Non-default
@@ -607,11 +594,9 @@ class TestIgnoredArgsWarning:
     def test_warning_lists_multiple_bitrate_profiles(self):
         """Test that warning lists all bitrate profile names."""
         console, buffer = _make_console()
-        log = logging.getLogger("test")
 
         display_ignored_args_warnings(
             console,
-            log,
             bitrate_profile_names=[
                 "Streaming 1080p",
                 "Streaming 720p",

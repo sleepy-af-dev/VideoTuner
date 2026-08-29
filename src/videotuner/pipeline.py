@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -25,7 +24,6 @@ from .media import InvalidVideoFileError, get_frame_count, parse_video_info
 from .pipeline_cli import (
     PipelineArgs,
     build_arg_parser,
-    get_default,
     parse_cli,
     validate_args,
 )
@@ -48,20 +46,48 @@ from .pipeline_reference import (
     are_sampling_params_equal,
     generate_metric_reference,
 )
-from .pipeline_types import IterationContext, get_reference_dir
+from .pipeline_types import IterationContext, JobResult, get_reference_dir
 from .pipeline_validation import (
     build_targets,
     has_targets,
     validate_sampling_parameters,
 )
 from .profiles import Profile
-from .progress import PipelineDisplay
+from .progress import PipelineDisplay, TranscriptFormatter
 from .ssimulacra2_assessment import SSIM2Result
-from .utils import ensure_dir, get_app_root, log_section, sanitize_filename
+from .utils import (
+    configure_logging,
+    ensure_dir,
+    get_app_root,
+    log_section,
+    sanitize_filename,
+)
 from .vmaf_assessment import VMAFResult
 
 
-def run_pipeline(args: PipelineArgs) -> int:
+def run_pipeline(args: PipelineArgs, *, show_title: bool = True) -> JobResult:
+    """Run one job, guaranteeing its log handler is detached afterwards.
+
+    ``show_title`` is False for jobs inside a batch, which prints the banner
+    once at the start and a ``[N/M]`` header per job instead.
+
+    The body attaches a FileHandler to the root logger for this job's log file.
+    Leaving it attached would make every later job in a batch write into this
+    job's log as well, so anything the body added is removed here on every exit
+    path.
+    """
+    root = logging.getLogger()
+    pre_existing = set(map(id, root.handlers))
+    try:
+        return _run_pipeline_body(args, show_title=show_title)
+    finally:
+        for handler in list(root.handlers):
+            if id(handler) not in pre_existing:
+                root.removeHandler(handler)
+                handler.close()
+
+
+def _run_pipeline_body(args: PipelineArgs, *, show_title: bool = True) -> JobResult:
     parser = build_arg_parser()
 
     # Validate arguments and resolve profiles
@@ -72,27 +98,21 @@ def run_pipeline(args: PipelineArgs) -> int:
 
     crop_detect: bool = bool(args.crop_detect)
 
-    display = PipelineDisplay(show_title=True)
+    display = PipelineDisplay(show_title=show_title)
 
     # Configure logging (file-only; console output is driven by the Rich UI)
-    verbose: bool = bool(args.verbose)
-    quiet: bool = bool(args.quiet)
-    level = logging.INFO
-    if quiet:
-        level = logging.WARNING
-    elif verbose:
-        level = logging.DEBUG
-    logging.basicConfig(
-        level=level,
-        format="%(message)s",
-        handlers=[logging.NullHandler()],
-        force=True,
-    )
+    level = configure_logging(verbose=bool(args.verbose), quiet=bool(args.quiet))
     log = logging.getLogger(__name__)
 
     input_path: Path = Path(args.input)
     if not input_path.exists():
-        parser.error(f"Input not found: {input_path}")
+        # Not parser.error(): that raises SystemExit, which would kill a batch
+        # partway through instead of failing this one job.
+        display.console.print(
+            f"\n[bold red]Error:[/bold red] Input not found: {input_path}\n"
+        )
+        log.error("Input not found: %s", input_path)
+        return JobResult.failure(input_path, "input not found")
 
     log.info("Probing input with ffprobe ...")
     ffprobe_bin: str = args.ffprobe_bin
@@ -101,7 +121,7 @@ def run_pipeline(args: PipelineArgs) -> int:
     except InvalidVideoFileError as e:
         display.console.print(f"\n[bold red]Error:[/bold red] {e}\n")
         log.error("Invalid video file: %s", e)
-        return 1
+        return JobResult.failure(input_path, "invalid video file")
     res = f"{info.width}x{info.height}" if (info.width and info.height) else "unknown"
     log.info(
         "Detected fps=%.3f, duration=%.2fs, pix_fmt=%s, res=%s",
@@ -114,7 +134,58 @@ def run_pipeline(args: PipelineArgs) -> int:
     # Determine app root early for tool detection
     repo_root: Path = get_app_root()
 
-    # Display active settings summary
+    # The job folder and its log are set up before anything is displayed, so the
+    # terminal transcript reaches the log from the first line on. Errors below
+    # (HDR/x264, guard bands) used to be raised before the handler existed and
+    # so never appeared in any log.
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_stem = sanitize_filename(input_path.stem)
+    if args.workdir:
+        workdir: Path = args.workdir
+    else:
+        workdir = repo_root / "jobs" / f"{safe_stem}_{timestamp}"
+    _ = ensure_dir(workdir)
+
+    # Create temp subdirectory for temporary files
+    temp_dir = ensure_dir(workdir / "temp")
+
+    # Add file logger (default in job folder). The folder carries the timestamp,
+    # so the log inside it does not repeat it - and a job folder looks the same
+    # whether it came from a single run or from a batch.
+    if not args.log_file:
+        log_file: Path = workdir / f"{safe_stem}.log"
+    else:
+        log_file = Path(args.log_file)
+        try:
+            _ = ensure_dir(log_file.parent)
+        except OSError as e:
+            log.warning("Could not create log directory %s: %s", log_file.parent, e)
+
+    def _rel(p: Path) -> str:
+        try:
+            return os.path.relpath(p, repo_root)
+        except Exception:
+            return str(p)
+
+    try:
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setLevel(level)
+        fh.setFormatter(TranscriptFormatter())
+        logging.getLogger().addHandler(fh)
+
+    except Exception as e:
+        log.warning("Could not attach file logger at %s: %s", log_file, e)
+
+    log_section(log, "Initialization")
+
+    try:
+        log.info("Log file: %s", _rel(log_file))
+        log.info("Job folder: %s", _rel(workdir))
+    except OSError as e:
+        log.warning("Failed to log file/job folder paths due to OSError: %s", e)
+
+    # Display active settings summary. The console tees this into the log, so
+    # there is no second hand-written copy of it here.
     display_settings_summary(
         display.console, args, multi_profile_display, input_path.name
     )
@@ -137,13 +208,12 @@ def run_pipeline(args: PipelineArgs) -> int:
             )
             display.console.print(f"\n[bold red]Error:[/bold red] {msg}\n")
             log.error(msg)
-            return 1
+            return JobResult.failure(input_path, "HDR source with x264 profile")
 
     # Warn about ignored arguments when using bitrate profiles
     bitrate_profile_names = [p.name for p in multi_profile_list if p.is_bitrate_mode]
     display_ignored_args_warnings(
         display.console,
-        log,
         bitrate_profile_names=bitrate_profile_names,
         crf_start_value=args.crf_start_value,
         crf_interval=args.crf_interval,
@@ -164,8 +234,8 @@ def run_pipeline(args: PipelineArgs) -> int:
             f"leave no usable duration in {info.duration:.1f}s video"
         )
         msg2 = "ERROR: Reduce --guard-start-percent, --guard-end-percent, or --guard-seconds"  # noqa: E501  # TODO(E501): shorten line
-        print(msg1, file=sys.stderr)
-        print(msg2, file=sys.stderr)
+        display.console.print(f"[bold red]{msg1}[/bold red]")
+        display.console.print(f"[bold red]{msg2}[/bold red]")
         log.error(
             "Guard bands (%.1f%% = %.1fs) leave no usable duration in %.1fs video",
             (guard_start_percent + guard_end_percent) * 100,
@@ -173,144 +243,7 @@ def run_pipeline(args: PipelineArgs) -> int:
             info.duration,
         )
         log.error("Reduce guard settings")
-        return 1
-
-    # Default workdir is <repo_root>/jobs/<name>_<timestamp> unless overridden
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_stem = sanitize_filename(input_path.stem)
-    if args.workdir:
-        workdir: Path = args.workdir
-    else:
-        jobs_root = repo_root / "jobs"
-        workdir = jobs_root / f"{safe_stem}_{timestamp}"
-    _ = ensure_dir(workdir)
-
-    # Create temp subdirectory for temporary files
-    temp_dir = ensure_dir(workdir / "temp")
-
-    # Add file logger (default in job folder)
-    if not args.log_file:
-        log_file: Path = workdir / f"{safe_stem}_{timestamp}.log"
-    else:
-        log_file = Path(args.log_file)
-        try:
-            _ = ensure_dir(log_file.parent)
-        except OSError as e:
-            log.warning("Could not create log directory %s: %s", log_file.parent, e)
-
-    def _rel(p: Path) -> str:
-        try:
-            return os.path.relpath(p, repo_root)
-        except Exception:
-            return str(p)
-
-    try:
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setLevel(level)
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
-        logging.getLogger().addHandler(fh)
-
-    except Exception as e:
-        log.warning("Could not attach file logger at %s: %s", log_file, e)
-
-    log_section(log, "Initialization")
-
-    try:
-        log.info("Log file: %s", _rel(log_file))
-        log.info("Job folder: %s", _rel(workdir))
-    except OSError as e:
-        log.warning("Failed to log file/job folder paths due to OSError: %s", e)
-
-    # Log job settings
-    mode_str = "CRF Search"
-    if args.assessment_only:
-        mode_str = "Assessment Only"
-    elif args.multi_profile_search:
-        mode_str = "Multi-Profile Search"
-
-    profile_str = selected_profile.name if selected_profile else "None"
-    if args.multi_profile_search:
-        profile_str = multi_profile_display
-
-    # Determine encoder type for display
-    encoder_str = ""
-    if selected_profile:
-        encoder_str = selected_profile.encoder.value
-    elif multi_profile_list:
-        encoder_types = {p.encoder.value for p in multi_profile_list}
-        encoder_str = ", ".join(sorted(encoder_types))
-
-    log.info("")
-    log.info("Settings")
-    log.info("  Mode: %s", mode_str)
-    log.info("  Encoder: %s", encoder_str)
-    log.info("  Profile: %s", profile_str)
-
-    # Build assessments string
-    assessments: list[str] = []
-    if args.vmaf:
-        assessments.append("VMAF")
-    if args.ssim2:
-        assessments.append("SSIMULACRA2")
-    log.info("  Assessments: %s", ", ".join(assessments))
-
-    log.info("  CropDetect: %s", "Enabled" if crop_detect else "Disabled")
-
-    # Log non-default sampling parameters
-    if args.vmaf_interval_frames != get_default("vmaf_interval_frames"):
-        log.info("  VMAF Interval: %d frames", args.vmaf_interval_frames)
-    if args.vmaf_region_frames != get_default("vmaf_region_frames"):
-        log.info("  VMAF Region: %d frames", args.vmaf_region_frames)
-    if args.ssim2_interval_frames != get_default("ssim2_interval_frames"):
-        log.info("  SSIM2 Interval: %d frames", args.ssim2_interval_frames)
-    if args.ssim2_region_frames != get_default("ssim2_region_frames"):
-        log.info("  SSIM2 Region: %d frames", args.ssim2_region_frames)
-
-    # Log non-default analysis options
-    if args.vmaf_model is not None:
-        log.info("  VMAF Model: %s", args.vmaf_model)
-    if args.tonemap != get_default("tonemap"):
-        log.info("  Tonemap: %s", args.tonemap)
-
-    # Log non-default guard bands
-    if args.guard_start_percent > 0:
-        log.info("  Guard Start: %.1f%%", args.guard_start_percent * 100)
-    if args.guard_end_percent > 0:
-        log.info("  Guard End: %.1f%%", args.guard_end_percent * 100)
-    if args.guard_seconds > 0:
-        log.info("  Guard Seconds: %.1fs", args.guard_seconds)
-
-    # Log bitrate warning if specified
-    if args.predicted_bitrate_warning_percent is not None:
-        log.info("  Bitrate Warning: %.0f%%", args.predicted_bitrate_warning_percent)
-
-    # Log quality targets if specified
-    target_parts: list[str] = []
-    if args.vmaf_target is not None:
-        target_parts.append(f"VMAF Mean ≥ {args.vmaf_target}")
-    if args.vmaf_hmean_target is not None:
-        target_parts.append(f"VMAF HMean ≥ {args.vmaf_hmean_target}")
-    if args.vmaf_1pct_target is not None:
-        target_parts.append(f"VMAF 1% ≥ {args.vmaf_1pct_target}")
-    if args.vmaf_min_target is not None:
-        target_parts.append(f"VMAF Min ≥ {args.vmaf_min_target}")
-    if args.ssim2_mean_target is not None:
-        target_parts.append(f"SSIM2 Mean ≥ {args.ssim2_mean_target}")
-    if args.ssim2_median_target is not None:
-        target_parts.append(f"SSIM2 Median ≥ {args.ssim2_median_target}")
-    if args.ssim2_95pct_target is not None:
-        target_parts.append(f"SSIM2 95% ≥ {args.ssim2_95pct_target}")
-    if args.ssim2_5pct_target is not None:
-        target_parts.append(f"SSIM2 5% ≥ {args.ssim2_5pct_target}")
-
-    if target_parts:
-        log.info("")
-        log.info("Targets")
-        for target in target_parts:
-            log.info("  %s", target)
-
-    log.info("")
-    log.info("Source: %s", input_path.name)
+        return JobResult.failure(input_path, "guard bands leave no usable duration")
 
     # Build FFMS2 index for source (shared across cropdetect and all encodes)
     # This is done BEFORE cropdetect to avoid delays during crop detection
@@ -454,7 +387,7 @@ def run_pipeline(args: PipelineArgs) -> int:
     # Validate that at least one metric is enabled
     if not args.vmaf and not args.ssim2:
         log.error("No metrics have valid samples - cannot proceed")
-        return 1
+        return JobResult.failure(input_path, "no valid samples")
 
     log_section(log, "Reference Generation")
 
@@ -590,6 +523,14 @@ def run_pipeline(args: PipelineArgs) -> int:
     optimal_crf: float | None = None
     _predicted_bitrate: float = 0.0
     optimal_predicted_bitrate: float = 0.0
+
+    # This job's summary row. Overwritten by the multi-profile branch with the
+    # winning profile; otherwise filled in from the single-profile search below.
+    result_profile_name: str | None = (
+        selected_profile.name if selected_profile else None
+    )
+    result_crf: float | None = None
+    result_bitrate: float = 0.0
 
     # ========== ASSESSMENT ONLY MODE ==========
     if args.assessment_only:
@@ -810,7 +751,7 @@ def run_pipeline(args: PipelineArgs) -> int:
             except CRFFloorError as e:
                 display.console.print(f"[bold red]CRF floor reached: {e}[/bold red]")
                 log.warning("CRF floor reached: %s", e)
-                return 1
+                return JobResult.failure(input_path, "CRF floor reached")
 
             if next_crf is None:
                 if crf_search_state.all_targets_met():
@@ -921,7 +862,7 @@ def run_pipeline(args: PipelineArgs) -> int:
                 "[bold red]No profiles produced valid results[/bold red]"
             )
             log.error("Multi-profile search failed - no valid results")
-            return 1
+            return JobResult.failure(input_path, "no profile produced valid results")
 
         winner = ranked_results[0]
 
@@ -973,6 +914,11 @@ def run_pipeline(args: PipelineArgs) -> int:
         optimal_search_scores = {
             k: v for k, v in winner.scores.items() if v is not None
         }
+
+        # Carry the winner through to this job's result row
+        result_profile_name = winner.profile_name
+        result_crf = winner.optimal_crf
+        result_bitrate = winner.predicted_bitrate_kbps
 
     # ========== DISPLAY FINAL RESULTS ==========
     # Build final scores dict for display
@@ -1050,32 +996,45 @@ def run_pipeline(args: PipelineArgs) -> int:
 
     log_section(log, "Results")
 
-    # Log VMAF scores
-    if vmaf_results:
-        result = vmaf_results[0]
-        log.info("\n=== VMAF Scores ===")
-        log.info("VMAF (mean):            %.2f", result.mean)
-        log.info("VMAF (harmonic mean):   %.2f", result.harmonic_mean)
-        log.info("VMAF (1%% low):          %.2f", result.p1_low)
-        log.info("VMAF (minimum):         %.2f", result.minimum)
+    # Scores are not restated here: the console already printed them and the
+    # transcript carries that into this log verbatim.
 
-    # Log SSIMULACRA2 scores
-    if ssim2_results:
-        result = ssim2_results[0]
-        log.info("\n=== SSIMULACRA2 Scores ===")
-        log.info("SSIMULACRA2 (mean):    %.2f", result.mean)
-        log.info("SSIMULACRA2 (median):  %.2f", result.median)
-        log.info("SSIMULACRA2 (95%%):     %.2f", result.p95_high)
-        log.info("SSIMULACRA2 (5%% low):  %.2f", result.p5_low)
-        log.info("SSIMULACRA2 (stddev):  %.2f", result.std_dev)
+    # Single-profile modes fill in the summary row here; the multi-profile branch
+    # already set it from the winning profile.
+    if not multi_profile_list:
+        result_crf = optimal_crf
+        result_bitrate = (
+            _predicted_bitrate if args.assessment_only else optimal_predicted_bitrate
+        )
 
-    return 0
+    converged = (
+        args.assessment_only or bool(multi_profile_list) or optimal_crf is not None
+    )
+    return JobResult(
+        input_path=input_path,
+        ok=True,
+        status="ok" if converged else "no convergence",
+        profile_name=result_profile_name,
+        optimal_crf=result_crf,
+        predicted_bitrate_kbps=result_bitrate,
+        source_bitrate_kbps=info.video_bitrate_kbps,
+        scores=final_scores,
+    )
 
 
 def main(argv: Iterable[str] | None = None) -> int:
     """CLI wrapper for entry points."""
-    return run_pipeline(parse_cli(argv))
+    args = parse_cli(argv)
+
+    # A folder means a batch: the same pipeline, once per video inside it.
+    if Path(args.input).is_dir():
+        from .batch import run_batch
+
+        # The batch prints the banner once; jobs get a [N/M] header instead.
+        return run_batch(args, lambda a: run_pipeline(a, show_title=False))
+
+    return 0 if run_pipeline(args).ok else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(run_pipeline(parse_cli()))
+    raise SystemExit(main())

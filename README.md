@@ -31,6 +31,7 @@ quality metrics to find the optimal rate factor for video encoding.
     - [1. CRF Search Mode (Default)](#1-crf-search-mode-default)
     - [2. Assessment-Only Mode](#2-assessment-only-mode)
     - [3. Multi-Profile Search Mode](#3-multi-profile-search-mode)
+  - [Batch Processing](#batch-processing)
   - [Quality Targets](#quality-targets)
   - [Encoding Profiles](#encoding-profiles)
   - [Bitrate Mode Profiles](#bitrate-mode-profiles)
@@ -52,7 +53,9 @@ quality metrics to find the optimal rate factor for video encoding.
   - [Paths](#paths)
   - [Logging](#logging)
 - [Output](#output)
-  - [Working Directory](#working-directory)
+  - [Job folder](#job-folder)
+  - [Batch folder](#batch-folder)
+  - [Logs](#logs)
 - [Development](#development)
   - [Building Releases](#building-releases)
   - [Development Commands](#development-commands)
@@ -297,6 +300,33 @@ videotuner input.mkv --multi-profile-search Film,animation-group --vmaf-target 9
 3. **Select Winner**: The best-ranked profile is selected as the winner
 
 **Performance Optimization:** Each subsequent profile's CRF search starts at the previous profile's optimal CRF value for faster convergence.
+
+### Batch Processing
+
+Pass a folder instead of a file and VideoTuner runs the same pipeline once per video inside it, with the same settings. Any mode above works in a batch.
+
+```bash
+# CRF search across every video in a folder
+videotuner ./season1 --encoder x265 --preset slow --vmaf-target 95
+
+# Batch with a profile
+videotuner ./season1 --profile Film --vmaf-target 95
+
+# Batch multi-profile comparison; the summary names the winner per file
+videotuner ./season1 --multi-profile-search Film,Grain --vmaf-target 95
+```
+
+**Which files are picked up:** video files at the top level of the folder only, matched by extension (`.mkv`, `.mp4`, `.m4v`, `.mov`, `.ts`, `.m2ts`, `.avi`, `.webm`) and processed in name order. Subfolders are not searched.
+
+**How a batch behaves:**
+
+- Settings are validated once before the first job, so a bad flag stops the batch immediately instead of failing identically on every file.
+- Every file is then probed and you are warned up front about any that are expected to fail, such as HDR sources when the chosen profile uses x264. The rest of the batch still runs.
+- A job that fails is recorded and the batch continues to the next file.
+- Jobs run one at a time. The encoders already use every core, so running two at once makes both slower.
+- The batch ends with a summary table, one row per file, and exits non-zero if any job failed.
+
+**Note:** batch mode writes an `.ffindex` file next to each source video, the same as a single-file run. They are reused on later runs over the same folder, which is the largest available time saving when re-running a batch.
 
 ### Quality Targets
 
@@ -596,7 +626,7 @@ Run `videotuner --help` for complete options. Key options include:
 
 | Option            | Default                   | Description                    |
 | ----------------- | ------------------------- | ------------------------------ |
-| `--workdir`       | `jobs/<name>_<timestamp>` | Working directory              |
+| `--workdir`       | `jobs/<name>_<timestamp>` | Job folder; the batch folder in batch mode |
 | `--ffmpeg`        | `ffmpeg`                  | FFmpeg binary                  |
 | `--ffprobe`       | `ffprobe`                 | FFprobe binary                 |
 | `--mkvmerge`      | `mkvmerge`                | MKVmerge binary                |
@@ -605,15 +635,19 @@ Run `videotuner --help` for complete options. Key options include:
 
 ### Logging
 
-| Option             | Description               |
-| ------------------ | ------------------------- |
-| `-v` / `--verbose` | Debug logging             |
-| `-q` / `--quiet`   | Warnings only             |
-| `--log-file`       | Write summary log to file |
+| Option             | Description                                            |
+| ------------------ | ------------------------------------------------------ |
+| `-v` / `--verbose` | Add debug detail to the log                            |
+| `-q` / `--quiet`   | Reduce the log to warnings only                        |
+| `--log-file`       | Write the job log somewhere other than the job folder  |
+
+Both `-v` and `-q` affect the log file only; terminal output is unchanged.
 
 ## Output
 
-### Working Directory
+### Job folder
+
+One job is one source video processed end to end. Its output all lands in one folder.
 
 - Default location: `jobs/<input_name>_<timestamp>`
 - Override with `--workdir <path>`
@@ -622,27 +656,52 @@ Run `videotuner --help` for complete options. Key options include:
 
 ```text
 jobs/<input_name>_<timestamp>/
-├── reference/                    # Lossless reference samples
-│   └── vmaf_reference.mkv        # Concatenated VMAF reference
-│   └── ssim2_reference.mkv       # Concatenated SSIM2 reference
-├── distorted/                    # Encoded samples organized by profile
-│   ├── <ProfileName>_profile/
-│   │   └── vmaf_crf_*.mkv        # VMAF distorted at each CRF iteration
-│   │   └── ssim2_crf_*.mkv       # SSIM2 distorted at each CRF iteration
-├── vmaf/                         # VMAF assessment results
+├── reference/                                # Lossless reference samples
+│   ├── vmaf_reference_concatenated.mkv
+│   └── ssim2_reference_concatenated.mkv
+├── distorted/                                # Encoded samples, by profile
+│   └── profile_<ProfileName>/
+│       ├── vmaf_crf_*.mkv                    # VMAF distorted at each CRF iteration
+│       └── ssim2_crf_*.mkv                   # SSIM2 distorted at each CRF iteration
+├── vmaf/                                     # VMAF assessment results
 │   └── <ProfileName>_profile/
-│       └── crf_*.json
-├── ssimulacra2/                  # SSIMULACRA2 assessment results
+│       └── vmaf_concatenated_iter*.json
+├── ssimulacra2/                              # SSIMULACRA2 assessment results
 │   └── <ProfileName>_profile/
-│       └── crf_*.json
-├── temp/                         # Temporary files (VapourSynth scripts, encoder bitstreams)
-└── <name>_<timestamp>.log        # Pipeline log
+│       └── ssim2_concatenated_iter*.json
+├── temp/                                     # VapourSynth scripts, encoder bitstreams
+└── <input_name>.log                          # Job log
 ```
 
 **Notes:**
 
 - All encoded samples and assessment results are preserved across iterations for inspection
 - In multi-profile mode, each profile gets its own subfolder
+
+### Batch folder
+
+A batch groups the job folders of every video in one input folder. A job folder is identical inside whether it came from a single run or from a batch.
+
+- Default location: `jobs/<input_folder_name>_<timestamp>`
+- Override with `--workdir <path>`, which names the batch folder in batch mode
+
+```text
+jobs/<input_folder_name>_<timestamp>/
+├── batch.log                     # Batch-level events and the final summary
+├── <video_1_name>/               # Job folder, structured exactly as above
+├── <video_2_name>/
+└── ...
+```
+
+Two inputs whose names differ only by extension (`clip.mkv` and `clip.mp4`) would collide on one job folder name, so the second gets a numeric suffix rather than overwriting the first.
+
+### Logs
+
+The job log is a transcript: everything printed to the terminal during that job is written to it, so the log reads the way the run looked. Section banners and anything at warning level or above carry a timestamp; transcript lines do not, which keeps tables and panels readable.
+
+`batch.log` holds batch-level events and the summary table only. Each job's detail stays in that job's own log, so the file you open after an overnight run is the short one.
+
+`-v` adds debug detail to the log, `-q` reduces it to warnings only. Neither changes what appears on the terminal.
 
 ## Development
 

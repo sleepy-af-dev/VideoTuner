@@ -45,6 +45,7 @@ class PipelineArgs:
     crf_start_value: float = DEFAULT_CRF_START_VALUE
     crf_interval: float = DEFAULT_CRF_INTERVAL
     carry_crf: bool = False
+    as_one_source: bool = False
 
     # Mode flags
     assessment_only: bool = False
@@ -125,6 +126,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--assessment-only",
         action="store_true",
         help="Single assessment at starting CRF without CRF search",
+    )
+    _ = mode_group.add_argument(
+        "--as-one-source",
+        action="store_true",
+        default=_get_default("as_one_source"),
+        help=(
+            "Read every video in the input folder as one source, producing a "
+            "single result for the folder rather than one per file"
+        ),
     )
     _ = mode_group.add_argument(
         "--multi-profile-search",

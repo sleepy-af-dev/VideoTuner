@@ -1040,6 +1040,18 @@ def main(argv: Iterable[str] | None = None) -> int:
     """CLI wrapper for entry points."""
     args = parse_cli(argv)
 
+    if args.as_one_source and not Path(args.input).is_dir():
+        # Erroring costs a re-run; continuing costs a full encode measuring
+        # something other than what the flag promised.
+        note = (
+            "--as-one-source reads a folder of files as one source, "
+            f"but {args.input} is a single file."
+        )
+        PipelineDisplay(show_title=False).console.print(
+            f"[bold red]Error:[/bold red] {note}"
+        )
+        return 1
+
     # A folder means a batch: the same pipeline, once per video inside it.
     if Path(args.input).is_dir():
         from .batch import run_batch

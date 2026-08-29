@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -57,6 +56,7 @@ from .progress import PipelineDisplay, TranscriptFormatter
 from .ssimulacra2_assessment import SSIM2Result
 from .utils import (
     configure_logging,
+    display_path,
     ensure_dir,
     get_app_root,
     log_section,
@@ -179,12 +179,6 @@ def _run_pipeline_body(
         except OSError as e:
             log.warning("Could not create log directory %s: %s", log_file.parent, e)
 
-    def _rel(p: Path) -> str:
-        try:
-            return os.path.relpath(p, repo_root)
-        except Exception:
-            return str(p)
-
     try:
         fh = logging.FileHandler(log_file, encoding="utf-8")
         fh.setLevel(level)
@@ -197,8 +191,8 @@ def _run_pipeline_body(
     log_section(log, "Initialization")
 
     try:
-        log.info("Log file: %s", _rel(log_file))
-        log.info("Job folder: %s", _rel(workdir))
+        log.info("Log file: %s", display_path(log_file, repo_root))
+        log.info("Job folder: %s", display_path(workdir, repo_root))
         # Recorded in full because the job folder name may have been shortened.
         log.info("Source: %s", input_path.resolve())
     except OSError as e:

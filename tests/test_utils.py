@@ -9,6 +9,7 @@ import pytest
 
 from videotuner.constants import MAX_USABLE_PATH, PATH_FILENAME_MARGIN
 from videotuner.utils import (
+    display_path,
     ensure_dir,
     fit_path_segment,
     job_folder_budget,
@@ -183,7 +184,7 @@ class TestJobFolderBudget:
 class TestResolveRunFolder:
     """Naming the folder a single run writes to, under a given parent."""
 
-    STAMP = "20260829_130000"
+    STAMP: str = "20260829_130000"
 
     def test_short_name_is_used_as_is(self, tmp_path: Path) -> None:
         folder, fitted = resolve_run_folder(tmp_path, "input", self.STAMP, ["P"])
@@ -241,3 +242,25 @@ class TestEnsureDirWarnsOnLongPaths:
 
         assert len(caplog.records) == 1, "should warn once per directory, not per call"
         assert "long-path aware" in caplog.records[0].message
+
+
+class TestDisplayPath:
+    """How a path is rendered into a log line."""
+
+    def test_a_path_inside_the_root_is_relative(self, tmp_path: Path) -> None:
+        assert display_path(tmp_path / "jobs" / "run", tmp_path) == str(
+            Path("jobs") / "run"
+        )
+
+    def test_a_path_outside_the_root_is_absolute(self, tmp_path: Path) -> None:
+        """--workdir can point anywhere, and a chain of parent hops reads worse
+        than the absolute path it replaces."""
+        outside = tmp_path.parent / "elsewhere" / "run"
+
+        rendered = display_path(outside, tmp_path / "app")
+
+        assert not rendered.startswith(".."), "should not climb out of the root"
+        assert rendered == str(outside)
+
+    def test_the_root_itself_is_rendered_as_dot(self, tmp_path: Path) -> None:
+        assert display_path(tmp_path, tmp_path) == "."

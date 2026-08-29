@@ -80,6 +80,28 @@ def fit_path_segment(name: str, budget: int) -> str:
     return f"{name[:keep]}~{digest}"
 
 
+def display_path(path: Path, root: Path) -> str:
+    """Render a path for logging: relative to ``root``, or absolute if outside it.
+
+    Output can live anywhere now that ``--workdir`` sets the parent, and a
+    relative path that climbs out of the app root is both longer and harder to
+    read than the absolute one it replaces.
+
+    Args:
+        path: Path to render
+        root: Directory paths are shown relative to when they sit inside it
+
+    Returns:
+        The relative path, or the absolute path when it lies outside ``root``
+    """
+    try:
+        relative = os.path.relpath(path, root)
+    except ValueError:
+        # Different drive on Windows: no relative form exists.
+        return str(path)
+    return str(path) if relative.startswith("..") else relative
+
+
 def resolve_run_folder(
     jobs_root: Path, name: str, timestamp: str, profile_slugs: Iterable[str]
 ) -> tuple[Path, str]:

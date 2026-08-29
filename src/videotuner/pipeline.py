@@ -157,16 +157,19 @@ def _report_within_budget(
     args: PipelineArgs,
     display: PipelineDisplay,
     log: logging.Logger,
-    *,
-    name_profile: bool,
 ) -> None:
     """Offer the best measured encode fitting the budget, searching first if asked.
 
-    Shared by both modes: they differ only in where the points came from and
-    whether naming a profile distinguishes anything.
+    Shared by both modes, which differ only in where the points came from. How
+    the result is worded follows from what actually happened rather than from
+    what the caller says happened.
     """
+    # Asking for the search is not the same as running one: a group of only
+    # bitrate profiles has no CRF to move, and must not then be told that even
+    # the CRF ceiling was too expensive.
+    searched = bool(args.continue_budget_search and searchable)
     pooled = list(points)
-    if args.continue_budget_search and searchable:
+    if searched:
         pooled += _search_within_budget(
             searchable, budget.cap_kbps, args.crf_interval, display, log
         )
@@ -178,8 +181,9 @@ def _report_within_budget(
         budget,
         targets,
         args.metric_decimals,
-        name_profile=name_profile,
-        searched=args.continue_budget_search,
+        # Naming the profile only tells the reader anything when more than one ran
+        name_profile=len({p.profile_name for p in pooled}) > 1,
+        searched=searched,
     )
 
 
@@ -1087,7 +1091,6 @@ def _run_pipeline_body(
                 args,
                 display,
                 log,
-                name_profile=True,
             )
 
         if not ranked_results:
@@ -1255,7 +1258,6 @@ def _run_pipeline_body(
                 args,
                 display,
                 log,
-                name_profile=False,
             )
 
     log_section(log, "Results")

@@ -85,6 +85,8 @@ class PipelineArgs:
     cropdetect_low: float | None = None
     cropdetect_high: float | None = None
     predicted_bitrate_warning_percent: float | None = None
+    show_best_within_budget: bool = False
+    continue_budget_search: bool = False
     metric_decimals: int = METRIC_DECIMALS
 
     log_file: str | Path | None = None
@@ -429,6 +431,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=_get_default("predicted_bitrate_warning_percent"),
         help="Warn if output exceeds this %% of input bitrate (1-100)",
     )
+    _ = bitrate_group.add_argument(
+        "--show-best-within-budget",
+        action="store_true",
+        default=_get_default("show_best_within_budget"),
+        help="After the warning, show the best encode that fits the budget (requires --predicted-bitrate-warning-percent, not for --assessment-only)",  # noqa: E501  # TODO(E501): shorten line
+    )
+    _ = bitrate_group.add_argument(
+        "--continue-budget-search",
+        action="store_true",
+        default=_get_default("continue_budget_search"),
+        help="Run further encodes to close in on the budget (implies --show-best-within-budget, not for --assessment-only)",  # noqa: E501  # TODO(E501): shorten line
+    )
 
     # -------------------------------------------------------------------------
     # Display
@@ -538,6 +552,11 @@ def parse_cli(argv: Iterable[str] | None = None) -> PipelineArgs:
     mps = getattr(parsed, "multi_profile_search", None)
     if isinstance(mps, str):
         parsed.multi_profile_search = [g.strip() for g in mps.split(",") if g.strip()]
+
+    # Asking to search for the best encode within budget is asking to be shown
+    # it, so the two never have to be passed together.
+    if getattr(parsed, "continue_budget_search", False):
+        parsed.show_best_within_budget = True
 
     return PipelineArgs(**vars(parsed))  # pyright: ignore[reportAny]
 
@@ -680,6 +699,32 @@ def validate_bitrate_warning_args(
             parser.error(
                 f"--predicted-bitrate-warning-percent must be between {BITRATE_WARNING_PERCENT_MIN:.0f} and {BITRATE_WARNING_PERCENT_MAX:.0f} (got {args.predicted_bitrate_warning_percent})"  # noqa: E501  # TODO(E501): shorten line
             )
+
+    # --continue-budget-search implies --show-best-within-budget, so the flag
+    # that is set is not always the flag that was typed. Errors name the typed
+    # one, which is the only one the reader can act on.
+    typed_flag = (
+        "--continue-budget-search"
+        if args.continue_budget_search
+        else "--show-best-within-budget"
+    )
+
+    # The warning percent is what defines the budget, so asking to be shown the
+    # best encode within it without setting one cannot be honoured.
+    if args.show_best_within_budget and args.predicted_bitrate_warning_percent is None:
+        parser.error(
+            f"{typed_flag} requires --predicted-bitrate-warning-percent, which sets the budget. Add a warning percent or remove {typed_flag}."  # noqa: E501  # TODO(E501): shorten line
+        )
+
+    if args.assessment_only and args.show_best_within_budget:
+        detail = (
+            "with no search to continue"
+            if args.continue_budget_search
+            else "so there are no other results to choose between"
+        )
+        parser.error(
+            f"--assessment-only and {typed_flag} are mutually exclusive. --assessment-only runs a single encode, {detail}."  # noqa: E501  # TODO(E501): shorten line
+        )
 
 
 def validate_metric_decimals_args(

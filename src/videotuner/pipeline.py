@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
+from itertools import count
 from pathlib import Path
 
+from .budget_search import run_budget_search, select_within_budget
 from .constants import (
     CRF_SEARCH_MAX_ITERATIONS,
     METRIC_DECIMALS,
@@ -40,6 +42,7 @@ from .pipeline_cli import (
 from .pipeline_display import (
     check_and_display_bitrate_warning,
     display_assessment_summary,
+    display_best_within_budget,
     display_ignored_args_warnings,
     display_multi_profile_results,
     display_settings_summary,
@@ -56,7 +59,13 @@ from .pipeline_reference import (
     are_sampling_params_equal,
     generate_metric_reference,
 )
-from .pipeline_types import IterationContext, JobResult, get_reference_dir
+from .pipeline_types import (
+    Budget,
+    BudgetPoint,
+    IterationContext,
+    JobResult,
+    get_reference_dir,
+)
 from .pipeline_validation import (
     build_targets,
     check_sources_compatible,
@@ -76,6 +85,106 @@ from .utils import (
     sanitize_filename,
 )
 from .vmaf_assessment import VMAFResult
+
+
+def _budget_encoder(
+    profile_name: str,
+    ctx: IterationContext,
+    display: PipelineDisplay,
+    log: logging.Logger,
+    first_iteration: int,
+) -> Callable[[float], BudgetPoint]:
+    """Build the callable the budget search runs one encode with.
+
+    A factory rather than a closure written inside the caller's loop, so each
+    profile gets its own iteration counter without capturing a loop variable.
+    """
+    counter = count(first_iteration)
+
+    def encode(crf: float) -> BudgetPoint:
+        display.console.print(
+            f"[bold cyan]Budget Search: {profile_name} at CRF {crf:.1f}[/bold cyan]"
+        )
+        log.info("Budget search encode: %s at CRF %.1f", profile_name, crf)
+        scores, _vmaf, _ssim2, predicted, _vpath, _spath = run_single_crf_iteration(
+            ctx, crf, iteration=next(counter)
+        )
+        return BudgetPoint(
+            profile_name=profile_name,
+            crf=crf,
+            scores=scores,
+            predicted_bitrate_kbps=predicted,
+        )
+
+    return encode
+
+
+def _search_within_budget(
+    searchable: list[tuple[str, IterationContext, tuple[BudgetPoint, ...]]],
+    cap_kbps: float,
+    interval: float,
+    display: PipelineDisplay,
+    log: logging.Logger,
+) -> list[BudgetPoint]:
+    """Spend extra encodes, per profile, closing in on the budget.
+
+    Every CRF profile is searched rather than only the winner: the profile that
+    is cheapest at its own optimum is not necessarily the best one at the budget.
+    """
+    display.console.print()
+    display.console.print(
+        "[bold]Searching for the best result within budget "
+        + f"(<= {cap_kbps:,.0f} kbps)[/bold]"
+    )
+    log.info("Budget search: looking for encodes at or below %.0f kbps", cap_kbps)
+
+    extra: list[BudgetPoint] = []
+    for profile_name, ctx, points in searchable:
+        encode = _budget_encoder(profile_name, ctx, display, log, len(points) + 1)
+        extra.extend(run_budget_search(list(points), cap_kbps, interval, encode))
+
+    if not extra:
+        display.console.print("[dim]Nothing further to encode[/dim]")
+
+    return extra
+
+
+def _report_within_budget(
+    points: list[BudgetPoint],
+    searchable: list[tuple[str, IterationContext, tuple[BudgetPoint, ...]]],
+    budget: Budget,
+    targets: list[QualityTarget],
+    args: PipelineArgs,
+    display: PipelineDisplay,
+    log: logging.Logger,
+) -> None:
+    """Offer the best measured encode fitting the budget, searching first if asked.
+
+    Shared by both modes, which differ only in where the points came from. How
+    the result is worded follows from what actually happened rather than from
+    what the caller says happened.
+    """
+    # Asking for the search is not the same as running one: a group of only
+    # bitrate profiles has no CRF to move, and must not then be told that even
+    # the CRF ceiling was too expensive.
+    searched = bool(args.continue_budget_search and searchable)
+    pooled = list(points)
+    if searched:
+        pooled += _search_within_budget(
+            searchable, budget.cap_kbps, args.crf_interval, display, log
+        )
+
+    display_best_within_budget(
+        display.console,
+        log,
+        select_within_budget(pooled, budget.cap_kbps, targets),
+        budget,
+        targets,
+        args.metric_decimals,
+        # Naming the profile only tells the reader anything when more than one ran
+        name_profile=len({p.profile_name for p in pooled}) > 1,
+        searched=searched,
+    )
 
 
 def run_pipeline(
@@ -606,6 +715,10 @@ def _run_pipeline_body(
     optimal_crf: float | None = None
     _predicted_bitrate: float = 0.0
     optimal_predicted_bitrate: float = 0.0
+    # Every encode a single-profile CRF search runs, for the budget search,
+    # with the context it would need to run more of them
+    single_tested_points: list[BudgetPoint] = []
+    budget_ctx: IterationContext | None = None
 
     # This job's summary row. Overwritten by the multi-profile branch with the
     # winning profile; otherwise filled in from the single-profile search below.
@@ -718,6 +831,7 @@ def _run_pipeline_body(
             sharing_samples=sharing_samples,
         )
 
+        budget_ctx = ctx
         iteration = 0
         current_crf: float = args.crf_start_value
         max_iterations = CRF_SEARCH_MAX_ITERATIONS
@@ -764,6 +878,14 @@ def _run_pipeline_body(
 
             # Store predicted bitrate for this CRF
             crf_to_predicted_bitrate_single[current_crf] = _predicted_bitrate
+            single_tested_points.append(
+                BudgetPoint(
+                    profile_name=selected_profile.name,
+                    crf=current_crf,
+                    scores=scores,
+                    predicted_bitrate_kbps=_predicted_bitrate,
+                )
+            )
 
             # Add result to search state
             search_scores = {k: v for k, v in scores.items() if v is not None}
@@ -943,11 +1065,44 @@ def _run_pipeline_body(
         # Rank results
         ranked_results = rank_profile_results(profile_results, targets)
 
+        budget = Budget.resolve(
+            info.video_bitrate_kbps, args.predicted_bitrate_warning_percent
+        )
+
+        def report_within_budget() -> None:
+            """Offer the best encode within budget, from every profile's encodes."""
+            if budget is None:
+                return
+            by_name = {p.name: p for p in multi_profile_list}
+            _report_within_budget(
+                [p for r in profile_results for p in r.tested_points],
+                [
+                    (
+                        r.profile_name,
+                        ctx_factory(by_name[r.profile_name]),
+                        r.tested_points,
+                    )
+                    for r in profile_results
+                    if r.profile_name in by_name
+                    and not by_name[r.profile_name].is_bitrate_mode
+                ],
+                budget,
+                targets,
+                args,
+                display,
+                log,
+            )
+
         if not ranked_results:
             display.console.print(
                 "[bold red]No profiles produced valid results[/bold red]"
             )
             log.error("Multi-profile search failed - no valid results")
+            # Nothing met the targets, which is exactly when what *is* reachable
+            # within budget is worth knowing. The job still failed.
+            if args.show_best_within_budget:
+                display.console.print("[yellow]No profile met your targets[/yellow]")
+                report_within_budget()
             return JobResult.failure(input_path, "no profile produced valid results")
 
         winner = ranked_results[0]
@@ -973,7 +1128,7 @@ def _run_pipeline_body(
         display.console.print(f"[cyan]Predicted Bitrate: {bitrate_display}[/cyan]")
 
         # Show warning if applicable
-        check_and_display_bitrate_warning(
+        warned = check_and_display_bitrate_warning(
             display.console,
             log,
             winner.predicted_bitrate_kbps,
@@ -981,6 +1136,11 @@ def _run_pipeline_body(
             args.predicted_bitrate_warning_percent,
             profile_name=winner.profile_name,
         )
+
+        # The winner busted the budget, so offer the closest encode that fits
+        # it: the reader decides whether its metrics are close enough.
+        if warned and args.show_best_within_budget:
+            report_within_budget()
 
         if winner.optimal_crf is not None:
             log.info(
@@ -1071,7 +1231,7 @@ def _run_pipeline_body(
             display.console.print(f"[cyan]Predicted Bitrate: {bitrate_display}[/cyan]")
 
         # Show warning if applicable
-        check_and_display_bitrate_warning(
+        warned = check_and_display_bitrate_warning(
             display.console,
             log,
             predicted_bitrate_for_display,
@@ -1079,6 +1239,26 @@ def _run_pipeline_body(
             args.predicted_bitrate_warning_percent,
             profile_name=selected_profile.name,
         )
+
+        # Same offer as multi-profile mode, drawn from this profile's own
+        # iterations. Assessment-only ran a single encode, so it has no
+        # cheaper measurement to fall back to.
+        budget = Budget.resolve(
+            info.video_bitrate_kbps, args.predicted_bitrate_warning_percent
+        )
+        if warned and args.show_best_within_budget and budget is not None:
+            assert selected_profile is not None
+            _report_within_budget(
+                single_tested_points,
+                [(selected_profile.name, budget_ctx, tuple(single_tested_points))]
+                if budget_ctx is not None
+                else [],
+                budget,
+                targets,
+                args,
+                display,
+                log,
+            )
 
     log_section(log, "Results")
 

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, cast
 if TYPE_CHECKING:
     from .crf_search import QualityTarget
     from .pipeline_cli import PipelineArgs
-    from .pipeline_types import IterationContext, MultiProfileResult
+    from .pipeline_types import BudgetPoint, IterationContext, MultiProfileResult
     from .profiles import Profile
     from .progress import PipelineDisplay
 
@@ -123,7 +123,7 @@ def _run_bitrate_profile(
         MultiProfileResult for this profile
     """
     from .pipeline_iteration import run_single_bitrate_iteration
-    from .pipeline_types import MultiProfileResult
+    from .pipeline_types import BudgetPoint, MultiProfileResult
     from .pipeline_validation import check_scores_meet_targets
 
     bitrate_kbps = profile.bitrate or 0
@@ -155,6 +155,15 @@ def _run_bitrate_profile(
             predicted_bitrate_kbps=predicted_bitrate,
             converged=True,
             meets_all_targets=meets_all,
+            # One encode, so one point. It has no rate factor to record.
+            tested_points=(
+                BudgetPoint(
+                    profile_name=profile.name,
+                    crf=None,
+                    scores=scores,
+                    predicted_bitrate_kbps=predicted_bitrate,
+                ),
+            ),
         )
 
         if meets_all is True:
@@ -222,7 +231,7 @@ def _run_crf_profile_search(
     from .crf_search import CRFFloorError, CRFSearchState
     from .pipeline_display import display_assessment_summary
     from .pipeline_iteration import run_single_crf_iteration
-    from .pipeline_types import MultiProfileResult
+    from .pipeline_types import BudgetPoint, MultiProfileResult
     from .pipeline_validation import check_scores_meet_targets
 
     crf_search_state = CRFSearchState(targets, crf_interval)
@@ -240,6 +249,8 @@ def _run_crf_profile_search(
 
     crf_to_predicted_bitrate: dict[float, float] = {}
     iteration_final_scores: dict[str, float | None] = {}
+    # Every encode this search runs, kept for the budget search to choose from.
+    tested_points: list[BudgetPoint] = []
 
     while iteration < max_iterations:
         iteration += 1
@@ -258,6 +269,14 @@ def _run_crf_profile_search(
 
         crf_to_predicted_bitrate[current_crf] = predicted_bitrate
         iteration_final_scores = scores
+        tested_points.append(
+            BudgetPoint(
+                profile_name=profile.name,
+                crf=current_crf,
+                scores=scores,
+                predicted_bitrate_kbps=predicted_bitrate,
+            )
+        )
 
         search_scores = {k: v for k, v in scores.items() if v is not None}
         crf_search_state.add_result(current_crf, search_scores)
@@ -334,6 +353,7 @@ def _run_crf_profile_search(
         predicted_bitrate_kbps=predicted_bitrate,
         converged=converged,
         meets_all_targets=meets_all_targets_crf,
+        tested_points=tuple(tested_points),
     )
 
     if not result.is_valid():
@@ -385,7 +405,7 @@ def get_effective_metric_priority(
 
 
 def metric_priority_sort_key(
-    result: MultiProfileResult,
+    scores: dict[str, float | None],
     priority: tuple[str, ...],
 ) -> tuple[float, ...]:
     """Create a sort key from scores based on metric priority.
@@ -394,8 +414,11 @@ def metric_priority_sort_key(
     Python sorts ascending, but higher scores are better). Missing scores
     are treated as negative infinity (worst possible).
 
+    Takes the scores rather than the thing holding them, so profile results
+    and individual measured encodes rank by one shared rule.
+
     Args:
-        result: Profile result to create key for
+        scores: Metric scores to create key for
         priority: Metric names in priority order
 
     Returns:
@@ -403,7 +426,7 @@ def metric_priority_sort_key(
     """
     key: list[float] = []
     for metric_name in priority:
-        score = result.scores.get(metric_name)
+        score = scores.get(metric_name)
         if score is not None:
             key.append(-score)  # Negate: higher score = lower sort value = better
         else:
@@ -466,18 +489,18 @@ def rank_profile_results(
         tier1.sort(
             key=lambda r: (
                 r.predicted_bitrate_kbps,
-                metric_priority_sort_key(r, priority),
+                metric_priority_sort_key(r.scores, priority),
             )
         )
         tier2.sort(
             key=lambda r: (
                 r.predicted_bitrate_kbps,
-                metric_priority_sort_key(r, priority),
+                metric_priority_sort_key(r.scores, priority),
             )
         )
     else:
         # All-ABR group: sort by metric priority only (no bitrate ranking)
-        tier1.sort(key=lambda r: metric_priority_sort_key(r, priority))
-        tier2.sort(key=lambda r: metric_priority_sort_key(r, priority))
+        tier1.sort(key=lambda r: metric_priority_sort_key(r.scores, priority))
+        tier2.sort(key=lambda r: metric_priority_sort_key(r.scores, priority))
 
     return tier1 + tier2

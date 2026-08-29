@@ -281,7 +281,7 @@ class TestBitrateWarning:
         console, buffer = _make_console()
         log = logging.getLogger("test")
 
-        check_and_display_bitrate_warning(
+        _ = check_and_display_bitrate_warning(
             console=console,
             log=log,
             predicted_bitrate_kbps=10000.0,
@@ -298,7 +298,7 @@ class TestBitrateWarning:
         console, buffer = _make_console()
         log = logging.getLogger("test")
 
-        check_and_display_bitrate_warning(
+        _ = check_and_display_bitrate_warning(
             console=console,
             log=log,
             predicted_bitrate_kbps=10000.0,
@@ -315,7 +315,7 @@ class TestBitrateWarning:
         console, buffer = _make_console()
         log = logging.getLogger("test")
 
-        check_and_display_bitrate_warning(
+        _ = check_and_display_bitrate_warning(
             console=console,
             log=log,
             predicted_bitrate_kbps=10000.0,
@@ -332,7 +332,7 @@ class TestBitrateWarning:
         console, buffer = _make_console()
         log = logging.getLogger("test")
 
-        check_and_display_bitrate_warning(
+        _ = check_and_display_bitrate_warning(
             console=console,
             log=log,
             predicted_bitrate_kbps=0.0,
@@ -351,7 +351,7 @@ class TestBitrateWarning:
 
         # Predicted is 10,000 kbps, input is 5,000 kbps = 200% of input
         # Threshold is 80%, so warning should be displayed
-        check_and_display_bitrate_warning(
+        _ = check_and_display_bitrate_warning(
             console=console,
             log=log,
             predicted_bitrate_kbps=10000.0,
@@ -374,7 +374,7 @@ class TestBitrateWarning:
 
         # Predicted is 3,000 kbps, input is 5,000 kbps = 60% of input
         # Threshold is 80%, so no warning should be displayed
-        check_and_display_bitrate_warning(
+        _ = check_and_display_bitrate_warning(
             console=console,
             log=log,
             predicted_bitrate_kbps=3000.0,
@@ -393,7 +393,7 @@ class TestBitrateWarning:
 
         # Predicted is 4,000 kbps, input is 5,000 kbps = 80% of input
         # Threshold is 80%, so no warning (not exceeding)
-        check_and_display_bitrate_warning(
+        _ = check_and_display_bitrate_warning(
             console=console,
             log=log,
             predicted_bitrate_kbps=4000.0,
@@ -410,7 +410,7 @@ class TestBitrateWarning:
         console, buffer = _make_console()
         log = logging.getLogger("test")
 
-        check_and_display_bitrate_warning(
+        _ = check_and_display_bitrate_warning(
             console=console,
             log=log,
             predicted_bitrate_kbps=10000.0,
@@ -427,7 +427,7 @@ class TestBitrateWarning:
         console, buffer = _make_console()
         log = logging.getLogger("test")
 
-        check_and_display_bitrate_warning(
+        _ = check_and_display_bitrate_warning(
             console=console,
             log=log,
             predicted_bitrate_kbps=10000.0,
@@ -449,7 +449,7 @@ class TestBitrateFormatting:
         console, buffer = _make_console()
         log = logging.getLogger("test")
 
-        check_and_display_bitrate_warning(
+        _ = check_and_display_bitrate_warning(
             console=console,
             log=log,
             predicted_bitrate_kbps=31144.0,

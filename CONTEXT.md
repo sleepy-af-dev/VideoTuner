@@ -55,3 +55,23 @@ _Avoid_: preset (a preset is one setting within a profile, not a synonym for it)
 A metric threshold a job must meet, such as a minimum mean VMAF. A job searches for
 the rate factor that satisfies every target it was given.
 _Avoid_: goal, threshold
+
+**Budget**:
+The largest predicted bitrate a result can have and still be worth offering, set by
+`--predicted-bitrate-warning-percent` as a percentage of the source's own bitrate.
+A job optimizes for its quality targets, never for the budget; exceeding it is
+reported after the fact, alongside the best encode that stayed within it.
+_Avoid_: bitrate target (a target is what a job searches for, which this is not),
+bitrate limit (nothing is prevented from exceeding it)
+
+**Point**:
+One encode that was run and scored, at a known predicted bitrate. Every CRF
+iteration produces one and so does every bitrate-mode encode, which is why a
+search that missed its targets still leaves usable measurements behind. The unit
+the budget search chooses between.
+_Avoid_: result (that is a profile's outcome, one per profile, not one per encode)
+
+**Budget search**:
+Encoding further CRF values to find the lowest one that still fits the budget,
+run only when asked for with `--continue-budget-search`. Distinct from the CRF
+search, which seeks the highest rate factor meeting every quality target.

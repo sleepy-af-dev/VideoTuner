@@ -90,6 +90,47 @@ class JobResult:
 
 
 @dataclass(frozen=True)
+class Budget:
+    """The bitrate ceiling a run is measured against, and what set it.
+
+    Both halves travel together everywhere: the cap is what a result is judged
+    by, and the percentage is how it is reported back to whoever set it.
+    """
+
+    input_bitrate_kbps: float
+    threshold_percent: float
+
+    @property
+    def cap_kbps(self) -> float:
+        """Highest predicted bitrate that still fits."""
+        return self.input_bitrate_kbps * self.threshold_percent / 100.0
+
+    @classmethod
+    def resolve(
+        cls, input_bitrate_kbps: float | None, threshold_percent: float | None
+    ) -> Budget | None:
+        """Build a budget, or None when either half is missing or unusable."""
+        if not input_bitrate_kbps or not threshold_percent:
+            return None
+        return cls(input_bitrate_kbps, threshold_percent)
+
+
+@dataclass(frozen=True)
+class BudgetPoint:
+    """One encode that was actually run and scored, at a known predicted bitrate.
+
+    The unit the budget search chooses between. Every CRF iteration produces one,
+    as does each bitrate-mode encode, so a point is raw measurement: whether it
+    met the quality targets is derived from ``scores``, never stored.
+    """
+
+    profile_name: str
+    crf: float | None  # None for a bitrate-mode encode, which has no rate factor
+    scores: dict[str, float | None]
+    predicted_bitrate_kbps: float
+
+
+@dataclass(frozen=True)
 class MultiProfileResult:
     """Results from a single profile in multi-profile mode (CRF search or bitrate).
 
@@ -106,6 +147,9 @@ class MultiProfileResult:
     predicted_bitrate_kbps: float  # Predicted bitrate across all samples
     converged: bool  # True if search converged successfully
     meets_all_targets: bool | None = None  # True/False for CRF, None for bitrate (N/A)
+    # Every encode this profile ran, not just the optimal one. A profile that
+    # never converged still contributes its measurements to the budget search.
+    tested_points: tuple[BudgetPoint, ...] = ()
 
     @property
     def is_bitrate_mode(self) -> bool:

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from videotuner.constants import (
     BITRATE_WARNING_PERCENT_MAX,
     # Bitrate warning constants
     BITRATE_WARNING_PERCENT_MIN,
+    BUDGET_SEARCH_MAX_ITERATIONS,
     CRF_FLOOR_TOLERANCE,
     CRF_FLOOR_VALUE,
     CRF_MAX,
@@ -166,3 +169,22 @@ class TestPercentileConstants:
     def test_95pct_value(self):
         """Test 95th percentile value."""
         assert PERCENTILE_95PCT == 0.95
+
+
+class TestBudgetSearchConstants:
+    """The budget search cap, and the documentation that quotes it."""
+
+    def test_cap_is_smaller_than_the_quality_search(self):
+        """These encodes run after a search that already spent its own allowance."""
+        assert 0 < BUDGET_SEARCH_MAX_ITERATIONS < CRF_SEARCH_MAX_ITERATIONS
+
+    def test_readme_quotes_the_current_cap(self):
+        """The README tells users what the flag costs, so it must not drift.
+
+        Documentation restating a constant goes stale silently. This fails the
+        moment the cap changes without the sentence changing with it.
+        """
+        readme = (Path(__file__).parent.parent / "README.md").read_text(
+            encoding="utf-8"
+        )
+        assert f"capped at {BUDGET_SEARCH_MAX_ITERATIONS} extra encodes" in readme

@@ -90,6 +90,32 @@ class JobResult:
 
 
 @dataclass(frozen=True)
+class Budget:
+    """The bitrate ceiling a run is measured against, and what set it.
+
+    Both halves travel together everywhere: the cap is what a result is judged
+    by, and the percentage is how it is reported back to whoever set it.
+    """
+
+    input_bitrate_kbps: float
+    threshold_percent: float
+
+    @property
+    def cap_kbps(self) -> float:
+        """Highest predicted bitrate that still fits."""
+        return self.input_bitrate_kbps * self.threshold_percent / 100.0
+
+    @classmethod
+    def resolve(
+        cls, input_bitrate_kbps: float | None, threshold_percent: float | None
+    ) -> Budget | None:
+        """Build a budget, or None when either half is missing or unusable."""
+        if not input_bitrate_kbps or not threshold_percent:
+            return None
+        return cls(input_bitrate_kbps, threshold_percent)
+
+
+@dataclass(frozen=True)
 class BudgetPoint:
     """One encode that was actually run and scored, at a known predicted bitrate.
 

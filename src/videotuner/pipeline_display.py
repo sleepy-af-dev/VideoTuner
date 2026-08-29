@@ -14,11 +14,11 @@ from rich.console import Console
 from rich.table import Table
 
 from .constants import METRIC_DECIMALS
-from .crf_search import QualityTarget
+from .crf_search import CRF_CEILING, QualityTarget
 from .pipeline_cli import DEFAULT_CRF_INTERVAL, DEFAULT_CRF_START_VALUE, get_default
 
 if TYPE_CHECKING:
-    from .pipeline_types import BudgetPoint, JobResult, MultiProfileResult
+    from .pipeline_types import Budget, BudgetPoint, JobResult, MultiProfileResult
 
 #: Metric key to display name, in the order metrics are shown. Single source of
 #: truth for both the per-job assessment summary and the batch summary.
@@ -404,13 +404,12 @@ def display_best_within_budget(
     console: Console,
     log: logging.Logger,
     chosen: BudgetPoint | None,
-    input_bitrate_kbps: float,
-    threshold_percent: float,
+    budget: Budget,
     targets: list[QualityTarget],
     metric_decimals: int,
     *,
     name_profile: bool,
-    searched: bool = False,
+    searched: bool,
 ) -> None:
     """Show the best encode that fits the budget, if one was measured.
 
@@ -422,8 +421,7 @@ def display_best_within_budget(
         console: Rich console for output
         log: Logger, recording the alternative alongside the warning
         chosen: Best measured encode within the budget, or None if nothing fits
-        input_bitrate_kbps: Input video bitrate
-        threshold_percent: Warning threshold as percentage
+        budget: The ceiling being measured against
         targets: Quality targets, shown as deltas against the chosen encode
         metric_decimals: Decimal places for metric display
         name_profile: Whether to name the profile, which only distinguishes
@@ -431,9 +429,8 @@ def display_best_within_budget(
         searched: Whether further encodes were run to close in on the budget,
             which changes what the output can honestly claim
     """
-    from .crf_search import CRF_CEILING
-
-    cap_kbps = input_bitrate_kbps * threshold_percent / 100.0
+    cap_kbps = budget.cap_kbps
+    threshold_percent = budget.threshold_percent
 
     if chosen is None:
         if searched:
@@ -463,7 +460,7 @@ def display_best_within_budget(
         headline = f"CRF {chosen.crf:.1f}"
 
     bitrate_display = format_bitrate_percentage(
-        chosen.predicted_bitrate_kbps, input_bitrate_kbps
+        chosen.predicted_bitrate_kbps, budget.input_bitrate_kbps
     )
     console.print()
     console.print(f"[bold cyan]Best within budget: {headline}[/bold cyan]")

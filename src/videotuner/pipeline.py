@@ -60,6 +60,7 @@ from .pipeline_reference import (
     generate_metric_reference,
 )
 from .pipeline_types import (
+    Budget,
     BudgetPoint,
     IterationContext,
     JobResult,
@@ -146,6 +147,40 @@ def _search_within_budget(
         display.console.print("[dim]Nothing further to encode[/dim]")
 
     return extra
+
+
+def _report_within_budget(
+    points: list[BudgetPoint],
+    searchable: list[tuple[str, IterationContext, tuple[BudgetPoint, ...]]],
+    budget: Budget,
+    targets: list[QualityTarget],
+    args: PipelineArgs,
+    display: PipelineDisplay,
+    log: logging.Logger,
+    *,
+    name_profile: bool,
+) -> None:
+    """Offer the best measured encode fitting the budget, searching first if asked.
+
+    Shared by both modes: they differ only in where the points came from and
+    whether naming a profile distinguishes anything.
+    """
+    pooled = list(points)
+    if args.continue_budget_search and searchable:
+        pooled += _search_within_budget(
+            searchable, budget.cap_kbps, args.crf_interval, display, log
+        )
+
+    display_best_within_budget(
+        display.console,
+        log,
+        select_within_budget(pooled, budget.cap_kbps, targets),
+        budget,
+        targets,
+        args.metric_decimals,
+        name_profile=name_profile,
+        searched=args.continue_budget_search,
+    )
 
 
 def run_pipeline(
@@ -1026,22 +1061,18 @@ def _run_pipeline_body(
         # Rank results
         ranked_results = rank_profile_results(profile_results, targets)
 
-        warn_percent = args.predicted_bitrate_warning_percent
-        budget_kbps = (
-            info.video_bitrate_kbps * warn_percent / 100.0
-            if info.video_bitrate_kbps and warn_percent
-            else None
+        budget = Budget.resolve(
+            info.video_bitrate_kbps, args.predicted_bitrate_warning_percent
         )
 
         def report_within_budget() -> None:
-            """Offer the best measured encode fitting the budget, if any."""
-            if budget_kbps is None:
+            """Offer the best encode within budget, from every profile's encodes."""
+            if budget is None:
                 return
-            assert warn_percent is not None and info.video_bitrate_kbps is not None
-            pooled = [p for r in profile_results for p in r.tested_points]
-            if args.continue_budget_search:
-                by_name = {p.name: p for p in multi_profile_list}
-                searchable = [
+            by_name = {p.name: p for p in multi_profile_list}
+            _report_within_budget(
+                [p for r in profile_results for p in r.tested_points],
+                [
                     (
                         r.profile_name,
                         ctx_factory(by_name[r.profile_name]),
@@ -1050,20 +1081,13 @@ def _run_pipeline_body(
                     for r in profile_results
                     if r.profile_name in by_name
                     and not by_name[r.profile_name].is_bitrate_mode
-                ]
-                pooled += _search_within_budget(
-                    searchable, budget_kbps, args.crf_interval, display, log
-                )
-            display_best_within_budget(
-                display.console,
-                log,
-                select_within_budget(pooled, budget_kbps, targets),
-                info.video_bitrate_kbps,
-                warn_percent,
+                ],
+                budget,
                 targets,
-                args.metric_decimals,
+                args,
+                display,
+                log,
                 name_profile=True,
-                searched=args.continue_budget_search,
             )
 
         if not ranked_results:
@@ -1216,35 +1240,22 @@ def _run_pipeline_body(
         # Same offer as multi-profile mode, drawn from this profile's own
         # iterations. Assessment-only ran a single encode, so it has no
         # cheaper measurement to fall back to.
-        warn_percent = args.predicted_bitrate_warning_percent
-        if (
-            warned
-            and args.show_best_within_budget
-            and not args.assessment_only
-            and info.video_bitrate_kbps
-            and warn_percent
-        ):
+        budget = Budget.resolve(
+            info.video_bitrate_kbps, args.predicted_bitrate_warning_percent
+        )
+        if warned and args.show_best_within_budget and budget is not None:
             assert selected_profile is not None
-            cap_kbps = info.video_bitrate_kbps * warn_percent / 100.0
-            pooled = list(single_tested_points)
-            if args.continue_budget_search and budget_ctx is not None:
-                pooled += _search_within_budget(
-                    [(selected_profile.name, budget_ctx, tuple(single_tested_points))],
-                    cap_kbps,
-                    args.crf_interval,
-                    display,
-                    log,
-                )
-            display_best_within_budget(
-                display.console,
-                log,
-                select_within_budget(pooled, cap_kbps, targets),
-                info.video_bitrate_kbps,
-                warn_percent,
+            _report_within_budget(
+                single_tested_points,
+                [(selected_profile.name, budget_ctx, tuple(single_tested_points))]
+                if budget_ctx is not None
+                else [],
+                budget,
                 targets,
-                args.metric_decimals,
+                args,
+                display,
+                log,
                 name_profile=False,
-                searched=args.continue_budget_search,
             )
 
     log_section(log, "Results")

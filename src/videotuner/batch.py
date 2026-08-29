@@ -171,6 +171,8 @@ def run_batch(
             folder_name, max(1, len(folder_name) - shortfall)
         )
         batch_folder = jobs_root / f"{folder_name}_{timestamp}"
+        note = f"Batch folder name shortened to fit the path limit: {folder_name}"
+        display.console.print(f"[yellow]{note}[/yellow]")
     _ = ensure_dir(batch_folder)
 
     # Job folder names are fitted against the batch folder actually chosen.
@@ -213,6 +215,12 @@ def run_batch(
             display.console.print(
                 f"[bold]\\[{index}/{len(videos)}][/bold] [cyan]{video.name}[/cyan]"
             )
+            if folder_name != sanitize_filename(video.stem):
+                # The job never sees the untruncated name, so the batch reports
+                # this: an unexplained hash suffix in a folder name is worse
+                # than a line of output.
+                note = f"Job folder name shortened to fit the path limit: {folder_name}"
+                display.console.print(f"[yellow]{note}[/yellow]")
             start_crf = carried_crf if carried_crf is not None else args.crf_start_value
             if carried_crf is not None:
                 note = f"Starting at CRF {start_crf:.1f} carried from the previous job"

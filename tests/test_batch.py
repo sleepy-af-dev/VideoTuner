@@ -167,6 +167,33 @@ class TestRunBatch:
         ]
         assert all(a.log_file is None for a, _ in handed)
 
+    def test_shortening_a_job_folder_name_is_reported(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A hash suffix nobody was told about is worse than a line of output.
+
+        The job itself never sees the untruncated name, so only the batch can
+        report this.
+        """
+        source = tmp_path / "src"
+        source.mkdir()
+        _touch(source, ("a-long-example-input-name" * 8) + ".mkv")
+
+        _ = run_batch(_args(source, tmp_path / "out"), _ok)
+
+        assert "shortened to fit the path limit" in capsys.readouterr().out
+
+    def test_a_name_that_fits_is_not_reported(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        source = tmp_path / "src"
+        source.mkdir()
+        _touch(source, "a.mkv")
+
+        _ = run_batch(_args(source, tmp_path / "out"), _ok)
+
+        assert "shortened" not in capsys.readouterr().out
+
     def test_batch_log_is_written_to_the_batch_folder(self, tmp_path: Path) -> None:
         source = tmp_path / "src"
         source.mkdir()

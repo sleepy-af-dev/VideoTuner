@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import pytest
 
+from videotuner.encoding_utils import SampledSource, UsableRange
 from videotuner.pipeline_cli import PipelineArgs
 from videotuner.pipeline_reference import (
     MetricSamplingParams,
@@ -129,134 +129,64 @@ class TestAreSamplingParamsEqual:
 
 
 class TestMetricSamplingParams:
-    """Tests for MetricSamplingParams dataclass."""
+    """How a metric samples the source a job reads, across one file or several."""
 
-    def test_creation_with_all_fields(self):
-        """Test that MetricSamplingParams can be created with all fields."""
-        params = MetricSamplingParams(
-            interval_frames=1600,
-            region_frames=20,
-            guard_start_frames=100,
-            guard_end_frames=100,
-            total_frames=10000,
+    @staticmethod
+    def _source(name: str, start: int, end: int) -> SampledSource:
+        return SampledSource(
+            path=Path(f"{name}.mkv"),
+            cache_file=Path(f"{name}.ffindex"),
+            usable_range=UsableRange(start=start, end=end, frame_count=end - start),
         )
-        assert params.interval_frames == 1600
-        assert params.region_frames == 20
-        assert params.guard_start_frames == 100
-        assert params.guard_end_frames == 100
-        assert params.total_frames == 10000
 
-    def test_is_frozen(self):
-        """Test that MetricSamplingParams is immutable."""
+    def test_is_frozen(self) -> None:
         params = MetricSamplingParams(
             interval_frames=1600,
             region_frames=20,
-            guard_start_frames=100,
-            guard_end_frames=100,
-            total_frames=10000,
+            sources=(self._source("one", 0, 10000),),
         )
         with pytest.raises(AttributeError):
-            setattr(params, "interval_frames", 3200)
+            setattr(params, "interval_frames", 1)
 
-    def test_usable_frames_property(self):
-        """Test usable_frames excludes guard bands."""
+    def test_num_samples_for_one_file(self) -> None:
         params = MetricSamplingParams(
-            interval_frames=1600,
-            region_frames=20,
-            guard_start_frames=100,
-            guard_end_frames=200,
-            total_frames=10000,
+            interval_frames=100,
+            region_frames=50,
+            sources=(self._source("one", 0, 1000),),
         )
-        # usable = 10000 - 100 - 200 = 9700
-        assert params.usable_frames == 9700
-
-    def test_usable_frames_with_no_guards(self):
-        """Test usable_frames equals total when no guard bands."""
-        params = MetricSamplingParams(
-            interval_frames=1600,
-            region_frames=20,
-            guard_start_frames=0,
-            guard_end_frames=0,
-            total_frames=10000,
-        )
-        assert params.usable_frames == 10000
-
-    def test_num_samples_property(self):
-        """Test num_samples calculation."""
-        params = MetricSamplingParams(
-            interval_frames=1600,
-            region_frames=20,
-            guard_start_frames=100,
-            guard_end_frames=100,
-            total_frames=10000,
-        )
-        # usable = 10000 - 100 - 100 = 9800
-        # num_samples = (9800 + 1600 - 20) // 1600 = 11380 // 1600 = 7
-        assert params.num_samples == 7
-
-    def test_num_samples_with_small_video(self):
-        """Test num_samples with a small video returns at least 1."""
-        params = MetricSamplingParams(
-            interval_frames=1600,
-            region_frames=20,
-            guard_start_frames=100,
-            guard_end_frames=100,
-            total_frames=500,
-        )
-        # usable = 500 - 100 - 100 = 300
-        # num_samples = (300 + 1600 - 20) // 1600 = 1880 // 1600 = 1
-        assert params.num_samples == 1
-
-    def test_total_sample_frames_property(self):
-        """Test total_sample_frames calculation."""
-        params = MetricSamplingParams(
-            interval_frames=1600,
-            region_frames=20,
-            guard_start_frames=100,
-            guard_end_frames=100,
-            total_frames=10000,
-        )
-        # num_samples = 7 (from previous test)
-        # total_sample_frames = 7 * 20 = 140
-        assert params.total_sample_frames == 140
-
-    def test_coverage_percent_property(self):
-        """Test coverage_percent calculation."""
-        params = MetricSamplingParams(
-            interval_frames=1600,
-            region_frames=20,
-            guard_start_frames=100,
-            guard_end_frames=100,
-            total_frames=10000,
-        )
-        # total_sample_frames = 140
-        # coverage = (140 / 10000) * 100 = 1.4%
-        assert math.isclose(params.coverage_percent, 1.4)
-
-    def test_coverage_percent_with_zero_total_frames(self):
-        """Test coverage_percent returns 0 when total_frames is 0."""
-        params = MetricSamplingParams(
-            interval_frames=1600,
-            region_frames=20,
-            guard_start_frames=0,
-            guard_end_frames=0,
-            total_frames=0,
-        )
-        assert params.coverage_percent == 0.0
-
-    def test_coverage_percent_with_high_coverage(self):
-        """Test coverage_percent with high sampling rate."""
-        params = MetricSamplingParams(
-            interval_frames=100,  # Sample every 100 frames
-            region_frames=50,  # 50 frame regions
-            guard_start_frames=0,
-            guard_end_frames=0,
-            total_frames=1000,
-        )
-        # usable = 1000
-        # num_samples = (1000 + 100 - 50) // 100 = 1050 // 100 = 10
-        # total_sample_frames = 10 * 50 = 500
-        # coverage = (500 / 1000) * 100 = 50%
+        # (1000 + 100 - 50) // 100 = 10
         assert params.num_samples == 10
         assert params.total_sample_frames == 500
-        assert math.isclose(params.coverage_percent, 50.0)
+
+    def test_samples_are_counted_per_file_then_summed(self) -> None:
+        """Each file is sampled on its own, so short files still contribute."""
+        params = MetricSamplingParams(
+            interval_frames=100,
+            region_frames=50,
+            sources=(
+                self._source("one", 0, 1000),
+                self._source("two", 0, 1000),
+            ),
+        )
+
+        assert params.num_samples == 20
+        assert params.total_sample_frames == 1000
+
+    def test_a_file_shorter_than_the_interval_still_contributes(self) -> None:
+        params = MetricSamplingParams(
+            interval_frames=1600,
+            region_frames=20,
+            sources=(
+                self._source("long", 0, 10000),
+                self._source("short", 0, 500),
+            ),
+        )
+
+        assert (
+            params.num_samples
+            > MetricSamplingParams(
+                interval_frames=1600,
+                region_frames=20,
+                sources=(self._source("long", 0, 10000),),
+            ).num_samples
+        )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import shlex
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -15,13 +15,11 @@ from .encoding_utils import (
     CropValues,
     EncoderPaths,
     SampledSource,
-    SamplingParams,
     VapourSynthEnv,
     build_encoder_command,
     build_sampling_vpy_script,
     build_vspipe_command,
     calculate_sample_count,
-    calculate_usable_range,
     create_temp_encode_paths,
     is_hdr_video,
     mux_and_cleanup,
@@ -307,13 +305,10 @@ def calculate_cropdetect_values(
 
 
 def encode_concatenated_reference(
-    source_path: Path,
+    sources: Sequence[SampledSource],
     output_path: Path,
     interval_frames: int,
     region_frames: int,
-    guard_start_frames: int,
-    guard_end_frames: int,
-    total_frames: int,
     fps: float,
     profile: Profile,
     video_info: VideoInfo,
@@ -335,13 +330,12 @@ def encode_concatenated_reference(
     intervals, avoiding manual region extraction and splicing.
 
     Args:
-        source_path: Input source video path
+        sources: Files to sample, each carrying its own usable range. Guard
+            bands are a fraction of a file's length, so ranges differ per file
+            and are settled by the caller.
         output_path: Output MKV path
         interval_frames: Sample every N frames
         region_frames: Number of consecutive frames per sample
-        guard_start_frames: Frames to skip at start (intros/credits)
-        guard_end_frames: Frames to skip at end (credits)
-        total_frames: Total frames in source video
         fps: Video framerate
         profile: Encoding profile (should use preset="ultrafast")
         video_info: MediaInfo from ffprobe
@@ -364,17 +358,6 @@ def encode_concatenated_reference(
     log = logging.getLogger(__name__)
     encoder_type = profile.encoder
 
-    # Validate and calculate usable range
-    sampling = SamplingParams(
-        interval_frames=interval_frames,
-        region_frames=region_frames,
-        guard_start_frames=guard_start_frames,
-        guard_end_frames=guard_end_frames,
-        total_frames=total_frames,
-    )
-    sampling.validate()
-    usable_range = calculate_usable_range(sampling)
-
     # Resolve and validate encoder paths
     paths = EncoderPaths.from_cwd(cwd, encoder_type)
     paths.validate()
@@ -395,14 +378,9 @@ def encode_concatenated_reference(
     )
 
     # Build and write VapourSynth script
-    cache_file = source_path.parent / f"{source_path.stem}.ffindex"
     effective_crop = crop_values if enable_cropdetect else None
     vpy_content = build_sampling_vpy_script(
-        sources=[
-            SampledSource(
-                path=source_path, cache_file=cache_file, usable_range=usable_range
-            )
-        ],
+        sources=sources,
         interval_frames=interval_frames,
         region_frames=region_frames,
         fps=fps,
@@ -413,8 +391,9 @@ def encode_concatenated_reference(
     write_vpy_script(vpy_path, vpy_content)
 
     # Log encoding info
+    usable_frames = sum(s.usable_range.frame_count for s in sources)
     num_samples, total_sampled_frames = calculate_sample_count(
-        usable_range.frame_count, interval_frames, region_frames
+        usable_frames, interval_frames, region_frames
     )
     label_prefix = f"{metric_label} " if metric_label else ""
     log.info(
@@ -465,13 +444,10 @@ def encode_concatenated_reference(
 
 
 def encode_concatenated_distorted(
-    source_path: Path,
+    sources: Sequence[SampledSource],
     output_path: Path,
     interval_frames: int,
     region_frames: int,
-    guard_start_frames: int,
-    guard_end_frames: int,
-    total_frames: int,
     fps: float,
     profile: Profile,
     crf: float,
@@ -494,13 +470,12 @@ def encode_concatenated_distorted(
     intervals, then encodes with specified CRF value.
 
     Args:
-        source_path: Input source video path
+        sources: Files to sample, each carrying its own usable range. Guard
+            bands are a fraction of a file's length, so ranges differ per file
+            and are settled by the caller.
         output_path: Output MKV path
         interval_frames: Sample every N frames
         region_frames: Number of consecutive frames per sample
-        guard_start_frames: Frames to skip at start (intros/credits)
-        guard_end_frames: Frames to skip at end (credits)
-        total_frames: Total frames in source video
         fps: Video framerate
         profile: Encoding profile
         crf: CRF value for encoding
@@ -524,17 +499,6 @@ def encode_concatenated_distorted(
     log = logging.getLogger(__name__)
     encoder_type = profile.encoder
 
-    # Validate and calculate usable range
-    sampling = SamplingParams(
-        interval_frames=interval_frames,
-        region_frames=region_frames,
-        guard_start_frames=guard_start_frames,
-        guard_end_frames=guard_end_frames,
-        total_frames=total_frames,
-    )
-    sampling.validate()
-    usable_range = calculate_usable_range(sampling)
-
     # Resolve and validate encoder paths
     paths = EncoderPaths.from_cwd(cwd, encoder_type)
     paths.validate()
@@ -557,14 +521,9 @@ def encode_concatenated_distorted(
     )
 
     # Build and write VapourSynth script
-    cache_file = source_path.parent / f"{source_path.stem}.ffindex"
     effective_crop = crop_values if enable_cropdetect else None
     vpy_content = build_sampling_vpy_script(
-        sources=[
-            SampledSource(
-                path=source_path, cache_file=cache_file, usable_range=usable_range
-            )
-        ],
+        sources=sources,
         interval_frames=interval_frames,
         region_frames=region_frames,
         fps=fps,
@@ -575,8 +534,9 @@ def encode_concatenated_distorted(
     write_vpy_script(vpy_path, vpy_content)
 
     # Log encoding info
+    usable_frames = sum(s.usable_range.frame_count for s in sources)
     num_samples, total_sampled_frames = calculate_sample_count(
-        usable_range.frame_count, interval_frames, region_frames
+        usable_frames, interval_frames, region_frames
     )
     label_prefix = f"{metric_label} " if metric_label else ""
     log.info(
@@ -628,13 +588,10 @@ def encode_concatenated_distorted(
 
 
 def encode_concatenated_bitrate(
-    source_path: Path,
+    sources: Sequence[SampledSource],
     output_path: Path,
     interval_frames: int,
     region_frames: int,
-    guard_start_frames: int,
-    guard_end_frames: int,
-    total_frames: int,
     fps: float,
     profile: Profile,
     video_info: VideoInfo,
@@ -703,17 +660,6 @@ def encode_concatenated_bitrate(
     if pass_num in (2, 3) and stats_file is None:
         raise ValueError(f"Pass {pass_num} requires stats_file parameter")
 
-    # Validate and calculate usable range
-    sampling = SamplingParams(
-        interval_frames=interval_frames,
-        region_frames=region_frames,
-        guard_start_frames=guard_start_frames,
-        guard_end_frames=guard_end_frames,
-        total_frames=total_frames,
-    )
-    sampling.validate()
-    usable_range = calculate_usable_range(sampling)
-
     # Resolve and validate encoder paths
     paths = EncoderPaths.from_cwd(cwd, encoder_type)
     paths.validate()
@@ -758,14 +704,9 @@ def encode_concatenated_bitrate(
     )
 
     # Build and write VapourSynth script
-    cache_file = source_path.parent / f"{source_path.stem}.ffindex"
     effective_crop = crop_values if enable_cropdetect else None
     vpy_content = build_sampling_vpy_script(
-        sources=[
-            SampledSource(
-                path=source_path, cache_file=cache_file, usable_range=usable_range
-            )
-        ],
+        sources=sources,
         interval_frames=interval_frames,
         region_frames=region_frames,
         fps=fps,
@@ -776,8 +717,9 @@ def encode_concatenated_bitrate(
     write_vpy_script(vpy_path, vpy_content)
 
     # Log encoding info
+    usable_frames = sum(s.usable_range.frame_count for s in sources)
     num_samples, total_sampled_frames = calculate_sample_count(
-        usable_range.frame_count, interval_frames, region_frames
+        usable_frames, interval_frames, region_frames
     )
     label_prefix = f"{metric_label} " if metric_label else ""
     log.info(
@@ -895,13 +837,10 @@ def encode_concatenated_bitrate(
 
 
 def encode_multipass_bitrate(
-    source_path: Path,
+    sources: Sequence[SampledSource],
     output_path: Path,
     interval_frames: int,
     region_frames: int,
-    guard_start_frames: int,
-    guard_end_frames: int,
-    total_frames: int,
     fps: float,
     profile: Profile,
     video_info: VideoInfo,
@@ -978,13 +917,10 @@ def encode_multipass_bitrate(
         pass1_output = output_path.parent / f"pass1_{output_path.name}"
 
     _ = encode_concatenated_bitrate(
-        source_path=source_path,
+        sources=sources,
         output_path=pass1_output,
         interval_frames=interval_frames,
         region_frames=region_frames,
-        guard_start_frames=guard_start_frames,
-        guard_end_frames=guard_end_frames,
-        total_frames=total_frames,
         fps=fps,
         profile=pass1_profile,
         video_info=video_info,
@@ -1020,13 +956,10 @@ def encode_multipass_bitrate(
             pass3_output = output_path.parent / f"pass3_{output_path.name}"
 
         _ = encode_concatenated_bitrate(
-            source_path=source_path,
+            sources=sources,
             output_path=pass3_output,
             interval_frames=interval_frames,
             region_frames=region_frames,
-            guard_start_frames=guard_start_frames,
-            guard_end_frames=guard_end_frames,
-            total_frames=total_frames,
             fps=fps,
             profile=pass3_profile,
             video_info=video_info,
@@ -1058,13 +991,10 @@ def encode_multipass_bitrate(
     pass2_profile = create_multipass_profile(profile, 2)
 
     final_output = encode_concatenated_bitrate(
-        source_path=source_path,
+        sources=sources,
         output_path=output_path,
         interval_frames=interval_frames,
         region_frames=region_frames,
-        guard_start_frames=guard_start_frames,
-        guard_end_frames=guard_end_frames,
-        total_frames=total_frames,
         fps=fps,
         profile=pass2_profile,  # Always use pass 2 for final encode
         video_info=video_info,

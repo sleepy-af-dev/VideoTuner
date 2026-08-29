@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .encoding_utils import CropValues
+from .encoding_utils import CropValues, SampledSource
 from .media import VideoInfo
 from .pipeline_cli import PipelineArgs
 from .profiles import Profile
@@ -22,8 +22,11 @@ from .utils import ensure_dir
 class IterationContext:
     """Shared context for pipeline iterations."""
 
-    # Paths
+    # Paths. ``input_path`` names the job: the file it reads, or the folder
+    # when several files are read as one source. ``sources`` is what is
+    # actually decoded, one entry per file with its own usable range.
     input_path: Path
+    sources: list[SampledSource]
     workdir: Path
     temp_dir: Path
     repo_root: Path

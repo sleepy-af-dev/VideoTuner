@@ -13,6 +13,12 @@ One source video processed end to end, from sample extraction through to a final
 result. The unit of work everything else is counted in.
 _Avoid_: run, task, encode
 
+**Source**:
+The video a job reads. Usually one file; with `--as-one-source`, every file in
+the input folder, sampled individually and joined so they are assessed as one.
+_Avoid_: input (that is what the user passed on the command line, which may be
+a folder)
+
 **Batch**:
 A set of jobs sharing one set of settings, produced from the videos found in a
 single input folder.

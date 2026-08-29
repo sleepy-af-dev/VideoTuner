@@ -18,8 +18,19 @@ from .crf_search import (
     CRFSearchState,
     QualityTarget,
 )
-from .encoding_utils import CropValues, is_hdr_video
-from .media import InvalidVideoFileError, get_frame_count, parse_video_info
+from .encoding_utils import (
+    CropValues,
+    SampledSource,
+    UsableRange,
+    combine_crop_values,
+    is_hdr_video,
+)
+from .media import (
+    InvalidVideoFileError,
+    combine_video_info,
+    get_frame_count,
+    parse_video_info,
+)
 from .pipeline_cli import (
     PipelineArgs,
     build_arg_parser,
@@ -48,6 +59,7 @@ from .pipeline_reference import (
 from .pipeline_types import IterationContext, JobResult, get_reference_dir
 from .pipeline_validation import (
     build_targets,
+    check_sources_compatible,
     has_targets,
     validate_sampling_parameters,
 )
@@ -119,14 +131,46 @@ def _run_pipeline_body(
         log.error("Input not found: %s", input_path)
         return JobResult.failure(input_path, "input not found")
 
+    # input_path names the job; source_paths are the files it reads. They are
+    # the same thing unless several files are being read as one source.
+    if args.as_one_source:
+        from .batch import discover_videos
+
+        source_paths = discover_videos(input_path)
+        if not source_paths:
+            display.console.print(
+                f"\n[bold red]Error:[/bold red] No video files found in {input_path}\n"
+            )
+            log.error("No video files found in %s", input_path)
+            return JobResult.failure(input_path, "no video files found")
+    else:
+        source_paths = [input_path]
+
     log.info("Probing input with ffprobe ...")
     ffprobe_bin: str = args.ffprobe_bin
     try:
-        info = parse_video_info(input_path, ffprobe_bin=ffprobe_bin)
+        infos = [parse_video_info(p, ffprobe_bin=ffprobe_bin) for p in source_paths]
     except InvalidVideoFileError as e:
         display.console.print(f"\n[bold red]Error:[/bold red] {e}\n")
         log.error("Invalid video file: %s", e)
         return JobResult.failure(input_path, "invalid video file")
+
+    if len(source_paths) > 1:
+        problems = check_sources_compatible(
+            list(zip(source_paths, infos, strict=True)),
+            guard_start_percent=max(0.0, args.guard_start_percent),
+            guard_end_percent=max(0.0, args.guard_end_percent),
+            guard_seconds=max(0.0, args.guard_seconds),
+        )
+        if problems:
+            headline = "These files cannot be read as one source:"
+            display.console.print(f"\n[bold red]Error:[/bold red] {headline}\n")
+            for problem in problems:
+                display.console.print(f"[red]  {problem}[/red]")
+            log.error("Incompatible sources: %s", "; ".join(problems))
+            return JobResult.failure(input_path, "incompatible sources")
+
+    info = combine_video_info(infos)
     res = f"{info.width}x{info.height}" if (info.width and info.height) else "unknown"
     log.info(
         "Detected fps=%.3f, duration=%.2fs, pix_fmt=%s, res=%s",
@@ -262,29 +306,29 @@ def _run_pipeline_body(
     # Build FFMS2 index for source (shared across cropdetect and all encodes)
     # This is done BEFORE cropdetect to avoid delays during crop detection
     # Index is stored alongside the source file for persistence across job runs
+    cache_files = {p: p.parent / f"{p.stem}.ffindex" for p in source_paths}
     if crop_detect or args.vmaf or args.ssim2:
-        # Store index alongside source file (e.g., sources/video.mkv -> sources/video.ffindex)  # noqa: E501  # TODO(E501): shorten line
-        cache_file = input_path.parent / f"{input_path.stem}.ffindex"
-
-        # Only build if index doesn't exist
-        if not cache_file.exists():
-            with (
-                display.stage(
-                    "Building FFMS2 Index",
-                    total=1,  # Placeholder - will be updated when ffmsindex reports frame count  # noqa: E501  # TODO(E501): shorten line
+        for source in source_paths:
+            cache_file = cache_files[source]
+            # Only build if index doesn't exist
+            if not cache_file.exists():
+                with display.stage(
+                    f"Building FFMS2 Index ({source.name})",
+                    total=1,  # Placeholder - updated when ffmsindex reports frames
                     show_eta=True,
                     transient=True,  # Transient to avoid duplicate header line
                     show_done=True,
-                ) as index_stage
-            ):
-                _ = build_ffms2_index(
-                    source_path=input_path,
-                    cache_file=cache_file,
-                    cwd=repo_root,
-                    line_handler=index_stage.make_ffmsindex_handler(),
+                ) as index_stage:
+                    _ = build_ffms2_index(
+                        source_path=source,
+                        cache_file=cache_file,
+                        cwd=repo_root,
+                        line_handler=index_stage.make_ffmsindex_handler(),
+                    )
+            else:
+                display.console.print(
+                    f"[cyan]Using Existing FFMS2 Index[/cyan] ({source.name})"
                 )
-        else:
-            display.console.print("[cyan]Using Existing FFMS2 Index[/cyan]")
 
     log_section(log, "Analysis")
 
@@ -292,49 +336,57 @@ def _run_pipeline_body(
     crop_values: CropValues | None = None
 
     if crop_detect:
-        # Analyze the entire video to get representative crop values
-        total_frames = get_frame_count(input_path, info)
-        # Calculate expected sample count for progress bar
-        _skip = max(1, int(total_frames * 0.10))
-        _step = max(1, round(info.fps * args.cropdetect_interval))
-        expected_samples = len(range(_skip, total_frames - _skip, _step))
-        log.info(
-            "Detecting crop from entire video (%d frames, %d samples)...",
-            total_frames,
-            expected_samples,
-        )
-        with display.stage(
-            "Detecting Crop",
-            total=expected_samples,
-            show_eta=True,
-            transient=True,
-            show_done=True,
-        ) as cropdetect_stage:
-            crop_values = calculate_cropdetect_values(
-                source_path=input_path,
-                start_frame=0,
-                num_frames=total_frames,
-                fps=info.fps,
-                is_hdr=is_hdr_video(info.color_trc),
-                interval=args.cropdetect_interval,
-                ffmpeg_bin=args.ffmpeg_bin,
-                source_width=info.width or 0,
-                source_height=info.height or 0,
-                cwd=repo_root,
-                line_handler=cropdetect_stage.make_cropdetect_handler(),
-                cropdetect_mode=args.cropdetect_mode,
-                cropdetect_limit=args.cropdetect_limit,
-                cropdetect_round=args.cropdetect_round,
-                cropdetect_mv_threshold=args.cropdetect_mv_threshold,
-                cropdetect_low=args.cropdetect_low,
-                cropdetect_high=args.cropdetect_high,
+        # Each file is measured on its own and the results combined, taking the
+        # most aggressive crop per edge: splicing needs matching dimensions, and
+        # cropping more can only remove border, never reinstate content.
+        measured: list[CropValues] = []
+        for source, source_info in zip(source_paths, infos, strict=True):
+            source_frames = get_frame_count(source, source_info)
+            # Calculate expected sample count for progress bar
+            _skip = max(1, int(source_frames * 0.10))
+            _step = max(1, round(source_info.fps * args.cropdetect_interval))
+            expected_samples = len(range(_skip, source_frames - _skip, _step))
+            log.info(
+                "Detecting crop in %s (%d frames, %d samples)...",
+                source.name,
+                source_frames,
+                expected_samples,
             )
-            # Calculate final dimensions after crop
-            final_width = (info.width or 0) - crop_values.left - crop_values.right
-            final_height = (info.height or 0) - crop_values.top - crop_values.bottom
-            cropdetect_stage.done_suffix = (
-                f"[white]({final_width}x{final_height})[/white]"
-            )
+            label = "Detecting Crop"
+            if len(source_paths) > 1:
+                label = f"Detecting Crop ({source.name})"
+            with display.stage(
+                label,
+                total=expected_samples,
+                show_eta=True,
+                transient=True,
+                show_done=True,
+            ) as cropdetect_stage:
+                measured.append(
+                    calculate_cropdetect_values(
+                        source_path=source,
+                        start_frame=0,
+                        num_frames=source_frames,
+                        fps=source_info.fps,
+                        is_hdr=is_hdr_video(source_info.color_trc),
+                        interval=args.cropdetect_interval,
+                        ffmpeg_bin=args.ffmpeg_bin,
+                        source_width=source_info.width or 0,
+                        source_height=source_info.height or 0,
+                        cwd=repo_root,
+                        line_handler=cropdetect_stage.make_cropdetect_handler(),
+                        cropdetect_mode=args.cropdetect_mode,
+                        cropdetect_limit=args.cropdetect_limit,
+                        cropdetect_round=args.cropdetect_round,
+                        cropdetect_mv_threshold=args.cropdetect_mv_threshold,
+                        cropdetect_low=args.cropdetect_low,
+                        cropdetect_high=args.cropdetect_high,
+                    )
+                )
+
+        crop_values = combine_crop_values(measured)
+        final_width = (info.width or 0) - crop_values.left - crop_values.right
+        final_height = (info.height or 0) - crop_values.top - crop_values.bottom
         log.info(
             "CropDetect values: left=%d, top=%d, right=%d, bottom=%d (final: %dx%d)",
             crop_values.left,
@@ -356,13 +408,37 @@ def _run_pipeline_body(
 
     log_section(log, "Sample Selection")
 
-    # Calculate total frames and guard frames for periodic sampling
-    total_frames = get_frame_count(input_path, info)
+    # Guard bands are a fraction of a file's length, so every file gets its own
+    # usable range. Each is sampled on its own and the samples joined, which is
+    # what makes every intro and set of credits get skipped rather than only the
+    # outermost pair.
     # Note: guard percentages are already in decimal form (0.0-1.0), not 0-100
     guard_start_ratio = args.guard_start_percent
     guard_end_ratio = args.guard_end_percent
-    guard_start_frames = int(guard_start_ratio * total_frames)
-    guard_end_frames = int(guard_end_ratio * total_frames)
+
+    sampled_sources: list[SampledSource] = []
+    for source, source_info in zip(source_paths, infos, strict=True):
+        source_frames = get_frame_count(source, source_info)
+        start = int(guard_start_ratio * source_frames)
+        end = source_frames - int(guard_end_ratio * source_frames)
+        sampled_sources.append(
+            SampledSource(
+                path=source,
+                cache_file=cache_files[source],
+                usable_range=UsableRange(start=start, end=end, frame_count=end - start),
+            )
+        )
+
+    total_frames = sum(
+        get_frame_count(s, i) for s, i in zip(source_paths, infos, strict=True)
+    )
+    guard_start_frames = sum(s.usable_range.start for s in sampled_sources)
+    guard_end_frames = total_frames - sum(s.usable_range.end for s in sampled_sources)
+
+    if len(source_paths) > 1:
+        log.info("Reading %d files as one source", len(source_paths))
+        for source in source_paths:
+            log.info("  %s", source.name)
 
     log.info(
         "Total frames: %d (%.3f fps × %.1fs)", total_frames, info.fps, info.duration
@@ -437,13 +513,10 @@ def _run_pipeline_body(
         shared_sampling = MetricSamplingParams(
             interval_frames=args.vmaf_interval_frames,  # Same as ssim2
             region_frames=args.vmaf_region_frames,  # Same as ssim2
-            guard_start_frames=guard_start_frames,
-            guard_end_frames=guard_end_frames,
-            total_frames=total_frames,
+            sources=tuple(sampled_sources),
         )
         shared_ref_path = generate_metric_reference(
             metric_type="shared",
-            source_path=input_path,
             output_dir=reference_dir,
             sampling_params=shared_sampling,
             fps=info.fps,
@@ -470,13 +543,10 @@ def _run_pipeline_body(
             vmaf_sampling = MetricSamplingParams(
                 interval_frames=args.vmaf_interval_frames,
                 region_frames=args.vmaf_region_frames,
-                guard_start_frames=guard_start_frames,
-                guard_end_frames=guard_end_frames,
-                total_frames=total_frames,
+                sources=tuple(sampled_sources),
             )
             vmaf_ref_path = generate_metric_reference(
                 metric_type="vmaf",
-                source_path=input_path,
                 output_dir=reference_dir,
                 sampling_params=vmaf_sampling,
                 fps=info.fps,
@@ -497,13 +567,10 @@ def _run_pipeline_body(
             ssim2_sampling = MetricSamplingParams(
                 interval_frames=args.ssim2_interval_frames,
                 region_frames=args.ssim2_region_frames,
-                guard_start_frames=guard_start_frames,
-                guard_end_frames=guard_end_frames,
-                total_frames=total_frames,
+                sources=tuple(sampled_sources),
             )
             ssim2_ref_path = generate_metric_reference(
                 metric_type="ssim2",
-                source_path=input_path,
                 output_dir=reference_dir,
                 sampling_params=ssim2_sampling,
                 fps=info.fps,
@@ -558,6 +625,7 @@ def _run_pipeline_body(
         # Create iteration context
         ctx = IterationContext(
             input_path=input_path,
+            sources=sampled_sources,
             workdir=workdir,
             temp_dir=temp_dir,
             repo_root=repo_root,
@@ -630,6 +698,7 @@ def _run_pipeline_body(
         # Create iteration context with selected profile (may have been updated by profile search)  # noqa: E501  # TODO(E501): shorten line
         ctx = IterationContext(
             input_path=input_path,
+            sources=sampled_sources,
             workdir=workdir,
             temp_dir=temp_dir,
             repo_root=repo_root,
@@ -838,6 +907,7 @@ def _run_pipeline_body(
         def ctx_factory(profile: Profile) -> IterationContext:
             return IterationContext(
                 input_path=input_path,
+                sources=sampled_sources,
                 workdir=workdir,
                 temp_dir=temp_dir,
                 repo_root=repo_root,
@@ -1052,8 +1122,14 @@ def main(argv: Iterable[str] | None = None) -> int:
         )
         return 1
 
+    if args.as_one_source and args.carry_crf:
+        # One job means nothing to carry from.
+        note = "--carry-crf has no effect with --as-one-source: a single job."
+        PipelineDisplay(show_title=False).console.print(f"[yellow]{note}[/yellow]")
+
     # A folder means a batch: the same pipeline, once per video inside it.
-    if Path(args.input).is_dir():
+    # Unless the files are being read as one source, which is a single job.
+    if Path(args.input).is_dir() and not args.as_one_source:
         from .batch import run_batch
 
         # The batch prints the banner once; jobs get a [N/M] header instead,

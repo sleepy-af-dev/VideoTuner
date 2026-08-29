@@ -316,13 +316,10 @@ def _encode_crf_metric(
 
         try:
             bitstream_path = encode_concatenated_distorted(
-                source_path=ctx.input_path,
+                sources=ctx.sources,
                 output_path=output_path,
                 interval_frames=metric_params.interval_frames,
                 region_frames=metric_params.region_frames,
-                guard_start_frames=ctx.guard_start_frames,
-                guard_end_frames=ctx.guard_end_frames,
-                total_frames=ctx.total_frames,
                 fps=ctx.info.fps,
                 profile=ctx.selected_profile,
                 video_info=ctx.info,
@@ -808,13 +805,10 @@ def _encode_bitrate_metric(
                 pass1_output = output_path.parent / f"pass1_{output_path.name}"
 
             _ = encode_concatenated_bitrate(
-                source_path=ctx.input_path,
+                sources=ctx.sources,
                 output_path=pass1_output,
                 interval_frames=metric_params.interval_frames,
                 region_frames=metric_params.region_frames,
-                guard_start_frames=ctx.guard_start_frames,
-                guard_end_frames=ctx.guard_end_frames,
-                total_frames=ctx.total_frames,
                 fps=ctx.info.fps,
                 profile=pass1_profile,
                 video_info=ctx.info,
@@ -861,13 +855,10 @@ def _encode_bitrate_metric(
                     pass3_output = output_path.parent / f"pass3_{output_path.name}"
 
                 _ = encode_concatenated_bitrate(
-                    source_path=ctx.input_path,
+                    sources=ctx.sources,
                     output_path=pass3_output,
                     interval_frames=metric_params.interval_frames,
                     region_frames=metric_params.region_frames,
-                    guard_start_frames=ctx.guard_start_frames,
-                    guard_end_frames=ctx.guard_end_frames,
-                    total_frames=ctx.total_frames,
                     fps=ctx.info.fps,
                     profile=pass3_profile,
                     video_info=ctx.info,
@@ -911,13 +902,10 @@ def _encode_bitrate_metric(
             )
 
             _ = encode_concatenated_bitrate(
-                source_path=ctx.input_path,
+                sources=ctx.sources,
                 output_path=output_path,
                 interval_frames=metric_params.interval_frames,
                 region_frames=metric_params.region_frames,
-                guard_start_frames=ctx.guard_start_frames,
-                guard_end_frames=ctx.guard_end_frames,
-                total_frames=ctx.total_frames,
                 fps=ctx.info.fps,
                 profile=pass2_profile,
                 video_info=ctx.info,
@@ -946,13 +934,10 @@ def _encode_bitrate_metric(
             )
 
             _ = encode_concatenated_bitrate(
-                source_path=ctx.input_path,
+                sources=ctx.sources,
                 output_path=output_path,
                 interval_frames=metric_params.interval_frames,
                 region_frames=metric_params.region_frames,
-                guard_start_frames=ctx.guard_start_frames,
-                guard_end_frames=ctx.guard_end_frames,
-                total_frames=ctx.total_frames,
                 fps=ctx.info.fps,
                 profile=profile,
                 video_info=ctx.info,

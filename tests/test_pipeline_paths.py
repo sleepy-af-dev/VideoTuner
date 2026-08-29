@@ -365,6 +365,7 @@ class TestIterationContext:
         """Test that sharing_samples defaults to False."""
         ctx = IterationContext(
             input_path=Path("test.mkv"),
+            sources=[],
             workdir=Path("/tmp/work"),
             temp_dir=Path("/tmp/temp"),
             repo_root=Path("/repo"),
@@ -387,6 +388,7 @@ class TestIterationContext:
         """Test that sharing_samples can be set to True."""
         ctx = IterationContext(
             input_path=Path("test.mkv"),
+            sources=[],
             workdir=Path("/tmp/work"),
             temp_dir=Path("/tmp/temp"),
             repo_root=Path("/repo"),
@@ -410,6 +412,7 @@ class TestIterationContext:
         """Test usable_frames property excludes guard bands."""
         ctx = IterationContext(
             input_path=Path("test.mkv"),
+            sources=[],
             workdir=Path("/tmp/work"),
             temp_dir=Path("/tmp/temp"),
             repo_root=Path("/repo"),
@@ -433,6 +436,7 @@ class TestIterationContext:
         """Test usable_frames equals total when no guard bands."""
         ctx = IterationContext(
             input_path=Path("test.mkv"),
+            sources=[],
             workdir=Path("/tmp/work"),
             temp_dir=Path("/tmp/temp"),
             repo_root=Path("/repo"),
@@ -455,6 +459,7 @@ class TestIterationContext:
         """Test that crop_values defaults to None."""
         ctx = IterationContext(
             input_path=Path("test.mkv"),
+            sources=[],
             workdir=Path("/tmp/work"),
             temp_dir=Path("/tmp/temp"),
             repo_root=Path("/repo"),

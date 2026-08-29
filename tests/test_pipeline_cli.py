@@ -10,6 +10,20 @@ from videotuner.pipeline import main
 from videotuner.pipeline_cli import parse_cli
 
 
+def _argv(target: Path) -> list[str]:
+    """A complete command line reading a folder as one source."""
+    return [
+        str(target),
+        "--as-one-source",
+        "--encoder",
+        "x265",
+        "--preset",
+        "slow",
+        "--vmaf-target",
+        "95",
+    ]
+
+
 def _parse(*extra: str):
     return parse_cli(["input.mkv", *extra])
 
@@ -30,26 +44,13 @@ class TestAsOneSourceRequiresAFolder:
     A flag that quietly does nothing is what the dead output positional was.
     """
 
-    @staticmethod
-    def _argv(target: Path) -> list[str]:
-        return [
-            str(target),
-            "--as-one-source",
-            "--encoder",
-            "x265",
-            "--preset",
-            "slow",
-            "--vmaf-target",
-            "95",
-        ]
-
     def test_a_single_file_input_is_an_error(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         video = tmp_path / "input.mkv"
         _ = video.write_bytes(b"")
 
-        exit_code = main(self._argv(video))
+        exit_code = main(_argv(video))
 
         assert exit_code == 1
         assert "--as-one-source" in capsys.readouterr().out
@@ -61,6 +62,54 @@ class TestAsOneSourceRequiresAFolder:
         folder = tmp_path / "src"
         folder.mkdir()
 
-        _ = main(self._argv(folder))
+        _ = main(_argv(folder))
 
         assert "--as-one-source" not in capsys.readouterr().out
+
+
+class TestAsOneSourceRouting:
+    """A folder read as one source is a single job, not a batch."""
+
+    def test_a_folder_with_the_flag_does_not_run_a_batch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A batch would also reach the job, so assert the batch is never entered."""
+        from videotuner import batch
+
+        folder = tmp_path / "src"
+        folder.mkdir()
+        _ = (folder / "a.mkv").write_bytes(b"")
+
+        called: list[str] = []
+
+        def fake_batch(*_args: object) -> int:
+            called.append("batch")
+            return 0
+
+        monkeypatch.setattr(batch, "run_batch", fake_batch)
+
+        _ = main(_argv(folder))
+
+        assert called == [], "one source is a single job, not a batch of one"
+
+    def test_a_folder_without_the_flag_runs_a_batch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from videotuner import batch
+
+        folder = tmp_path / "src"
+        folder.mkdir()
+        _ = (folder / "a.mkv").write_bytes(b"")
+
+        called: list[str] = []
+
+        def fake_batch(*_args: object) -> int:
+            called.append("batch")
+            return 0
+
+        monkeypatch.setattr(batch, "run_batch", fake_batch)
+
+        argv = [a for a in _argv(folder) if a != "--as-one-source"]
+        _ = main(argv)
+
+        assert called == ["batch"]

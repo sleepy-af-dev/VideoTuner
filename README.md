@@ -337,6 +337,18 @@ The first job uses `--crf-start-value`, since there is no previous result. A job
 
 The carried value only sets where the search begins; it does not constrain where the search ends, so each job still converges on its own answer.
 
+**Reading a folder as one source:** `--as-one-source` treats every video in the folder as a single source and produces one result for the folder, rather than one result per file. Useful when the files are parts of one whole, such as episodes of a season you intend to encode with identical settings.
+
+```bash
+videotuner ./folder --profile Film --vmaf-target 95 --as-one-source
+```
+
+Each file is sampled on its own and the samples are joined. Every file keeps its own guard bands, so each intro and set of credits is skipped rather than only the first and last, and every file contributes samples regardless of length. Output is laid out exactly like a single-file run, in a folder named after the input folder.
+
+Files must agree on resolution, frame rate and HDR status. If any differ the run stops before encoding, listing every mismatch. Differing letterboxing is not a mismatch: the most aggressive crop measured across the files is applied to all of them, since joining requires matching dimensions.
+
+Given a single file rather than a folder, the flag is an error rather than a warning. `--carry-crf` has no effect alongside it, since there is only one job.
+
 **Note:** batch mode writes an `.ffindex` file next to each source video, the same as a single-file run. They are reused on later runs over the same folder, which is the largest available time saving when re-running a batch.
 
 ### Quality Targets
@@ -561,6 +573,7 @@ Run `videotuner --help` for complete options. Key options include:
 | `--profile NAME`         | -       | Profile name from `profiles.yaml`                            |
 | `--crf-start-value CRF`  | `28`   | Starting CRF for search                                      |
 | `--carry-crf`            | off    | Batch mode: start each job at the CRF the previous job settled on |
+| `--as-one-source`        | off    | Read every video in the input folder as one source           |
 | `--crf-interval STEP`    | `0.5`  | Minimum CRF step size                                        |
 
 ### CropDetect Options

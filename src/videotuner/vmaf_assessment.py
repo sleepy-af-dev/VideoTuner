@@ -6,6 +6,8 @@ import math
 import os
 import re
 import shlex
+import shutil
+import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -399,8 +401,18 @@ def run_vmaf(
         tonemap_policy=tonemap_policy,
         use_gpu=use_gpu,
     )
-    # Use a relative path for log_path within the filter graph (avoid drive letters)
-    log_path_escaped = _escape_filter_path(Path(make_relative_path(log_path, cwd)))
+    # libvmaf writes its JSON with a plain fopen, which is still capped at
+    # MAX_PATH (260) on Windows even when long paths are enabled OS-wide, and it
+    # treats the failure as non-fatal: ffmpeg still exits 0, just with no log.
+    # A job folder nested under a batch folder can exceed that, so libvmaf writes
+    # to a short path and the result is moved into place afterwards.
+    #
+    # The temp dir sits under cwd so the filter still gets a short *relative*
+    # path: an absolute one would carry a drive letter, and a `:` inside
+    # -filter_complex needs more escaping than the graph parser will accept.
+    tmp_log_dir = tempfile.mkdtemp(prefix=".vt_vmaf_", dir=cwd if cwd else None)
+    tmp_log = Path(tmp_log_dir) / "vmaf.json"
+    log_path_escaped = _escape_filter_path(Path(make_relative_path(tmp_log, cwd)))
 
     # Calculate thread count based on CPU cores
     cpu_count = get_cpu_count()
@@ -432,7 +444,14 @@ def run_vmaf(
         "-",
     ]
     log.info("VMAF: %s", " ".join(shlex.quote(c) for c in cmd))
-    run(cmd, live=True, cwd=cwd, line_callback=line_handler)
+    try:
+        run(cmd, live=True, cwd=cwd, line_callback=line_handler)
+        if tmp_log.exists():
+            _ = shutil.move(str(tmp_log), str(log_path))
+        else:
+            log.error("libvmaf produced no JSON log at %s", tmp_log)
+    finally:
+        shutil.rmtree(tmp_log_dir, ignore_errors=True)
 
     try:
         with open(log_path, encoding="utf-8") as f:

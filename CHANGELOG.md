@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- VMAF scores came back as NaN when the assessment output path exceeded 260 characters. libvmaf writes its JSON log with a plain `fopen`, which is capped at MAX_PATH on Windows even with long paths enabled, and it treats the failure as non-fatal, so ffmpeg exited successfully having written nothing. It is now handed a short path and the result is moved into place
 - The per-job log file handler was attached to the root logger and never removed, so in a batch every later job would also write into every earlier job's log
 - `logging.basicConfig(force=True)` closed existing handlers, tearing down the batch log as soon as the first job started
 - A missing input called `parser.error`, raising `SystemExit` and ending the whole run instead of failing one job

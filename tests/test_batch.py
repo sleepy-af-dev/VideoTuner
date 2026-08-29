@@ -13,8 +13,24 @@ import pytest
 
 from videotuner import batch
 from videotuner.batch import discover_videos, run_batch
+from videotuner.media import VideoInfo
 from videotuner.pipeline_cli import PipelineArgs
 from videotuner.pipeline_types import JobResult
+
+
+@pytest.fixture(autouse=True)
+def _stub_probe(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
+    """The pre-scan probes every file with ffprobe; these tests are about the
+    batch loop's bookkeeping, not about probing.
+
+    Stubbed at the process boundary so the suite does not need ffprobe on PATH,
+    which CI does not have.
+    """
+
+    def fake_probe(_path: Path, **_kwargs: object) -> VideoInfo:
+        return VideoInfo(fps=24.0, duration=60.0, width=1920, height=1080)
+
+    monkeypatch.setattr(batch, "parse_video_info", fake_probe)
 
 
 def _touch(folder: Path, *names: str) -> None:

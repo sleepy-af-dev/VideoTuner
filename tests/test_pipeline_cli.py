@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from videotuner import pipeline
+from videotuner.media import InvalidVideoFileError
 from videotuner.pipeline import main
 from videotuner.pipeline_cli import parse_cli
 
@@ -22,6 +24,11 @@ def _argv(target: Path) -> list[str]:
         "--vmaf-target",
         "95",
     ]
+
+
+def _reject_probe(path: Path, **_kwargs: object) -> object:
+    """Stand in for ffprobe rejecting a stub file, without needing ffprobe."""
+    raise InvalidVideoFileError(f"not a valid video file: {path}")
 
 
 def _parse(*extra: str):
@@ -87,6 +94,8 @@ class TestAsOneSourceRouting:
             return 0
 
         monkeypatch.setattr(batch, "run_batch", fake_batch)
+        # The job probes its sources; stubbed so this does not need ffprobe.
+        monkeypatch.setattr(pipeline, "parse_video_info", _reject_probe)
 
         _ = main(_argv(folder))
 

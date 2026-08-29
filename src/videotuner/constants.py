@@ -129,9 +129,9 @@ MAX_USABLE_PATH: int = 259
 # the pipeline writes today is 42 characters.
 PATH_FILENAME_MARGIN: int = 60
 
-# Longest directory name created directly inside a job folder, used when
-# working out how much room a job folder name may take.
-LONGEST_JOB_SUBDIR: str = "ssimulacra2"
+# Longest fixed directory name created inside a job folder. Profile
+# directories sit beside it, so whichever is longer bounds the depth.
+LONGEST_JOB_SUBDIR: str = "reference"
 
 # A job folder shortened below this stops being recognisable, so the batch
 # folder gives up characters instead.

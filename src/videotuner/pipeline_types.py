@@ -120,9 +120,18 @@ class MultiProfileResult:
 # Path management utilities
 
 
+#: Directories a job creates for its own use. A profile directory sits beside
+#: them, so a profile named after one of these is renamed to keep them apart.
+RESERVED_JOB_SUBDIRS: frozenset[str] = frozenset({"reference", "temp"})
+
+
 def _profile_slug(profile: Profile) -> str:
     """Convert profile name to filesystem-safe slug."""
-    return profile.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    slug = profile.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    if slug.casefold() in RESERVED_JOB_SUBDIRS:
+        # Case-insensitive: Windows would treat "Temp" and "temp" as one folder.
+        return f"{slug}_profile"
+    return slug
 
 
 def get_reference_dir(workdir: Path) -> Path:
@@ -138,43 +147,34 @@ def get_reference_dir(workdir: Path) -> Path:
     return ensure_dir(ref_dir)
 
 
-def get_distorted_dir(workdir: Path, profile: Profile) -> Path:
-    """Get path to distorted files directory for a profile, creating if needed.
+def get_profile_dir(workdir: Path, profile: Profile) -> Path:
+    """Get the directory holding everything produced for one profile.
+
+    Encodes and both metrics' results share a directory because their filenames
+    already say which is which. Splitting them into distorted/, vmaf/ and
+    ssimulacra2/ trees scattered one profile's output across three places and
+    cost a level of nesting that the path budget could not spare.
 
     Args:
         workdir: Working directory for the job
         profile: Encoding profile (used for directory naming)
 
     Returns:
-        Path to distorted files directory for this profile
+        Path to this profile's directory
     """
-    dist_dir = workdir / "distorted" / _profile_slug(profile)
-    return ensure_dir(dist_dir)
+    return ensure_dir(workdir / _profile_slug(profile))
+
+
+def get_distorted_dir(workdir: Path, profile: Profile) -> Path:
+    """Get path to distorted files for a profile, creating the directory."""
+    return get_profile_dir(workdir, profile)
 
 
 def get_vmaf_dir(workdir: Path, profile: Profile) -> Path:
-    """Get path to VMAF output directory for a profile, creating if needed.
-
-    Args:
-        workdir: Working directory for the job
-        profile: Encoding profile (used for directory naming)
-
-    Returns:
-        Path to VMAF assessment output directory
-    """
-    vmaf_dir = workdir / "vmaf" / _profile_slug(profile)
-    return ensure_dir(vmaf_dir)
+    """Get path to VMAF results for a profile, creating the directory."""
+    return get_profile_dir(workdir, profile)
 
 
 def get_ssim2_dir(workdir: Path, profile: Profile) -> Path:
-    """Get path to SSIMULACRA2 output directory for a profile, creating if needed.
-
-    Args:
-        workdir: Working directory for the job
-        profile: Encoding profile (used for directory naming)
-
-    Returns:
-        Path to SSIMULACRA2 assessment output directory
-    """
-    ssim2_dir = workdir / "ssimulacra2" / _profile_slug(profile)
-    return ensure_dir(ssim2_dir)
+    """Get path to SSIMULACRA2 results for a profile, creating the directory."""
+    return get_profile_dir(workdir, profile)

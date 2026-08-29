@@ -673,16 +673,11 @@ jobs/<input_name>_<timestamp>/
 ├── reference/                                # Lossless reference samples
 │   ├── vmaf_reference_concatenated.mkv
 │   └── ssim2_reference_concatenated.mkv
-├── distorted/                                # Encoded samples, by profile
-│   └── <ProfileName>/
-│       ├── vmaf_crf_*.mkv                    # VMAF distorted at each CRF iteration
-│       └── ssim2_crf_*.mkv                   # SSIM2 distorted at each CRF iteration
-├── vmaf/                                     # VMAF assessment results
-│   └── <ProfileName>/
-│       └── vmaf_concatenated_iter*.json
-├── ssimulacra2/                              # SSIMULACRA2 assessment results
-│   └── <ProfileName>/
-│       └── ssim2_concatenated_iter*.json
+├── <ProfileName>/                            # Everything produced for one profile
+│   ├── vmaf_crf_*.mkv                        # VMAF distorted at each CRF iteration
+│   ├── ssim2_crf_*.mkv                       # SSIM2 distorted at each CRF iteration
+│   ├── vmaf_concatenated_iter*.json          # VMAF assessment results
+│   └── ssim2_concatenated_iter*.json         # SSIMULACRA2 assessment results
 ├── temp/                                     # VapourSynth scripts, encoder bitstreams
 └── <input_name>.log                          # Job log
 ```
@@ -690,7 +685,8 @@ jobs/<input_name>_<timestamp>/
 **Notes:**
 
 - All encoded samples and assessment results are preserved across iterations for inspection
-- In multi-profile mode, each profile gets its own subfolder
+- Each profile gets one folder holding its encodes and both metrics' results, so a multi-profile comparison is one folder per candidate rather than three
+- A profile named `reference` or `temp` would clash with the folders above, so it gets a `_profile` suffix
 
 ### Batch folder
 

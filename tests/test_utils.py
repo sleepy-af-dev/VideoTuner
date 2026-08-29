@@ -151,9 +151,17 @@ class TestJobFolderBudget:
         assert deeper < shallow
 
     def test_longer_profile_slug_leaves_less_room(self, tmp_path: Path) -> None:
-        short = job_folder_budget(tmp_path, ["P"])
+        short = job_folder_budget(tmp_path, ["P" * 20])
         long = job_folder_budget(tmp_path, ["P" * 40])
-        assert short - long == 39
+        assert short - long == 20
+
+    def test_a_slug_shorter_than_the_fixed_dirs_does_not_win(
+        self, tmp_path: Path
+    ) -> None:
+        """Profile dirs sit beside reference/ and temp/, so the longest bounds it."""
+        assert job_folder_budget(tmp_path, ["P"]) == job_folder_budget(
+            tmp_path, ["reference"]
+        )
 
     def test_longest_slug_wins(self, tmp_path: Path) -> None:
         assert job_folder_budget(tmp_path, ["P", "P" * 40]) == job_folder_budget(

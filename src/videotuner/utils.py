@@ -113,9 +113,12 @@ def job_folder_budget(parent: Path, profile_slugs: Iterable[str]) -> int:
     Returns:
         Budget in characters, which may be zero or negative if parent is deep
     """
-    longest_slug = max((len(s) for s in profile_slugs), default=0)
-    # parent \ job \ ssimulacra2 \ slug
-    overhead = len(str(parent)) + 3 + len(LONGEST_JOB_SUBDIR) + longest_slug
+    # Profile directories sit directly inside the job folder, beside the fixed
+    # ones, so the deepest is whichever name is longer: parent \ job \ <deepest>
+    deepest = max(
+        len(LONGEST_JOB_SUBDIR), max((len(s) for s in profile_slugs), default=0)
+    )
+    overhead = len(str(parent)) + 2 + deepest
     return MAX_USABLE_PATH - PATH_FILENAME_MARGIN - overhead
 
 

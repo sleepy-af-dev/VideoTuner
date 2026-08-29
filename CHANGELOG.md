@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A job's log is now a single narrative. Log statements that restated console output in different words are gone; section banners and warnings keep a timestamp prefix, transcript lines do not
 - A batch prints the title banner once and a `[N/M]` header per job
 - Jobs in a batch run sequentially, and the run exits non-zero if any job failed
-- Assessment and encode output folders drop their redundant affixes: `distorted/profile_<Profile>/` and `vmaf/<Profile>_profile/` are now both `distorted/<Profile>/` and `vmaf/<Profile>/`, which also makes the two subtrees consistent
+- A job folder now holds one folder per profile containing that profile's encodes and both metrics' results, replacing the separate `distorted/<Profile>/`, `vmaf/<Profile>/` and `ssimulacra2/<Profile>/` trees. The filenames already say which is which, so nothing is lost, a multi-profile comparison is one folder per candidate rather than three, and dropping a level of nesting gives job folder names 12 more characters before they need shortening. A profile named `reference` or `temp` gets a `_profile` suffix so it cannot clash with those folders
 - Bitrate stats and analysis files no longer repeat the source name, which the job folder they sit in already carries. This alone took the longest path from 343 to 225 characters
 - Profile names and run identifiers such as `iter1` or `crf16.0` are never shortened, so results stay attributable
 

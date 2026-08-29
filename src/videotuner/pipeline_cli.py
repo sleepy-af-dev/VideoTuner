@@ -700,27 +700,30 @@ def validate_bitrate_warning_args(
                 f"--predicted-bitrate-warning-percent must be between {BITRATE_WARNING_PERCENT_MIN:.0f} and {BITRATE_WARNING_PERCENT_MAX:.0f} (got {args.predicted_bitrate_warning_percent})"  # noqa: E501  # TODO(E501): shorten line
             )
 
+    # --continue-budget-search implies --show-best-within-budget, so the flag
+    # that is set is not always the flag that was typed. Errors name the typed
+    # one, which is the only one the reader can act on.
+    typed_flag = (
+        "--continue-budget-search"
+        if args.continue_budget_search
+        else "--show-best-within-budget"
+    )
+
     # The warning percent is what defines the budget, so asking to be shown the
     # best encode within it without setting one cannot be honoured.
     if args.show_best_within_budget and args.predicted_bitrate_warning_percent is None:
         parser.error(
-            "--show-best-within-budget requires --predicted-bitrate-warning-percent, which sets the budget. Add a warning percent or remove --show-best-within-budget."  # noqa: E501  # TODO(E501): shorten line
+            f"{typed_flag} requires --predicted-bitrate-warning-percent, which sets the budget. Add a warning percent or remove {typed_flag}."  # noqa: E501  # TODO(E501): shorten line
         )
 
     if args.assessment_only and args.show_best_within_budget:
-        # store_true, so this reports whichever flag the user actually typed
-        flag = (
-            "--continue-budget-search"
-            if args.continue_budget_search
-            else "--show-best-within-budget"
-        )
         detail = (
             "with no search to continue"
             if args.continue_budget_search
             else "so there are no other results to choose between"
         )
         parser.error(
-            f"--assessment-only and {flag} are mutually exclusive. --assessment-only runs a single encode, {detail}."  # noqa: E501  # TODO(E501): shorten line
+            f"--assessment-only and {typed_flag} are mutually exclusive. --assessment-only runs a single encode, {detail}."  # noqa: E501  # TODO(E501): shorten line
         )
 
 

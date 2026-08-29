@@ -35,6 +35,15 @@ def _parse(*extra: str):
     return parse_cli(["input.mkv", *extra])
 
 
+def _error_line(stderr: str) -> str:
+    """The `videotuner: error: ...` line, without argparse's usage banner.
+
+    The banner names every option the parser has, so asserting a flag appears
+    anywhere in stderr passes whatever the message actually says.
+    """
+    return next((ln for ln in stderr.splitlines() if ": error:" in ln), "")
+
+
 class TestBudgetFlags:
     """The opt-in flags for showing, and searching for, the best within budget."""
 
@@ -53,7 +62,18 @@ class TestBudgetFlags:
         with pytest.raises(SystemExit):
             _ = main(["input.mkv", "--vmaf-target", "95", "--show-best-within-budget"])
 
-        assert "--predicted-bitrate-warning-percent" in capsys.readouterr().err
+        assert "--predicted-bitrate-warning-percent" in _error_line(
+            capsys.readouterr().err
+        )
+
+    def test_missing_budget_error_names_the_flag_that_was_typed(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """It implies the other flag, but this is the one the reader can act on."""
+        with pytest.raises(SystemExit):
+            _ = main(["input.mkv", "--vmaf-target", "95", "--continue-budget-search"])
+
+        assert "--continue-budget-search" in _error_line(capsys.readouterr().err)
 
     def test_assessment_only_rejects_showing(
         self, capsys: pytest.CaptureFixture[str]
@@ -69,7 +89,7 @@ class TestBudgetFlags:
                 ]
             )
 
-        error = capsys.readouterr().err
+        error = _error_line(capsys.readouterr().err)
         assert "--show-best-within-budget" in error
         assert "--assessment-only" in error
 
@@ -88,7 +108,7 @@ class TestBudgetFlags:
                 ]
             )
 
-        assert "--continue-budget-search" in capsys.readouterr().err
+        assert "--continue-budget-search" in _error_line(capsys.readouterr().err)
 
 
 class TestAsOneSourceFlag:

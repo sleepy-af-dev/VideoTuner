@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from itertools import count
@@ -83,6 +84,7 @@ from .utils import (
     log_section,
     resolve_run_folder,
     sanitize_filename,
+    use_utf8_output,
 )
 from .vmaf_assessment import VMAFResult
 
@@ -1290,6 +1292,10 @@ def _run_pipeline_body(
 
 def main(argv: Iterable[str] | None = None) -> int:
     """CLI wrapper for entry points."""
+    # Before anything prints. Redirecting output on Windows otherwise hands us
+    # the legacy code page, and the first quality target kills the run.
+    use_utf8_output(sys.stdout, sys.stderr)
+
     args = parse_cli(argv)
 
     if args.as_one_source and not Path(args.input).is_dir():

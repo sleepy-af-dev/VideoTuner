@@ -69,7 +69,11 @@ jobs:
   # slow when that script changes, which is when a full build is wanted anyway.
   ffms2:
     runs-on: windows-latest
-    timeout-minutes: 45
+    # A cold cache compiles FFmpeg and its dependency tree, which measured 42 of
+    # the 45 minutes this was first set to. Warm runs take a couple of minutes,
+    # so the cap only has to be generous enough that runner variance on the cold
+    # path cannot kill a build that is working.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
 

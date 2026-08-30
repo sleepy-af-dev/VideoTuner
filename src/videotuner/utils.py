@@ -536,3 +536,26 @@ def parse_master_display_metadata(primaries_str: str, luminance_str: str) -> str
     except Exception as e:
         logger.error("Failed to parse master display metadata: %s", e)
         return None
+
+
+def use_utf8_output(*streams: TextIO) -> None:
+    """Make the given text streams able to encode anything the UI prints.
+
+    Rich falls back to ASCII box drawing when the target encoding cannot take
+    the real thing, but characters written as ordinary text reach the stream
+    unchanged: the ``>=`` beside a quality target, the tick against a met one.
+    On Windows a redirected stdout arrives as the legacy code page rather than
+    UTF-8, so a run that is fine on screen dies with UnicodeEncodeError the
+    moment its output is piped to a file.
+
+    Args:
+        streams: Streams to switch to UTF-8, skipping any that cannot be
+    """
+    for stream in streams:
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue  # Not a text wrapper; nothing to set
+        try:
+            reconfigure(encoding="utf-8")
+        except (ValueError, OSError):  # pragma: no cover - stream already gone
+            pass

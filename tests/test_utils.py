@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import logging
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 
 from videotuner.constants import MAX_USABLE_PATH, PATH_FILENAME_MARGIN
 from videotuner.utils import (
@@ -15,6 +17,7 @@ from videotuner.utils import (
     job_folder_budget,
     parse_master_display_metadata,
     resolve_run_folder,
+    use_utf8_output,
 )
 
 
@@ -264,3 +267,28 @@ class TestDisplayPath:
 
     def test_the_root_itself_is_rendered_as_dot(self, tmp_path: Path) -> None:
         assert display_path(tmp_path, tmp_path) == "."
+
+
+class TestUseUtf8Output:
+    """Console output must survive a shell code page that cannot hold it."""
+
+    def test_reconfigures_a_legacy_stream(self):
+        """A redirected stdout on Windows arrives as the legacy code page."""
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+
+        use_utf8_output(stream)
+
+        assert stream.encoding.lower().replace("-", "") == "utf8"
+
+    def test_leaves_a_stream_that_cannot_be_reconfigured(self):
+        """Nothing to do, and nothing to raise, when there is no encoding to set."""
+        use_utf8_output(io.StringIO())
+
+    def test_console_can_print_the_characters_that_crashed_a_redirect(self):
+        """The run died on the >= in a quality target; ticks and warnings too."""
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+        use_utf8_output(stream)
+
+        Console(file=stream, width=80).print(
+            "VMAF Mean \u2265 95.0 \u2713 \u2717 \u26a0"
+        )

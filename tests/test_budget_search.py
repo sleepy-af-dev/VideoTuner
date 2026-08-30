@@ -174,6 +174,30 @@ class TestNextBudgetCrf:
 
         assert next_budget_crf(points, 43000.0, 0.5) == 22.5
 
+    def test_extrapolates_downward_when_everything_already_fits(self):
+        """All encodes fitting means the best one lies below them, not above.
+
+        From CRF 26 at 5,000 kbps and CRF 28 at 4,000 kbps, the slope of
+        ln(bitrate) is (ln 4000 - ln 5000) / 2 = -0.1116 per CRF. Rising to a
+        6,743 kbps budget from CRF 26 needs (ln 6743 - ln 5000) / -0.1116 =
+        -2.68, giving 23.32, which rounds to 23.5.
+        """
+        points = [
+            _point("alpha", 5000.0, {"vmaf_mean": 96.0}, crf=26.0),
+            _point("alpha", 4000.0, {"vmaf_mean": 95.0}, crf=28.0),
+        ]
+
+        assert next_budget_crf(points, 6743.0, 0.5) == 23.5
+
+    def test_stops_at_the_crf_floor(self):
+        """Nothing below CRF 1 to try, however much budget is left over."""
+        points = [
+            _point("alpha", 5000.0, {"vmaf_mean": 99.0}, crf=1.0),
+            _point("alpha", 4000.0, {"vmaf_mean": 98.0}, crf=4.0),
+        ]
+
+        assert next_budget_crf(points, 6743.0, 0.5) is None
+
     def test_stops_at_the_crf_ceiling(self):
         """Even the cheapest rate factor the encoder offers is over budget."""
         points = [

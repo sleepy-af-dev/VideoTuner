@@ -10,6 +10,7 @@ import pytest
 from videotuner.encoder_type import EncoderType
 from videotuner.encoding_utils import (
     HDR_TRANSFER_CHARACTERISTICS,
+    VS_PACKAGE_SUBDIR,
     CropValues,
     EncoderPaths,
     SampledSource,
@@ -319,24 +320,40 @@ class TestVapourSynthEnv:
         """Test from_cwd returns relative paths when cwd is None."""
         env = VapourSynthEnv.from_cwd(None)
         assert env.vs_dir == Path("vapoursynth-portable")
-        assert env.vsscript_dll == Path("vapoursynth-portable") / "VSScript.dll"
+        assert (
+            env.vsscript_dll
+            == Path("vapoursynth-portable") / VS_PACKAGE_SUBDIR / "vsscript.dll"
+        )
         assert (
             env.ffms2_dll == Path("vapoursynth-portable") / "vs-plugins" / "ffms2.dll"
         )
         assert env.vs_plugin_dir == Path("vapoursynth-portable") / "vs-plugins"
-        assert env.vspipe_bin == Path("vapoursynth-portable") / "vspipe.exe"
+        assert (
+            env.vspipe_bin
+            == Path("vapoursynth-portable") / VS_PACKAGE_SUBDIR / "vspipe.exe"
+        )
 
     def test_from_cwd_with_path(self):
         """Test from_cwd returns paths relative to cwd."""
         cwd = Path("C:/project")
         env = VapourSynthEnv.from_cwd(cwd)
         assert env.vs_dir == Path("C:/project/vapoursynth-portable")
-        assert env.vsscript_dll == Path("C:/project/vapoursynth-portable/VSScript.dll")
+        assert (
+            env.vsscript_dll
+            == Path("C:/project/vapoursynth-portable")
+            / VS_PACKAGE_SUBDIR
+            / "vsscript.dll"
+        )
         assert env.ffms2_dll == Path(
             "C:/project/vapoursynth-portable/vs-plugins/ffms2.dll"
         )
         assert env.vs_plugin_dir == Path("C:/project/vapoursynth-portable/vs-plugins")
-        assert env.vspipe_bin == Path("C:/project/vapoursynth-portable/vspipe.exe")
+        assert (
+            env.vspipe_bin
+            == Path("C:/project/vapoursynth-portable")
+            / VS_PACKAGE_SUBDIR
+            / "vspipe.exe"
+        )
 
     def test_from_args_uses_provided_paths(self):
         """Test from_args uses CLI-provided paths."""
@@ -353,14 +370,14 @@ class TestVapourSynthEnv:
         assert env.vs_plugin_dir == Path("C:/repo/vapoursynth-portable/vs-plugins")
 
     def test_validate_raises_when_vsscript_missing(self):
-        """Test validate raises FileNotFoundError when VSScript.dll is missing."""
+        """Test validate raises FileNotFoundError when vsscript.dll is missing."""
         with tempfile.TemporaryDirectory() as tmpdir:
             cwd = Path(tmpdir)
             env = VapourSynthEnv.from_cwd(cwd)
 
             with pytest.raises(FileNotFoundError) as exc_info:
                 env.validate()
-            assert "VSScript.dll" in str(exc_info.value)
+            assert "vsscript.dll" in str(exc_info.value)
 
     def test_validate_raises_when_ffms2_missing(self):
         """Test validate raises FileNotFoundError when ffms2.dll is missing."""
@@ -368,7 +385,9 @@ class TestVapourSynthEnv:
             cwd = Path(tmpdir)
             vs_dir = cwd / "vapoursynth-portable"
             vs_dir.mkdir(parents=True)
-            (vs_dir / "VSScript.dll").touch()
+            package_dir = vs_dir / VS_PACKAGE_SUBDIR
+            package_dir.mkdir(parents=True, exist_ok=True)
+            (package_dir / "vsscript.dll").touch()
 
             env = VapourSynthEnv.from_cwd(cwd)
 
@@ -383,7 +402,9 @@ class TestVapourSynthEnv:
             vs_dir = cwd / "vapoursynth-portable"
             plugins_dir = vs_dir / "vs-plugins"
             plugins_dir.mkdir(parents=True)
-            (vs_dir / "VSScript.dll").touch()
+            package_dir = vs_dir / VS_PACKAGE_SUBDIR
+            package_dir.mkdir(parents=True, exist_ok=True)
+            (package_dir / "vsscript.dll").touch()
             (plugins_dir / "ffms2.dll").touch()
 
             env = VapourSynthEnv.from_cwd(cwd)
@@ -399,8 +420,10 @@ class TestVapourSynthEnv:
             vs_dir = cwd / "vapoursynth-portable"
             plugins_dir = vs_dir / "vs-plugins"
             plugins_dir.mkdir(parents=True)
-            (vs_dir / "VSScript.dll").touch()
-            (vs_dir / "vspipe.exe").touch()
+            package_dir = vs_dir / VS_PACKAGE_SUBDIR
+            package_dir.mkdir(parents=True, exist_ok=True)
+            (package_dir / "vsscript.dll").touch()
+            (package_dir / "vspipe.exe").touch()
             (plugins_dir / "ffms2.dll").touch()
 
             env = VapourSynthEnv.from_cwd(cwd)
@@ -478,7 +501,7 @@ class TestEncoderPaths:
             with pytest.raises(FileNotFoundError) as exc_info:
                 paths.validate()
             # Should fail on VapourSynth validation
-            assert "VSScript.dll" in str(exc_info.value)
+            assert "vsscript.dll" in str(exc_info.value)
 
     def test_validate_passes_when_all_files_exist(self):
         """Test validate passes when all required files exist."""
@@ -492,8 +515,10 @@ class TestEncoderPaths:
             vs_dir = cwd / "vapoursynth-portable"
             plugins_dir = vs_dir / "vs-plugins"
             plugins_dir.mkdir(parents=True)
-            (vs_dir / "VSScript.dll").touch()
-            (vs_dir / "vspipe.exe").touch()
+            package_dir = vs_dir / VS_PACKAGE_SUBDIR
+            package_dir.mkdir(parents=True, exist_ok=True)
+            (package_dir / "vsscript.dll").touch()
+            (package_dir / "vspipe.exe").touch()
             (plugins_dir / "ffms2.dll").touch()
 
             paths = EncoderPaths.from_cwd(cwd, EncoderType.X265)
@@ -504,8 +529,11 @@ class TestEncoderPaths:
         """Test that VapourSynthEnv is accessible via vs_env."""
         paths = EncoderPaths.from_cwd(Path("C:/project"), EncoderType.X265)
         assert isinstance(paths.vs_env, VapourSynthEnv)
-        assert paths.vs_env.vsscript_dll == Path(
-            "C:/project/vapoursynth-portable/VSScript.dll"
+        assert (
+            paths.vs_env.vsscript_dll
+            == Path("C:/project/vapoursynth-portable")
+            / VS_PACKAGE_SUBDIR
+            / "vsscript.dll"
         )
 
     def test_frozen_dataclass(self):
@@ -758,7 +786,9 @@ class TestBuildVspipeCommand:
             vpy_path=Path("script.vpy"),
             cwd=Path("C:/project"),
         )
-        assert args[0] == str(Path("C:/project/vapoursynth-portable/vspipe.exe"))
+        assert args[0] == str(
+            Path("C:/project/vapoursynth-portable") / VS_PACKAGE_SUBDIR / "vspipe.exe"
+        )
         assert "-c" in args
         assert "y4m" in args
         assert args[-1] == "-"

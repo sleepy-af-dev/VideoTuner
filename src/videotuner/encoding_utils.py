@@ -19,6 +19,11 @@ from .encoder_type import EncoderType
 # Directory name for bundled VapourSynth portable installation
 VAPOURSYNTH_PORTABLE_DIR = "vapoursynth-portable"
 
+# Since VapourSynth R74 the portable install is built by pip installing a wheel,
+# so VapourSynth's own binaries sit inside the package rather than at the root of
+# the portable directory. Kept in step with build.py by a test.
+VS_PACKAGE_SUBDIR = Path("Lib") / "site-packages" / "vapoursynth"
+
 # Relative paths to bundled encoder binaries
 X265_BIN_PATH = Path("tools") / "x265.exe"
 X264_BIN_PATH = Path("tools") / "x264.exe"
@@ -268,13 +273,18 @@ class VapourSynthEnv:
             if cwd
             else Path(VAPOURSYNTH_PORTABLE_DIR)
         )
-        vs_plugin_dir = vs_dir / "vs-plugins"
+        return cls._from_dirs(vs_dir, vs_dir / "vs-plugins")
+
+    @classmethod
+    def _from_dirs(cls, vs_dir: Path, vs_plugin_dir: Path) -> VapourSynthEnv:
+        """Derive the individual file paths from the two directories."""
+        package_dir = vs_dir / VS_PACKAGE_SUBDIR
         return cls(
             vs_dir=vs_dir,
             vs_plugin_dir=vs_plugin_dir,
-            vsscript_dll=vs_dir / "VSScript.dll",
+            vsscript_dll=package_dir / "vsscript.dll",
             ffms2_dll=vs_plugin_dir / "ffms2.dll",
-            vspipe_bin=vs_dir / "vspipe.exe",
+            vspipe_bin=package_dir / "vspipe.exe",
         )
 
     @classmethod
@@ -304,23 +314,17 @@ class VapourSynthEnv:
             if vs_plugin_dir_arg is not None
             else vs_dir / "vs-plugins"
         )
-        return cls(
-            vs_dir=vs_dir,
-            vs_plugin_dir=vs_plugin_dir,
-            vsscript_dll=vs_dir / "VSScript.dll",
-            ffms2_dll=vs_plugin_dir / "ffms2.dll",
-            vspipe_bin=vs_dir / "vspipe.exe",
-        )
+        return cls._from_dirs(vs_dir, vs_plugin_dir)
 
     def validate(self) -> None:
         """Validate that required VapourSynth files exist.
 
         Raises:
-            FileNotFoundError: If VSScript.dll or ffms2.dll is missing.
+            FileNotFoundError: If vsscript.dll or ffms2.dll is missing.
         """
         if not self.vsscript_dll.exists():
             raise FileNotFoundError(
-                f"VapourSynth VSScript.dll not found at: {self.vsscript_dll}"
+                f"VapourSynth vsscript.dll not found at: {self.vsscript_dll}"
             )
         if not self.ffms2_dll.exists():
             raise FileNotFoundError(f"FFMS2 plugin not found at: {self.ffms2_dll}")
@@ -330,7 +334,7 @@ class VapourSynthEnv:
     def build_env(self, base_env: dict[str, str] | None = None) -> dict[str, str]:
         """Build comprehensive environment dict with all VapourSynth paths.
 
-        Configures VAPOURSYNTH_PORTABLE, PATH, VAPOURSYNTH_PLUGIN_PATH,
+        Configures VAPOURSYNTH_PORTABLE, PATH, VAPOURSYNTH_EXTRA_PLUGIN_PATH,
         VAPOURSYNTH_LIBRARY_PATH, and VSSCRIPT_LIBRARY_PATH.
 
         Args:
@@ -340,22 +344,27 @@ class VapourSynthEnv:
             New environment dict with all VS paths configured.
         """
         env = dict(base_env) if base_env is not None else os.environ.copy()
+        package_dir = self.vs_dir / VS_PACKAGE_SUBDIR
 
         # Set VAPOURSYNTH_PORTABLE for tools that use it
         env["VAPOURSYNTH_PORTABLE"] = str(self.vs_dir)
 
-        # Prepend VapourSynth directories to PATH so DLLs are found first
-        # Include both vs_dir (for vapoursynth.dll, VSScript.dll) and
-        # vs_plugin_dir (for ffms2.dll and other plugins)
-        path_additions = str(self.vs_dir) + os.pathsep + str(self.vs_plugin_dir)
+        # Prepend VapourSynth directories to PATH so DLLs are found first.
+        # package_dir holds libvapoursynth.dll and vsscript.dll, vs_dir holds
+        # python*.dll, and vs_plugin_dir holds ffms2.dll and the other plugins.
+        path_additions = os.pathsep.join(
+            str(p) for p in (package_dir, self.vs_dir, self.vs_plugin_dir)
+        )
         env["PATH"] = path_additions + os.pathsep + env.get("PATH", "")
 
-        # Set plugin path
+        # Since R74, autoloading no longer picks up a directory by its location
+        # beside portable.vs. The bundled plugins are reached by this variable,
+        # which is searched after VapourSynth's own plugins directory.
         if self.vs_plugin_dir.exists():
-            env["VAPOURSYNTH_PLUGIN_PATH"] = str(self.vs_plugin_dir)
+            env["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] = str(self.vs_plugin_dir)
 
         # Set library paths for DLLs
-        vsdll = self.vs_dir / "vapoursynth.dll"
+        vsdll = package_dir / "libvapoursynth.dll"
         if vsdll.exists():
             env["VAPOURSYNTH_LIBRARY_PATH"] = str(vsdll)
         if self.vsscript_dll.exists():
@@ -400,7 +409,7 @@ class EncoderPaths:
         """Validate that all required encoder files exist.
 
         Raises:
-            FileNotFoundError: If encoder binary, VSScript.dll, or ffms2.dll is missing.
+            FileNotFoundError: If encoder binary, vsscript.dll, or ffms2.dll is missing.
         """
         if not self.encoder_bin.exists():
             raise FileNotFoundError(

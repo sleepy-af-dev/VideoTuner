@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A job folder now holds one folder per profile containing that profile's encodes and both metrics' results, replacing the separate `distorted/<Profile>/`, `vmaf/<Profile>/` and `ssimulacra2/<Profile>/` trees. The filenames already say which is which, so nothing is lost, a multi-profile comparison is one folder per candidate rather than three, and dropping a level of nesting gives job folder names 12 more characters before they need shortening. A profile named `reference` or `temp` gets a `_profile` suffix so it cannot clash with those folders
 - Bitrate stats and analysis files no longer repeat the source name, which the job folder they sit in already carries. This alone took the longest path from 343 to 225 characters
 - Profile names and run identifiers such as `iter1` or `crf16.0` are never shortened, so results stay attributable
+- Bundled x264 updated to 0.165.3223+40, and the build switched from the gcc archive to the clang one to match x265
+- Bundled x265 updated to 4.2+68+68. Still the `avx2` archive: it already carries the AVX-512 assembly kernels, which x265 uses only when passed `--asm avx512`, so the `avx512` archive would raise the CPU the release runs on without changing anything VideoTuner does
+- Bundled VapourSynth updated to R79, on its own embedded Python 3.14. R74 rebuilt the portable install around a wheel, so VapourSynth's binaries now sit under `Lib/site-packages/vapoursynth/` rather than at the root of `vapoursynth-portable/`, and plugin autoloading is driven by `VAPOURSYNTH_EXTRA_PLUGIN_PATH` rather than by a directory sitting beside `portable.vs`. Plugins stay in `vs-plugins/` and `--vs-plugin-dir` is unchanged. Measured before and after on the same sources, both encoders produce identical scores and bitrates
+- Bundled ffms2 is now built from source during the release rather than taken from the 5.0 archive, which is the newest binary the project has published and predates commits since. The build pins the ffms2 commit, the AviSynthPlus commit its headers come from, and the vcpkg tag that decides which FFmpeg is linked, and reads the FFmpeg version back afterwards rather than assuming the pin held. A manual setup still uses the 5.0 archive unless you build it yourself
+- Bundled vszip updated to 22.1.0, making SSIMULACRA2 assessment substantially faster: measured at 2.38 to 13.16 frames per second on 4K samples, a little over 5x. Part of that is upstream optimisation, and part is that the plugin now ships one build per instruction set with a manifest telling VapourSynth which to load, so a machine gets code matched to its CPU rather than a single generic build. Scores are unchanged to within 3e-5 relative, which is vectorisation noise rather than a change in the metric, though a value sitting on a rounding boundary can print one hundredth differently
+- vszip is now taken from its PyPI wheel rather than a GitHub release, because it stopped attaching binaries to releases after R13. It installs as `vs-plugins/vszip/` rather than a single DLL, since the per-CPU builds and their manifest belong together
+- Bundled LSMASHSource updated to 1310.0.0.0. R79 warns that 1266 uses the deprecated API3 and that support for it is going away; 1310 loads on API4 and the warning is gone. Measured on the same sources, scores and bitrates are unchanged
+- Building a release no longer unpacks archives with a bundled copy of 7-Zip, which the VapourSynth portable distribution stopped shipping. It uses the bsdtar included with Windows 10 and later, so 7-Zip is no longer redistributed
 
 ### Removed
 
@@ -49,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `logging.basicConfig(force=True)` closed existing handlers, tearing down the batch log as soon as the first job started
 - A missing input called `parser.error`, raising `SystemExit` and ending the whole run instead of failing one job
 - An exception raised by the job body was not caught, so one failure ended the run
+- Building a release left Nuitka's working directories behind in `dist/`. The cleanup looked for a name Nuitka has never produced, so nothing was ever removed and each build added a few hundred megabytes
 
 ## [0.4.1] - 2026-06-28
 

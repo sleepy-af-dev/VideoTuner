@@ -196,12 +196,12 @@ Download the latest release from the [Releases page](https://github.com/sleepy-a
 
 | Component                                                                    | Version        | Description                                                  |
 | ---------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------ |
-| [x264](https://github.com/Patman86/x264-Mod-by-Patman)                       | 0.165.3223+26  | H.264 encoder in `tools/x264.exe`                            |
-| [x265](https://github.com/Patman86/x265-Mod-by-Patman)                       | 4.1+223+43     | HEVC encoder in `tools/x265.exe`                             |
-| [VapourSynth](https://github.com/vapoursynth/vapoursynth)                    | R73            | Portable environment in `vapoursynth-portable/`              |
-| [ffms2](https://github.com/FFMS/ffms2)                                       | 5.0            | Frame-accurate video indexing (`ffms2.dll`, `ffmsindex.exe`) |
-| [LSMASHSource](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works) | 1266.0.0.0     | Video loading for SSIMULACRA2                                |
-| [vszip](https://github.com/dnjulek/vapoursynth-zip)                          | R13            | SSIMULACRA2 quality metric calculation                       |
+| [x264](https://github.com/Patman86/x264-Mod-by-Patman)                       | 0.165.3223+40  | H.264 encoder in `tools/x264.exe`                            |
+| [x265](https://github.com/Patman86/x265-Mod-by-Patman)                       | 4.2+68+68      | HEVC encoder in `tools/x265.exe`                             |
+| [VapourSynth](https://github.com/vapoursynth/vapoursynth)                    | R79            | Portable environment in `vapoursynth-portable/`              |
+| [ffms2](https://github.com/FFMS/ffms2)                                       | 5.1.2 (3af2ef2) | Frame-accurate video indexing (`ffms2.dll`, `ffmsindex.exe`), built from source |
+| [LSMASHSource](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works) | 1310.0.0.0     | Video loading for SSIMULACRA2                                |
+| [vszip](https://github.com/dnjulek/vapoursynth-zip)                          | 22.1.0         | SSIMULACRA2 quality metric calculation                       |
 
 ### From Source
 
@@ -231,21 +231,28 @@ Python dependencies (automatically installed): pyyaml, rich, pymediainfo
 
 #### 2. Set Up VapourSynth Portable
 
-Download `Install-Portable-VapourSynth-R73.ps1` from [VapourSynth R73 releases](https://github.com/vapoursynth/vapoursynth/releases/tag/R73) and run from the repository root:
+Download `Install-Portable-VapourSynth-R79.zip` from [VapourSynth R79 releases](https://github.com/vapoursynth/vapoursynth/releases/tag/R79), extract the `.ps1` from it, and run that from the repository root:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File Install-Portable-VapourSynth-R73.ps1 -TargetFolder vapoursynth-portable
+powershell -ExecutionPolicy Bypass -File Install-Portable-VapourSynth-R79.ps1 -TargetFolder vapoursynth-portable -PythonVersionMinor 14
 ```
+
+This downloads its own embedded Python, so it is unrelated to the interpreter you installed the package with above.
 
 #### 3. Install Required Plugins
 
-Download the following plugins and place them in `vapoursynth-portable/vs-plugins/`:
+Create `vapoursynth-portable/vs-plugins/` and place the following plugins in it. The installer does not create this directory, and VideoTuner points VapourSynth at it with `VAPOURSYNTH_EXTRA_PLUGIN_PATH` when it runs, so the name has to match (or be passed with `--vs-plugin-dir`):
 
 | Plugin       | Version    | Download                                                                                                             | Extract                              |
 | ------------ | ---------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
 | ffms2        | 5.0        | [ffms2-5.0-msvc.7z](https://github.com/FFMS/ffms2/releases/tag/5.0)                                                  | `x64/ffms2.dll`, `x64/ffmsindex.exe` |
-| LSMASHSource | 1266.0.0.0 | [L-SMASH-Works-r1266.0.0.0.7z](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/releases/tag/1266.0.0.0) | `x64/LSMASHSource.dll`               |
-| vszip        | R13        | [vapoursynth-zip-r13-windows-x86_64.zip](https://github.com/dnjulek/vapoursynth-zip/releases/tag/R13)                | `vszip.dll`                          |
+| LSMASHSource | 1310.0.0.0 | [L-SMASH-Works-r1310.0.0.0.7z](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/releases/tag/1310.0.0.0) | `x64/LSMASHSource.dll`               |
+| vszip        | 22.1.0     | [vapoursynth_vszip-22.1.0-py3-none-win_amd64.whl](https://pypi.org/project/vapoursynth-vszip/22.1.0/#files)          | `vapoursynth/plugins/vszip/` → `vs-plugins/vszip/` |
+
+> **Note:** 5.0 is the newest ffms2 binary published, and the project has taken
+> commits since. Pre-built releases bundle an ffms2 built from a later commit, so
+> a manual setup using the archive above is on a slightly older ffms2 unless you
+> build it from source yourself.
 
 #### 4. Install Encoders
 
@@ -253,8 +260,13 @@ Download encoders and place in `tools/`:
 
 | Component | Version        | Download                                                                                               | Extract                       |
 | --------- | -------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------- |
-| x264      | 0.165.3223+26  | [x264-0.165.3223+26...7z](https://github.com/Patman86/x264-Mod-by-Patman/releases/tag/0.165.3223%2B26) | `x264.exe` → `tools/x264.exe` |
-| x265      | 4.1+223+43     | [x265-4.1+223+43...7z](https://github.com/Patman86/x265-Mod-by-Patman/releases/tag/4.1%2B223%2B43)     | `x265.exe` → `tools/x265.exe` |
+| x264      | 0.165.3223+40  | [x264-0.165.3223+40...x64-clang22.1.8.7z](https://github.com/Patman86/x264-Mod-by-Patman/releases/tag/0.165.3223%2B40) | `x264.exe` → `tools/x264.exe` |
+| x265      | 4.2+68+68      | [x265-4.2+68+68...x64-avx2-clang22.1.8.7z](https://github.com/Patman86/x265-Mod-by-Patman/releases/tag/4.2%2B68%2B68)  | `x265.exe` → `tools/x265.exe` |
+
+> **Note:** x265 publishes one archive per compiler and instruction set. Pick the
+> `avx2` build: it already contains the AVX-512 assembly kernels, which x265 uses
+> only when passed `--asm avx512`, so an `avx512` archive raises the CPU it will
+> run on without changing what VideoTuner does.
 
 ## Usage
 
@@ -788,7 +800,11 @@ python build.py
 
 This creates a release folder in `dist/VideoTuner-vX.X.X/` with the compiled executable and all required files.
 
+`python build.py --deps-only` downloads and verifies the bundled dependencies without compiling, which is what CI runs on a pull request to catch a moved URL or a changed archive layout before a release depends on it.
+
 **Note:** Building requires a C compiler (Visual Studio Build Tools on Windows).
+
+**ffms2 differs between a local build and a released one.** The release workflow builds ffms2 from a pinned commit and passes it to `build.py --ffms2-dir`; run on its own, `build.py` falls back to downloading 5.0. To match a release locally, run `.github/scripts/build-ffms2.ps1` first and pass its output directory.
 
 ### Development Commands
 

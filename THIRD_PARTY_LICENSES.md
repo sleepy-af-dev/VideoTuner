@@ -13,7 +13,6 @@ VideoTuner bundles the following third-party software components. This document 
 | FFMS2 | GPL-3.0 (binary) | <https://github.com/FFMS/ffms2> |
 | LSMASHSource | ISC + LGPL-2.1 | <https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works> |
 | L-SMASH | ISC | <https://github.com/l-smash/l-smash> |
-| 7-Zip | LGPL-2.1 | <https://7-zip.org> |
 | Python | PSF-2.0 | <https://python.org> |
 
 ## Source Code Availability
@@ -82,6 +81,8 @@ Full license text: [licenses/MIT.txt](licenses/MIT.txt)
 
 The FFMS2 source code is MIT licensed, but Windows binaries are distributed under GPL v3 due to being linked with GPL-licensed FFmpeg components.
 
+The bundled binary is built from source during the release rather than taken from an upstream archive, because 5.0 is the newest binary FFMS2 has published. `.github/scripts/build-ffms2.ps1` records the exact upstream commit it builds and the FFmpeg version it links, so the corresponding source is identified by that commit in the repository linked above.
+
 Full license text: [licenses/GPL-3.0.txt](licenses/GPL-3.0.txt)
 
 ---
@@ -97,18 +98,6 @@ Permission to use, copy, modify, and/or distribute this software for any purpose
 THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 Full license texts: [licenses/ISC.txt](licenses/ISC.txt), [licenses/LGPL-2.1.txt](licenses/LGPL-2.1.txt)
-
----
-
-## 7-Zip
-
-**Location:** `vapoursynth-portable/7z.dll`, `7z.exe`\
-**License:** GNU Lesser General Public License v2.1\
-**Copyright:** Copyright (C) 1999-2024 Igor Pavlov
-
-This library is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.
-
-Full license text: [licenses/LGPL-2.1.txt](licenses/LGPL-2.1.txt)
 
 ---
 

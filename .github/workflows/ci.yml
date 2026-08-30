@@ -48,3 +48,52 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --extra dev
       - run: uv run pytest
+
+  # build.py otherwise runs only on a version tag, so a dependency URL, checksum
+  # or archive layout that has moved upstream is discovered after the tag is
+  # pushed. This downloads and verifies the bundled dependencies without the
+  # Nuitka compile, which is the half that talks to the network.
+  bundled-deps:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: python build.py --deps-only
+
+  # ffms2 is built from source for a release, and the release workflow only runs
+  # on a version tag, so without this nothing exercises the build until the tag
+  # is already pushed. The vcpkg cache keys on the build script, so this is only
+  # slow when that script changes, which is when a full build is wanted anyway.
+  ffms2:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('.github/scripts/build-ffms2.ps1') }}
+          # An edit that does not move the FFmpeg pins still restores, and vcpkg
+          # matches its archives by ABI hash rather than by cache key
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Build ffms2
+        shell: pwsh
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-cache
+        run: |
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          .github/scripts/build-ffms2.ps1 -OutDir "${{ runner.temp }}/ffms2"
+
+      # The release feeds the build output straight into build.py, and that hand-off
+      # is the one part of it the deps job cannot cover, since it has no built ffms2.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: python build.py --deps-only --ffms2-dir "${{ runner.temp }}/ffms2"

@@ -65,8 +65,28 @@ jobs:
             exit 1
           fi
 
+      # ffms2 has published no binary since 5.0, so the release bundles one
+      # built from a later commit. The pins live in the build script. Caching
+      # vcpkg's compiled packages keeps this to seconds once warm; a cold cache
+      # compiles FFmpeg, which is the long part.
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-cache
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('.github/scripts/build-ffms2.ps1') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Build ffms2
+        shell: pwsh
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-cache
+        run: |
+          New-Item -ItemType Directory -Force $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          .github/scripts/build-ffms2.ps1 -OutDir "${{ runner.temp }}/ffms2"
+
       - name: Build release
-        run: python build.py
+        run: python build.py --ffms2-dir "${{ runner.temp }}/ffms2"
 
       - name: Create release zip
         shell: pwsh

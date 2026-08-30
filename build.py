@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
+import os
 import re
 import shutil
 import subprocess
@@ -10,6 +12,7 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
 
 # Import version from the package
@@ -23,37 +26,56 @@ RELEASE_DIR = DIST_DIR / RELEASE_NAME
 
 # External dependency URLs and versions
 # x264 encoder
-X264_VERSION = "0.165.3223+26"
-X264_URL = "https://github.com/Patman86/x264-Mod-by-Patman/releases/download/0.165.3223%2B26/x264-0.165.3223+26-ed3d55b-.Mod-by-Patman.-x64-gcc15.2.0.7z"
+X264_VERSION = "0.165.3223+40"
+X264_URL = "https://github.com/Patman86/x264-Mod-by-Patman/releases/download/0.165.3223%2B40/x264-0.165.3223+40-25a99de-.Mod-by-Patman.-x64-clang22.1.8.7z"
 
-# x265 encoder
-X265_VERSION = "4.1+223+43"
-X265_URL = "https://github.com/Patman86/x265-Mod-by-Patman/releases/download/4.1%2B223%2B43/x265-4.1+223+43-5b546048f-.Mod-by-Patman.-x64-avx2-clang2118.7z"
+# x265 encoder. The avx2 build already contains the AVX-512 assembly kernels;
+# the tag names the compiler target for the C/C++ code, so an avx512 build only
+# raises the CPU floor without adding anything x265 uses by default.
+X265_VERSION = "4.2+68+68"
+X265_URL = "https://github.com/Patman86/x265-Mod-by-Patman/releases/download/4.2%2B68%2B68/x265-4.2+68+68-2df85ea68-.Mod-by-Patman.-x64-avx2-clang22.1.8.7z"
 
-# VapourSynth portable environment
-VAPOURSYNTH_VERSION = "R73"
-VAPOURSYNTH_INSTALLER_URL = f"https://github.com/vapoursynth/vapoursynth/releases/download/{VAPOURSYNTH_VERSION}/Install-Portable-VapourSynth-{VAPOURSYNTH_VERSION}.ps1"
+# VapourSynth portable environment. Since R74 the installer ships inside a zip
+# rather than as a bare .ps1, and the portable tree is built by pip installing a
+# wheel, so VapourSynth's own binaries live under Lib/site-packages/vapoursynth.
+VAPOURSYNTH_VERSION = "R79"
+VAPOURSYNTH_INSTALLER_URL = f"https://github.com/vapoursynth/vapoursynth/releases/download/{VAPOURSYNTH_VERSION}/Install-Portable-VapourSynth-{VAPOURSYNTH_VERSION}.zip"
+
+# Python bundled into the portable environment. Independent of the Python this
+# project runs under: it only executes the generated .vpy scripts.
+VAPOURSYNTH_PYTHON_MINOR = 14
+
+# Where the wheel puts VapourSynth inside the portable tree
+VS_PACKAGE_SUBDIR = "Lib/site-packages/vapoursynth"
 
 # VapourSynth plugins (all x64)
 FFMS2_VERSION = "5.0"
 FFMS2_URL = f"https://github.com/FFMS/ffms2/releases/download/{FFMS2_VERSION}/ffms2-{FFMS2_VERSION}-msvc.7z"
 
-LSMASH_VERSION = "1266.0.0.0"
+LSMASH_VERSION = "1310.0.0.0"
 LSMASH_URL = f"https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/releases/download/{LSMASH_VERSION}/L-SMASH-Works-r{LSMASH_VERSION}.7z"
 
-VSZIP_VERSION = "R13"
-VSZIP_URL = f"https://github.com/dnjulek/vapoursynth-zip/releases/download/{VSZIP_VERSION}/vapoursynth-zip-{VSZIP_VERSION.lower()}-windows-x86_64.zip"
-VSZIP_DLL = "vszip.dll"
+# vszip stopped attaching binaries to its GitHub releases after R13 and now
+# publishes to PyPI only, so this is a wheel rather than a release asset. vsrepo
+# has not tracked it either and still lists R13 as newest.
+VSZIP_VERSION = "22.1.0"
+VSZIP_URL = f"https://files.pythonhosted.org/packages/py3/v/vapoursynth-vszip/vapoursynth_vszip-{VSZIP_VERSION}-py3-none-win_amd64.whl"
+
+# The wheel carries a directory of per-CPU builds plus a manifest that tells
+# VapourSynth which to load, so the whole directory is installed rather than one
+# DLL. Extracting a single file would give every machine the baseline build.
+VSZIP_WHEEL_SUBDIR = "vapoursynth/plugins/vszip/"
+VSZIP_DIR = "vszip"
 
 # SHA256 checksums for integrity verification (protects against compromised downloads)
 # To update: download file, run: python -c "import hashlib; print(hashlib.sha256(open('file','rb').read()).hexdigest())"  # noqa: E501  # TODO(E501): shorten line
 CHECKSUMS = {
-    "vapoursynth_installer": "5f984e341c2264244b6549e71dd842af74a17274b6bfd494bc25e6c0e2f37439",  # noqa: E501  # TODO(E501): shorten line
-    "x264": "24a478eb720cc37677d78cce01f38e9d8d3447148b0889cf7a727c6dcdc77b3a",
-    "x265": "e36b5c50c779e5625368674a5baba0aec7cd2baaa08155149a4e73033b649070",
+    "vapoursynth_installer": "ee5bb140137ad5321e03b5421670331483cf50eea20de3086b9620f76e439d7f",  # noqa: E501  # TODO(E501): shorten line
+    "x264": "e79043b415030e189bbfaba4a33b83fdebb0000876fe25a3a306b0da98782c49",
+    "x265": "53c2da979f2b66204b7bfbd7074356a59ee7bac14bffa3d3ad5cbff066e19200",
     "ffms2": "e867a3df7262865107df40f230f5b8e1455905eba9b8852e6f35b1227537caeb",
-    "lsmash": "7189f299730c82e2cef025082095628c1028effb7e7276eae5fb5c9c3f1aef00",
-    "vszip": "bc7aee2d83be3ab12dcfe65abf64b276512c6fdd948ea229587a2bd58134cc24",
+    "lsmash": "b4fd48e3cb97c9583e08e69a3dd49a6500dede3bbc054f0fb9cddd0f5448e6e1",
+    "vszip": "1f5e6aa39ea72e610c1146c2d27f157bea507895555398c60347a65ee1745273",
 }
 
 
@@ -83,47 +105,67 @@ def verify_checksum(file_path: Path, expected_hash: str, name: str) -> None:
         sys.exit(1)
 
 
+# Nuitka names its working directories after the package it compiles, which is
+# src/videotuner, giving videotuner.build, videotuner.dist and
+# videotuner.onefile-build alongside the release folder in dist/
+NUITKA_PACKAGE = "videotuner"
+
+
 def clean_previous_build() -> None:
     """Remove previous build artifacts."""
     if RELEASE_DIR.exists():
         print(f"Cleaning previous release: {RELEASE_DIR}")
         shutil.rmtree(RELEASE_DIR)
 
-    # Clean Nuitka build cache for fresh builds
-    nuitka_cache = DIST_DIR / "pipeline.build"
-    if nuitka_cache.exists():
-        shutil.rmtree(nuitka_cache)
+    for path in sorted(DIST_DIR.glob(f"{NUITKA_PACKAGE}.*")):
+        if path.is_dir():
+            print(f"Cleaning Nuitka working directory: {path.name}")
+            shutil.rmtree(path)
 
 
-def _patch_vs_installer(script: str) -> tuple[str, list[str]]:
+PYTHON_PROBE_CAP = 30
+
+
+def patch_vs_installer(script: str) -> tuple[str, list[str], list[str]]:
     """Apply compatibility patches to the VapourSynth portable installer script.
 
     Fixes known issues in the upstream installer that affect non-interactive use:
     - Adds -UseBasicParsing to Invoke-WebRequest calls (Windows PowerShell 5.1's
       IE DOM parser fails in -NonInteractive mode)
-    - Raises the Python patch version probe limit from 10 to 20 (upstream cap is
-      too low for Python 3.13+ which has exceeded 10 patch releases)
+    - Raises the Python patch version probe limit, which upstream sets just above
+      the newest release at the time and which silently caps the Python version
+      installed once the interpreter gains more patch releases
 
     Returns:
-        Tuple of (patched script content, list of applied patch descriptions).
-        If a patch's target pattern isn't found, it is silently skipped.
+        Tuple of (patched script, applied descriptions, skipped descriptions).
+        A patch is skipped when its target pattern is absent, which means the
+        upstream script has changed and the patch needs revisiting.
     """
     applied: list[str] = []
+    skipped: list[str] = []
 
     # Fix 1: Add -UseBasicParsing to all Invoke-WebRequest calls
     iwr_pattern = re.compile(r"Invoke-WebRequest\b(?!.*-UseBasicParsing)")
     if iwr_pattern.search(script):
         script = iwr_pattern.sub("Invoke-WebRequest -UseBasicParsing", script)
         applied.append("Added -UseBasicParsing to Invoke-WebRequest calls")
+    else:
+        skipped.append("-UseBasicParsing on Invoke-WebRequest")
 
-    # Fix 2: Raise the Python patch version probe limit ($i -le 10 -> $i -le 20)
-    version_limit_old = "$i -le 10"
-    version_limit_new = "$i -le 20"
-    if version_limit_old in script:
-        script = script.replace(version_limit_old, version_limit_new, 1)
-        applied.append("Raised Python patch version probe limit from 10 to 20")
+    # Fix 2: Raise the Python patch version probe limit. Matched by structure
+    # rather than by literal, because upstream moves the cap every release.
+    probe_pattern = re.compile(r"(\$i = \$PythonVersionPatch \+ 1; \$i -le )(\d+)")
+    probe_match = probe_pattern.search(script)
+    if probe_match and int(probe_match.group(2)) < PYTHON_PROBE_CAP:
+        script = probe_pattern.sub(rf"\g<1>{PYTHON_PROBE_CAP}", script, count=1)
+        applied.append(
+            f"Raised Python patch version probe limit "
+            f"from {probe_match.group(2)} to {PYTHON_PROBE_CAP}"
+        )
+    elif not probe_match:
+        skipped.append("Python patch version probe limit")
 
-    return script, applied
+    return script, applied, skipped
 
 
 def install_vapoursynth_portable(target_dir: Path) -> None:
@@ -140,31 +182,41 @@ def install_vapoursynth_portable(target_dir: Path) -> None:
     print(f"Installing VapourSynth {VAPOURSYNTH_VERSION} portable environment...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        installer_path = (
-            Path(tmpdir) / f"Install-Portable-VapourSynth-{VAPOURSYNTH_VERSION}.ps1"
-        )
+        script_name = f"Install-Portable-VapourSynth-{VAPOURSYNTH_VERSION}.ps1"
+        archive_path = Path(tmpdir) / f"{script_name}.zip"
+        installer_path = Path(tmpdir) / script_name
 
-        # Download the installer script
+        # Download the installer archive
         print(f"  Downloading installer from {VAPOURSYNTH_INSTALLER_URL}")
         try:
-            _ = urllib.request.urlretrieve(VAPOURSYNTH_INSTALLER_URL, installer_path)
+            _ = urllib.request.urlretrieve(VAPOURSYNTH_INSTALLER_URL, archive_path)
         except Exception as e:
             print(f"ERROR: Failed to download VapourSynth installer: {e}")
             sys.exit(1)
 
         verify_checksum(
-            installer_path, CHECKSUMS["vapoursynth_installer"], "VapourSynth installer"
+            archive_path, CHECKSUMS["vapoursynth_installer"], "VapourSynth installer"
         )
+
+        # The archive holds the .ps1 alongside a .bat wrapper we do not use
+        try:
+            with zipfile.ZipFile(archive_path) as zf:
+                _ = zf.extract(script_name, tmpdir)
+        except (zipfile.BadZipFile, KeyError) as e:
+            print(f"ERROR: Could not extract {script_name} from installer archive: {e}")
+            sys.exit(1)
 
         # Patch the installer for non-interactive compatibility
         original = installer_path.read_text(encoding="utf-8")
-        patched, applied_patches = _patch_vs_installer(original)
-        if applied_patches:
-            _ = installer_path.write_text(patched, encoding="utf-8")
-            for patch_desc in applied_patches:
-                print(f"  Patched installer: {patch_desc}")
-        else:
-            print("  WARNING: No patches applied — upstream script may have changed")
+        patched, applied_patches, skipped_patches = patch_vs_installer(original)
+        _ = installer_path.write_text(patched, encoding="utf-8")
+        for patch_desc in applied_patches:
+            print(f"  Patched installer: {patch_desc}")
+        for patch_desc in skipped_patches:
+            print(
+                f"  WARNING: patch no longer applies ({patch_desc}) — "
+                "upstream script has changed"
+            )
 
         # Run the PowerShell installer with target folder
         # The installer creates the folder relative to its working directory,
@@ -181,6 +233,8 @@ def install_vapoursynth_portable(target_dir: Path) -> None:
             str(installer_path),
             "-TargetFolder",
             target_name,
+            "-PythonVersionMinor",
+            str(VAPOURSYNTH_PYTHON_MINOR),
             "-Unattended",
         ]
 
@@ -199,55 +253,71 @@ def install_vapoursynth_portable(target_dir: Path) -> None:
 
 
 def download_vszip(plugin_dir: Path) -> None:
-    """Download and extract vszip plugin to the plugin directory."""
-    dest_dll = plugin_dir / VSZIP_DLL
-    if dest_dll.exists():
-        print(f"  {VSZIP_DLL} already exists, skipping download")
+    """Download vszip and install its plugin directory into plugin_dir."""
+    dest_dir = plugin_dir / VSZIP_DIR
+    if dest_dir.exists():
+        print(f"  {VSZIP_DIR}/ already exists, skipping download")
         return
 
-    print(f"Downloading {VSZIP_DLL} from vapoursynth-zip...")
+    print(f"Downloading vszip {VSZIP_VERSION}...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        zip_path = Path(tmpdir) / "vszip.zip"
+        wheel_path = Path(tmpdir) / "vszip.whl"
 
-        # Download the zip file
+        # Download the wheel
         try:
-            _ = urllib.request.urlretrieve(VSZIP_URL, zip_path)
+            _ = urllib.request.urlretrieve(VSZIP_URL, wheel_path)
         except Exception as e:
             print(f"ERROR: Failed to download vszip: {e}")
             sys.exit(1)
 
-        verify_checksum(zip_path, CHECKSUMS["vszip"], "vszip")
+        verify_checksum(wheel_path, CHECKSUMS["vszip"], "vszip")
 
-        # Extract vszip.dll from the zip
+        # Copy the plugin directory out of the wheel, manifest included
         try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                # Find vszip.dll in the archive (may be in a subdirectory)
-                dll_found = False
-                for name in zf.namelist():
-                    if name.endswith(VSZIP_DLL):
-                        # Extract to temp dir then move to destination
-                        _ = zf.extract(name, tmpdir)
-                        extracted_path = Path(tmpdir) / name
-                        _ = shutil.copy2(extracted_path, dest_dll)
-                        dll_found = True
-                        print(f"  Extracted {VSZIP_DLL} to {plugin_dir}")
-                        break
-
-                if not dll_found:
-                    print(f"ERROR: {VSZIP_DLL} not found in downloaded archive")
+            with zipfile.ZipFile(wheel_path, "r") as zf:
+                members = [
+                    n
+                    for n in zf.namelist()
+                    if n.startswith(VSZIP_WHEEL_SUBDIR) and not n.endswith("/")
+                ]
+                if not members:
+                    print(f"ERROR: {VSZIP_WHEEL_SUBDIR} not found in vszip wheel")
                     sys.exit(1)
 
+                dest_dir.mkdir(parents=True)
+                for name in members:
+                    with (
+                        zf.open(name) as src,
+                        (dest_dir / Path(name).name).open("wb") as dst,
+                    ):
+                        _ = shutil.copyfileobj(src, dst)
+
+                print(f"  Extracted {len(members)} vszip files to {dest_dir}")
+
         except zipfile.BadZipFile as e:
-            print(f"ERROR: Invalid zip file: {e}")
+            print(f"ERROR: Invalid wheel file: {e}")
             sys.exit(1)
+
+
+def _bsdtar() -> Path:
+    """Locate the bsdtar that ships with Windows.
+
+    Called by full path rather than by name so a GNU tar earlier on PATH (Git
+    for Windows installs one) cannot be picked up instead. GNU tar cannot read
+    7z archives, and libarchive can.
+    """
+    tar = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "tar.exe"
+    if not tar.exists():
+        print(f"ERROR: bsdtar not found at {tar} (requires Windows 10 or later)")
+        sys.exit(1)
+    return tar
 
 
 def extract_from_7z(
     archive_path: Path,
     files_to_extract: list[str],
     dest_dir: Path,
-    sevenzip_exe: Path,
 ) -> None:
     """Extract specific files from a 7z archive.
 
@@ -255,35 +325,55 @@ def extract_from_7z(
         archive_path: Path to the .7z archive
         files_to_extract: List of file paths within the archive to extract
         dest_dir: Destination directory for extracted files
-        sevenzip_exe: Path to 7z.exe
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Extract specified files to temp directory
+        # bsdtar keeps the archive's directory structure, so each file lands at
+        # its own path below tmpdir rather than flattened into the root
         cmd = [
-            str(sevenzip_exe),
-            "e",  # extract without directory structure
+            str(_bsdtar()),
+            "-xf",
             str(archive_path),
-            f"-o{tmpdir}",
-            "-y",  # yes to all prompts
+            "-C",
+            tmpdir,
             *files_to_extract,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            print(f"ERROR: 7z extraction failed: {result.stderr}")
+            print(f"ERROR: extraction failed: {result.stderr}")
             sys.exit(1)
 
         # Move extracted files to destination
         for file_path in files_to_extract:
-            filename = Path(file_path).name
-            src = Path(tmpdir) / filename
+            src = Path(tmpdir) / file_path
             if src.exists():
-                _ = shutil.copy2(src, dest_dir / filename)
+                _ = shutil.copy2(src, dest_dir / src.name)
             else:
-                print(f"ERROR: Expected file not found after extraction: {filename}")
+                print(f"ERROR: Expected file not found after extraction: {file_path}")
                 sys.exit(1)
 
 
-def download_ffms2(plugin_dir: Path, sevenzip_exe: Path) -> None:
+FFMS2_FILES = ("ffms2.dll", "ffmsindex.exe")
+
+
+def install_ffms2_from(source_dir: Path, plugin_dir: Path) -> None:
+    """Install a locally built ffms2 instead of downloading the release.
+
+    ffms2 has published no binary since 5.0, so a release bundles one built from
+    a later commit. Verified as strictly as a download would be: the files have
+    to be there, and there is no fallback to the older archive if they are not.
+    """
+    print(f"Installing ffms2 from {source_dir}...")
+    missing = [name for name in FFMS2_FILES if not (source_dir / name).exists()]
+    if missing:
+        print(f"ERROR: {source_dir} is missing {', '.join(missing)}")
+        sys.exit(1)
+
+    for name in FFMS2_FILES:
+        _ = shutil.copy2(source_dir / name, plugin_dir / name)
+    print(f"  Copied {' and '.join(FFMS2_FILES)} to {plugin_dir}")
+
+
+def download_ffms2(plugin_dir: Path) -> None:
     """Download and extract ffms2 plugin."""
     dest_dll = plugin_dir / "ffms2.dll"
     if dest_dll.exists():
@@ -311,12 +401,11 @@ def download_ffms2(plugin_dir: Path, sevenzip_exe: Path) -> None:
                 f"ffms2-{FFMS2_VERSION}-msvc/x64/ffmsindex.exe",
             ],
             plugin_dir,
-            sevenzip_exe,
         )
         print(f"  Extracted ffms2.dll and ffmsindex.exe to {plugin_dir}")
 
 
-def download_lsmashsource(plugin_dir: Path, sevenzip_exe: Path) -> None:
+def download_lsmashsource(plugin_dir: Path) -> None:
     """Download and extract LSMASHSource plugin."""
     dest_dll = plugin_dir / "LSMASHSource.dll"
     if dest_dll.exists():
@@ -341,12 +430,11 @@ def download_lsmashsource(plugin_dir: Path, sevenzip_exe: Path) -> None:
             archive_path,
             ["x64/LSMASHSource.dll"],
             plugin_dir,
-            sevenzip_exe,
         )
         print(f"  Extracted LSMASHSource.dll to {plugin_dir}")
 
 
-def download_x264(tools_dir: Path, sevenzip_exe: Path) -> None:
+def download_x264(tools_dir: Path) -> None:
     """Download and extract x264 encoder."""
     dest_exe = tools_dir / "x264.exe"
     if dest_exe.exists():
@@ -371,12 +459,11 @@ def download_x264(tools_dir: Path, sevenzip_exe: Path) -> None:
             archive_path,
             ["x264.exe"],
             tools_dir,
-            sevenzip_exe,
         )
         print(f"  Extracted x264.exe to {tools_dir}")
 
 
-def download_x265(tools_dir: Path, sevenzip_exe: Path) -> None:
+def download_x265(tools_dir: Path) -> None:
     """Download and extract x265 encoder."""
     dest_exe = tools_dir / "x265.exe"
     if dest_exe.exists():
@@ -401,7 +488,6 @@ def download_x265(tools_dir: Path, sevenzip_exe: Path) -> None:
             archive_path,
             ["x265.exe"],
             tools_dir,
-            sevenzip_exe,
         )
         print(f"  Extracted x265.exe to {tools_dir}")
 
@@ -459,7 +545,90 @@ def run_nuitka() -> Path:
     return exe_path
 
 
-def assemble_release(exe_path: Path) -> None:
+# Paths the application resolves at runtime (see VapourSynthEnv in
+# encoding_utils.py). Provisioning checks these itself so a layout change
+# upstream fails the build rather than shipping a release that cannot start.
+REQUIRED_VAPOURSYNTH = (
+    "vapoursynth-portable/python.exe",
+    f"vapoursynth-portable/{VS_PACKAGE_SUBDIR}/vspipe.exe",
+    f"vapoursynth-portable/{VS_PACKAGE_SUBDIR}/vsscript.dll",
+    f"vapoursynth-portable/{VS_PACKAGE_SUBDIR}/libvapoursynth.dll",
+    "vapoursynth-portable/vs-plugins/ffms2.dll",
+    "vapoursynth-portable/vs-plugins/ffmsindex.exe",
+    "vapoursynth-portable/vs-plugins/LSMASHSource.dll",
+    "vapoursynth-portable/vs-plugins/vszip/vszip.dll",
+    "vapoursynth-portable/vs-plugins/vszip/manifest.vs",
+)
+
+REQUIRED_ENCODERS = (
+    "tools/x264.exe",
+    "tools/x265.exe",
+)
+
+REQUIRED_AFTER_PROVISION = REQUIRED_VAPOURSYNTH + REQUIRED_ENCODERS
+
+
+def verify_provisioned(
+    dest: Path, required: Sequence[str] = REQUIRED_AFTER_PROVISION
+) -> None:
+    """Check every file the application expects is present under dest.
+
+    The download helpers each verify their own output, but nothing otherwise
+    confirms the VapourSynth installer produced the layout the app resolves
+    against. Raises SystemExit listing all missing paths.
+
+    Args:
+        dest: Root the paths are relative to
+        required: Paths to check. Narrow this to the subset the caller actually
+            provisioned, so a missing piece nobody promised is not reported as
+            a failure.
+    """
+    missing = [rel for rel in required if not (dest / rel).exists()]
+    if missing:
+        print(f"ERROR: provisioning left {len(missing)} required path(s) missing:")
+        for rel in missing:
+            print(f"  {dest / rel}")
+        sys.exit(1)
+    print(f"  Verified {len(required)} required paths")
+
+
+def provision_dependencies(dest: Path, ffms2_dir: Path | None = None) -> None:
+    """Download VapourSynth, its plugins and the encoders into dest.
+
+    Args:
+        dest: Root to provision into
+        ffms2_dir: Directory holding a locally built ffms2. When given, it is
+            used instead of the 5.0 download.
+    """
+    # The VapourSynth installer runs with dest as its working directory
+    dest.mkdir(parents=True, exist_ok=True)
+
+    # Install vapoursynth-portable from official source
+    vs_dst = dest / "vapoursynth-portable"
+    install_vapoursynth_portable(vs_dst)
+
+    # Download encoders to tools folder
+    tools_dst = dest / "tools"
+    tools_dst.mkdir(parents=True, exist_ok=True)
+    download_x264(tools_dst)
+    download_x265(tools_dst)
+
+    # Download plugins to the plugin directory. Since R74 the installer no
+    # longer creates this, and it is reached via VAPOURSYNTH_EXTRA_PLUGIN_PATH
+    # rather than by sitting beside portable.vs.
+    plugin_dir = vs_dst / "vs-plugins"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    if ffms2_dir is not None:
+        install_ffms2_from(ffms2_dir, plugin_dir)
+    else:
+        download_ffms2(plugin_dir)
+    download_lsmashsource(plugin_dir)
+    download_vszip(plugin_dir)
+
+    verify_provisioned(dest)
+
+
+def assemble_release(exe_path: Path, ffms2_dir: Path | None = None) -> None:
     """Assemble the release folder with exe and required files."""
     print(f"Assembling release: {RELEASE_DIR}")
 
@@ -468,23 +637,7 @@ def assemble_release(exe_path: Path) -> None:
     # Copy the executable
     _ = shutil.copy2(exe_path, RELEASE_DIR / "VideoTuner.exe")
 
-    # Install vapoursynth-portable from official source (needed for 7z.exe)
-    vs_dst = RELEASE_DIR / "vapoursynth-portable"
-    install_vapoursynth_portable(vs_dst)
-    sevenzip_exe = vs_dst / "7z.exe"
-
-    # Download encoders to tools folder
-    tools_dst = RELEASE_DIR / "tools"
-    tools_dst.mkdir(parents=True, exist_ok=True)
-    download_x264(tools_dst, sevenzip_exe)
-    download_x265(tools_dst, sevenzip_exe)
-
-    # Download plugins to the plugin directory
-    plugin_dir = vs_dst / "vs-plugins"
-    plugin_dir.mkdir(parents=True, exist_ok=True)
-    download_ffms2(plugin_dir, sevenzip_exe)
-    download_lsmashsource(plugin_dir, sevenzip_exe)
-    download_vszip(plugin_dir)
+    provision_dependencies(RELEASE_DIR, ffms2_dir)
 
     # Copy sample profile config
     sample_config = REPO_ROOT / "profiles.yaml.sample"
@@ -538,12 +691,39 @@ def print_summary() -> None:
 
 def main() -> None:
     """Main build entry point."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    _ = parser.add_argument(
+        "--deps-only",
+        action="store_true",
+        help=(
+            "Download and verify the bundled dependencies without compiling. "
+            "Exercises every external URL, checksum and archive layout."
+        ),
+    )
+    _ = parser.add_argument(
+        "--ffms2-dir",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Use a locally built ffms2 from PATH (ffms2.dll and ffmsindex.exe) "
+            "instead of downloading the 5.0 release, which is the newest binary "
+            "published."
+        ),
+    )
+    args = parser.parse_args()
+
+    if args.deps_only:
+        print(f"Provisioning VideoTuner v{__version__} dependencies (no compile)")
+        print()
+        provision_dependencies(RELEASE_DIR, args.ffms2_dir)
+        return
+
     print(f"Building VideoTuner v{__version__}")
     print()
 
     clean_previous_build()
     exe_path = run_nuitka()
-    assemble_release(exe_path)
+    assemble_release(exe_path, args.ffms2_dir)
     print_summary()
 
 

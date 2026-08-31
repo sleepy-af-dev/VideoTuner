@@ -28,42 +28,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install ".[build]"
 
+      # Reads the version from version.py and the notes from CHANGELOG.md, and
+      # fails if that version has no section. Lives in a script so the test suite
+      # covers it; see tests/test_release_notes.py.
       - name: Extract version info
         id: version
-        shell: python
-        run: |
-          import os
-          import re
-          import sys
-          sys.path.insert(0, "src")
-          from videotuner.version import __version__
-
-          # Write to GitHub outputs
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"version={__version__}\n")
-
-          # Extract this version's section from CHANGELOG.md, which is the only
-          # place release notes are written. Matches from "## [X.Y.Z]" up to the
-          # next "## " heading or the link definitions at the end of the file.
-          with open("CHANGELOG.md", encoding="utf-8") as f:
-              changelog = f.read()
-
-          pattern = rf"## \[{re.escape(__version__)}\].*?(?=\n## |\n\[|\Z)"
-          match = re.search(pattern, changelog, re.DOTALL)
-
-          # Fail rather than publishing a release whose notes are just its version
-          # number. A missing section means the heading was never promoted out of
-          # Unreleased, and a published release is awkward to take back.
-          if not match:
-              raise SystemExit(
-                  f"::error::CHANGELOG.md has no '## [{__version__}]' section. "
-                  "Promote the Unreleased heading before tagging."
-              )
-
-          current_notes = match.group(0).strip()
-
-          with open("release_notes.md", "w", encoding="utf-8") as f:
-              f.write(current_notes)
+        run: python .github/scripts/release_notes.py
 
       # Keyed on the event rather than on ref_type: this workflow's push trigger
       # is tags only, so a push is always a tag, while a manual run can be aimed

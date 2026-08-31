@@ -562,7 +562,9 @@ def run_nuitka() -> Path:
         f"--file-version={__version__}",
         "--product-name=VideoTuner",
         "--company-name=sleepy-af-dev",
-        "--copyright=Copyright 2025 sleepy-af-dev",
+        # Spelled out rather than derived from the clock: the current year would
+        # make two builds of the same commit differ across New Year
+        "--copyright=Copyright 2025-2026 sleepy-af-dev",
         "--file-description=CRF optimization and encoder benchmarking tool",
         # Point to the package directory (not __main__.py)
         "src/videotuner",

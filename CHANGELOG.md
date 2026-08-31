@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-31
+
+Batch processing, a bitrate budget the search can aim at, and a refresh of
+every bundled dependency.
+
 ### Added
 
 - Batch processing: pass a folder instead of a file to run the pipeline once per video inside it, with the same settings. Discovery is top level only, matched by extension (`.mkv`, `.mp4`, `.m4v`, `.mov`, `.ts`, `.m2ts`, `.avi`, `.webm`), in name order
@@ -180,5 +185,6 @@ Initial release.
 - Multi-profile comparison mode
 - Rich console progress display
 
-[Unreleased]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sleepy-af-dev/VideoTuner/releases/tag/v0.4.1

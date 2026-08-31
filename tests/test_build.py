@@ -7,9 +7,10 @@ warning, so nothing else fails when one silently rots.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
-from build import PYTHON_PROBE_CAP, VS_PACKAGE_SUBDIR, patch_vs_installer
+from build import CHECKSUMS, PYTHON_PROBE_CAP, VS_PACKAGE_SUBDIR, patch_vs_installer
 from videotuner.encoding_utils import VS_PACKAGE_SUBDIR as RUNTIME_VS_PACKAGE_SUBDIR
 
 # The probe loop as it appears upstream. R73 capped it at 10, R79 at 15, which
@@ -65,3 +66,15 @@ def test_basic_parsing_added_once_and_only_when_missing() -> None:
     assert again.count("-UseBasicParsing") == 1
     assert not applied_again
     assert "-UseBasicParsing on Invoke-WebRequest" in skipped_again
+
+
+def test_every_bundled_download_has_a_real_checksum() -> None:
+    """No pin is left disabled.
+
+    verify_checksum treats "PLACEHOLDER" as permission to skip, printing the
+    hash it saw and carrying on. That is useful while adding a dependency and
+    silent once forgotten, which would leave a download unverified without
+    anything failing.
+    """
+    for name, digest in CHECKSUMS.items():
+        assert re.fullmatch(r"[0-9a-f]{64}", digest), f"{name} has no SHA256: {digest}"

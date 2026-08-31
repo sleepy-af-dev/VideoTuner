@@ -1,9 +1,13 @@
 name: Build and Release
 
+# A tag push builds and publishes. A manual run builds exactly the same way and
+# uploads the zip as an artifact instead, so a change to this workflow can be
+# exercised without spending a version number on finding out it was wrong.
 on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
 
 jobs:
   build:
@@ -61,7 +65,11 @@ jobs:
           with open("release_notes.md", "w", encoding="utf-8") as f:
               f.write(current_notes)
 
+      # Keyed on the event rather than on ref_type: this workflow's push trigger
+      # is tags only, so a push is always a tag, while a manual run can be aimed
+      # at a tag ref too, and that must not be mistaken for a release.
       - name: Verify tag matches version
+        if: github.event_name == 'push'
         shell: bash
         run: |
           TAG_VERSION="${{ github.ref_name }}"
@@ -102,6 +110,7 @@ jobs:
           Compress-Archive -Path "dist/$releaseName/*" -DestinationPath "dist/$releaseName.zip"
 
       - name: Create GitHub Release
+        if: github.event_name == 'push'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -110,3 +119,19 @@ jobs:
             --title "VideoTuner v${{ steps.version.outputs.version }}" `
             --notes-file release_notes.md `
             "dist/VideoTuner-v${{ steps.version.outputs.version }}.zip"
+
+      # The zip a release would have published, kept long enough to install and
+      # run. The notes go with it because they are generated here rather than
+      # written by hand, so they are worth reading before a tag exists.
+      - name: Upload dry-run build
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: VideoTuner-v${{ steps.version.outputs.version }}-dry-run
+          path: |
+            dist/VideoTuner-v${{ steps.version.outputs.version }}.zip
+            release_notes.md
+          retention-days: 7
+          if-no-files-found: error
+          # The payload is already a zip, so re-compressing it only costs time
+          compression-level: 0

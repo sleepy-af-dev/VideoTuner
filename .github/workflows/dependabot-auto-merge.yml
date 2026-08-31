@@ -1,8 +1,13 @@
 name: Dependabot auto-merge
 
-# Auto-merge the low-risk Dependabot PRs: github-actions updates (any level) and patch-level
-# bumps in any ecosystem. Minor and major bumps are left for manual review. Auto-merge only
-# completes once the required checks pass, so the tests remain the gate.
+# Auto-merge the low-risk Dependabot PRs: patch bumps in any ecosystem, and minor bumps to
+# GitHub Actions, which are pinned by SHA here and so raise a PR for every release. Major
+# bumps go to review whatever the ecosystem. Auto-merge only completes once the required
+# checks pass, so the tests remain the gate.
+#
+# Actions were previously exempt from the level check entirely, which merged actions/cache
+# v4 to v6 unreviewed. It was harmless, but a major bump to the action holding the release
+# build's cache deserves a look rather than a coin toss.
 
 on: pull_request
 
@@ -20,9 +25,12 @@ jobs:
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
 
       - name: Enable auto-merge
+        # update-type is the highest semver change in the PR, so a grouped update
+        # carrying one major is treated as a major and stops here.
         if: >
           steps.meta.outputs.update-type == 'version-update:semver-patch' ||
-          startsWith(github.head_ref, 'dependabot/github_actions/')
+          (startsWith(github.head_ref, 'dependabot/github_actions/') &&
+          steps.meta.outputs.update-type == 'version-update:semver-minor')
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}

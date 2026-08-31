@@ -12,6 +12,10 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    # A healthy release takes about 20 minutes, or an hour when the vcpkg cache
+    # has gone cold and FFmpeg is compiled from scratch. Generous against that,
+    # and far short of the 6 hours a job otherwise gets to hang for.
+    timeout-minutes: 120
     permissions:
       contents: write
 

@@ -58,10 +58,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          python-version: "3.13"
-      - run: python build.py --deps-only
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run python build.py --deps-only
 
   # ffms2 is built from source for a release, and the release workflow only runs
   # on a version tag, so without this nothing exercises the build until the tag
@@ -97,7 +98,8 @@ jobs:
 
       # The release feeds the build output straight into build.py, and that hand-off
       # is the one part of it the deps job cannot cover, since it has no built ffms2.
-      - uses: actions/setup-python@v7
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          python-version: "3.13"
-      - run: python build.py --deps-only --ffms2-dir "${{ runner.temp }}/ffms2"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run python build.py --deps-only --ffms2-dir "${{ runner.temp }}/ffms2"

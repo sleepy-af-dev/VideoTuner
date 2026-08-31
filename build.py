@@ -67,6 +67,15 @@ VSZIP_URL = f"https://files.pythonhosted.org/packages/py3/v/vapoursynth-vszip/va
 VSZIP_WHEEL_SUBDIR = "vapoursynth/plugins/vszip/"
 VSZIP_DIR = "vszip"
 
+# Nuitka works out which DLLs to bundle with Dependency Walker, which it fetches
+# at build time and runs without checking a single byte of what it receives. The
+# tool has had no release since 2006, and the host is outside this project's
+# control, so the fetch is the one unpinned input to a published binary. Seeding
+# the archive keeps that request off the build entirely: Nuitka skips the
+# download when the archive or the extracted exe is already in its cache, and
+# unpacks the archive itself, which is what produces the DLL beside the exe.
+DEPENDS_URL = "https://dependencywalker.com/depends22_x64.zip"
+
 # SHA256 checksums for integrity verification (protects against compromised downloads)
 # To update: download file, run: python -c "import hashlib; print(hashlib.sha256(open('file','rb').read()).hexdigest())"  # noqa: E501  # TODO(E501): shorten line
 CHECKSUMS = {
@@ -76,6 +85,7 @@ CHECKSUMS = {
     "ffms2": "e867a3df7262865107df40f230f5b8e1455905eba9b8852e6f35b1227537caeb",
     "lsmash": "b4fd48e3cb97c9583e08e69a3dd49a6500dede3bbc054f0fb9cddd0f5448e6e1",
     "vszip": "1f5e6aa39ea72e610c1146c2d27f157bea507895555398c60347a65ee1745273",
+    "depends": "35db68a613874a2e8c1422eb0ea7861f825fc71717d46dabf1f249ce9634b4f1",
 }
 
 
@@ -492,8 +502,45 @@ def download_x265(tools_dir: Path) -> None:
         print(f"  Extracted x265.exe to {tools_dir}")
 
 
+def seed_depends_cache() -> None:
+    """Put a verified Dependency Walker in Nuitka's download cache.
+
+    Nuitka is asked where its cache lives rather than being told, so the layout
+    stays Nuitka's business. Imported here rather than at module scope because
+    `--deps-only` provisions dependencies without the build extra installed.
+    """
+    from nuitka.utils.Download import getDownloadCacheDir
+
+    cache_dir = Path(str(getDownloadCacheDir())) / "depends" / "x86_64"
+    archive = cache_dir / DEPENDS_URL.rsplit("/", 1)[-1]
+
+    # Either being present is what stops Nuitka reaching for the network
+    if archive.exists() or (cache_dir / "depends.exe").exists():
+        print(f"  Dependency Walker already cached in {cache_dir}")
+        return
+
+    print("Seeding Dependency Walker into the Nuitka cache...")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        download_path = Path(tmpdir) / archive.name
+
+        try:
+            _ = urllib.request.urlretrieve(DEPENDS_URL, download_path)
+        except Exception as e:
+            print(f"ERROR: Failed to download Dependency Walker: {e}")
+            sys.exit(1)
+
+        verify_checksum(download_path, CHECKSUMS["depends"], "Dependency Walker")
+        _ = shutil.copy2(download_path, archive)
+
+    print(f"  Placed {archive.name} in {cache_dir}")
+
+
 def run_nuitka() -> Path:
     """Run Nuitka to build the executable."""
+    seed_depends_cache()
+
     print("Building with Nuitka (this may take several minutes)...")
 
     cmd = [
@@ -515,7 +562,9 @@ def run_nuitka() -> Path:
         f"--file-version={__version__}",
         "--product-name=VideoTuner",
         "--company-name=sleepy-af-dev",
-        "--copyright=Copyright 2025 sleepy-af-dev",
+        # Spelled out rather than derived from the clock: the current year would
+        # make two builds of the same commit differ across New Year
+        "--copyright=Copyright 2025-2026 sleepy-af-dev",
         "--file-description=CRF optimization and encoder benchmarking tool",
         # Point to the package directory (not __main__.py)
         "src/videotuner",

@@ -1,6 +1,8 @@
 [project]
 name = "videotuner"
-version = "0.4.1"
+# Read from src/videotuner/version.py, which the release workflow also reads and
+# checks the tag against. Kept dynamic so a release bumps one file, not two.
+dynamic = ["version"]
 description = "A CRF optimization and encoder benchmarking tool that uses VMAF and SSIMULACRA2 quality metrics to find the optimal rate factor for video encoding."
 readme = "README.md"
 authors = [
@@ -31,6 +33,9 @@ build = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/videotuner/version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/videotuner"]

@@ -8,6 +8,7 @@ from videotuner.media import (
     VideoFormat,
     VideoInfo,
     combine_video_info,
+    estimate_frame_count,
     get_bit_depth_from_pix_fmt,
     get_frame_count,
     get_video_format,
@@ -85,9 +86,105 @@ class TestGetBitDepthFromPixFmt:
         assert get_bit_depth_from_pix_fmt("yuv420p14le") == 14
         assert get_bit_depth_from_pix_fmt("yuv420p16le") == 16
 
+    def test_semi_planar_names_subsampling_before_depth(self):
+        """p010le is 4:2:0 10-bit, p210le is 4:2:2 10-bit, p410le is 4:4:4
+        10-bit. The digit after the p is the chroma layout, not part of the
+        depth, so reading all three digits as a number gives 210 and 410."""
+        assert get_bit_depth_from_pix_fmt("p010le") == 10
+        assert get_bit_depth_from_pix_fmt("p210le") == 10
+        assert get_bit_depth_from_pix_fmt("p410le") == 10
+
+    def test_semi_planar_higher_depths(self):
+        assert get_bit_depth_from_pix_fmt("p012le") == 12
+        assert get_bit_depth_from_pix_fmt("p016le") == 16
+        assert get_bit_depth_from_pix_fmt("p216le") == 16
+
+    def test_packed_rgb_counts_bits_per_pixel(self):
+        """Packed RGB names the total across components, so the depth is that
+        divided by the component count."""
+        assert get_bit_depth_from_pix_fmt("rgb24") == 8
+        assert get_bit_depth_from_pix_fmt("bgr24") == 8
+        assert get_bit_depth_from_pix_fmt("rgb48le") == 16
+        assert get_bit_depth_from_pix_fmt("bgra64le") == 16
+
+    def test_planar_rgb_still_reads_the_plane_marker(self):
+        """gbrp10le is planar and keeps the depth after the p, so the packed
+        rule must not claim it."""
+        assert get_bit_depth_from_pix_fmt("gbrp10le") == 10
+        assert get_bit_depth_from_pix_fmt("gbrp") == 8
+
+
+class TestEstimateFrameCount:
+    """Only reached when the container metadata carries no frame count."""
+
+    def test_prefers_the_track_duration(self):
+        """Figures from an input whose container metadata reports 2881 frames:
+        the video track runs 120.162s and the container 121.955s. The track
+        duration reproduces 2881 exactly; the container's gives 2923, which is
+        42 frames past the end of the video."""
+        assert (
+            estimate_frame_count(
+                23.976023976023978,
+                track_duration=120.162,
+                container_duration=121.955,
+            )
+            == 2881
+        )
+
+    def test_falls_back_to_the_container_duration(self):
+        assert (
+            estimate_frame_count(25.0, track_duration=None, container_duration=4.0)
+            == 100
+        )
+
+    def test_no_usable_duration_gives_nothing(self):
+        assert (
+            estimate_frame_count(25.0, track_duration=None, container_duration=0.0)
+            is None
+        )
+
+    def test_no_usable_fps_gives_nothing(self):
+        assert (
+            estimate_frame_count(0.0, track_duration=10.0, container_duration=10.0)
+            is None
+        )
+
+    def test_rounds_down(self):
+        """Overshooting asks the sampler for frames past the end of the video,
+        so a fractional result truncates rather than rounding."""
+        assert (
+            estimate_frame_count(25.0, track_duration=4.999, container_duration=4.999)
+            == 124
+        )
+
 
 class TestGetVideoFormat:
     """Tests for video format detection (HDR vs SDR)."""
+
+    def test_ffprobe_smpte2084_is_hdr(self):
+        """ffprobe spells PQ 'smpte2084'. parse_video_info fills color_trc
+        straight from ffprobe, so this is the only spelling a real run sees."""
+        video_info = VideoInfo(fps=24.0, duration=100.0, color_trc="smpte2084")
+        assert get_video_format(video_info) == VideoFormat.HDR
+
+    def test_ffprobe_arib_std_b67_is_hdr(self):
+        """ffprobe spells HLG 'arib-std-b67', hyphenated."""
+        video_info = VideoInfo(fps=24.0, duration=100.0, color_trc="arib-std-b67")
+        assert get_video_format(video_info) == VideoFormat.HDR
+
+    def test_ffprobe_bt709_is_sdr(self):
+        video_info = VideoInfo(fps=24.0, duration=100.0, color_trc="bt709")
+        assert get_video_format(video_info) == VideoFormat.SDR
+
+    def test_ffprobe_wide_gamut_sdr_is_sdr(self):
+        """A BT.2020 SDR transfer is wide gamut, not high dynamic range."""
+        video_info = VideoInfo(fps=24.0, duration=100.0, color_trc="bt2020-10")
+        assert get_video_format(video_info) == VideoFormat.SDR
+
+    # The cases below use pymediainfo's spellings, which parse_video_info does
+    # not produce; HDR_TRANSFER_CHARACTERISTICS accepts them deliberately so a
+    # VideoInfo assembled from MediaInfo still classifies. The ffprobe cases
+    # above are the ones that cover a real run.
 
     def test_pq_transfer_is_hdr(self):
         """Test that PQ transfer characteristic is detected as HDR."""
@@ -149,16 +246,16 @@ class TestVideoInfo:
         info = VideoInfo(
             fps=24.0,
             duration=7200.0,
-            color_trc="PQ",
-            color_primaries="BT.2020",
+            color_trc="smpte2084",
+            color_primaries="bt2020",
             mastering_display_color_primaries="Display P3",
             mastering_display_luminance="min: 0.0050 cd/m2, max: 1000 cd/m2",
             maximum_content_light_level="1000 cd/m2",
             maximum_frameaverage_light_level="400 cd/m2",
         )
 
-        assert info.color_trc == "PQ"
-        assert info.color_primaries == "BT.2020"
+        assert info.color_trc == "smpte2084"
+        assert info.color_primaries == "bt2020"
         assert info.mastering_display_color_primaries == "Display P3"
         assert info.mastering_display_luminance == "min: 0.0050 cd/m2, max: 1000 cd/m2"
 

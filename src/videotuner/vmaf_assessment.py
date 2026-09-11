@@ -20,6 +20,7 @@ from .constants import (
     VMAF_MAX_THREADS,
     VMAF_THREAD_CPU_FRACTION,
 )
+from .encoding_utils import is_hdr_video
 from .media import (
     VideoInfo,
     get_assessment_frame_count,
@@ -53,8 +54,20 @@ class VMAFResult:
 
 
 def needs_tonemap(info: VideoInfo) -> bool:
-    """Check if video needs tonemapping (BT.2020 color space only)."""
-    return info.color_primaries == "BT.2020"
+    """Check whether a source has to be tonemapped before it can be scored.
+
+    Keyed on the transfer characteristic rather than the primaries. Tone mapping
+    compresses a high dynamic range into a low one, which is a question about the
+    transfer; a BT.2020 source carrying an SDR transfer is merely wide gamut and
+    needs a gamut conversion instead.
+
+    Args:
+        info: Parsed metadata for the source.
+
+    Returns:
+        True for a PQ or HLG source.
+    """
+    return is_hdr_video(info.color_trc)
 
 
 @dataclass(frozen=True)

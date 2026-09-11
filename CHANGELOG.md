@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- HDR sources are tonemapped before VMAF scoring. The check that decides compared the colour primaries against `BT.2020`, which is how pymediainfo spells it, but that field is filled from ffprobe, which writes `bt2020`. It never matched, so `--tonemap auto`, the default, scored HDR against raw PQ values, while cropdetect, which asks the question separately, tonemapped correctly throughout. **HDR VMAF scores from this release are not comparable with those from earlier ones.** SDR is unaffected
+- The tonemapping decision keys on the transfer characteristic rather than the primaries. Tone mapping compresses dynamic range, which is a property of the transfer; a BT.2020 source carrying an SDR transfer is wide gamut and wants a gamut conversion instead
+- `get_video_format` classified every source as SDR, comparing the transfer against pymediainfo's spellings in the same way. Nothing in the pipeline called it, so no release behaved differently, but the encoding path had three copies of the test it should have been. It now delegates to the same HDR check as the rest of the tool, and those three copies call it
+- HLG sources no longer get `--hdr10` and `--hdr10-opt`. HLG is HDR but not HDR10: x265 documents `--hdr10` as controlling the HDR10 SEI packet, which carries the mastering display and MaxCLL that an HLG source does not have, and `--hdr10-opt` as a block-level optimisation for HDR10 content. `--repeat-headers` still applies to any HDR source
+- Mastering display metadata is preserved for displays outside the three named colour spaces. pymediainfo names the primaries only when they match a set it knows and prints the coordinates otherwise, and the coordinate form was discarded with a warning. It is now converted, so a title mastered on a non-standard display keeps its `--master-display`
+- Bit depth is read correctly from semi-planar and packed pixel formats. `p210le` and `p410le` name the chroma layout before the depth, so reading all three digits gave 210 and 410, neither a valid depth, and both fell back to 8-bit; packed RGB such as `rgb48le` has no plane marker to read at all. Sources here are almost always planar, so this was latent rather than live
+- An estimated frame count now uses the video track's duration rather than the container's. A container spans every track it holds, so its duration can run past the end of the video, and the estimate then asks the sampler for frames that do not exist. The estimate is only reached when no track reported a count of its own
+- An SD source that tagged its colour primaries but not its matrix now gets a `--colormatrix`. The inference looked for `bt601`, which ffprobe never writes, since it names SD primaries `smpte170m` and `bt470bg`
+
 ## [0.5.0] - 2026-08-31
 
 Batch processing, a bitrate budget the search can aim at, and a refresh of

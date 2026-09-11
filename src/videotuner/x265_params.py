@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from .encoding_utils import is_hdr_video
+from .encoding_utils import MATRIX_FOR_PRIMARIES, is_hdr_video, is_pq_video
 from .media import VideoInfo, get_bit_depth_from_pix_fmt
 
 logger = logging.getLogger(__name__)
@@ -89,8 +89,11 @@ def build_global_x265_params(
     # Detect if content is HDR (PQ/SMPTE 2084 or HLG/ARIB STD-B67 transfer)
     color_trc = video_info.color_trc
     is_hdr = is_hdr_video(color_trc)
+    is_pq = is_pq_video(color_trc)
 
-    logger.debug("HDR detection: color_trc='%s', is_hdr=%s", color_trc, is_hdr)
+    logger.debug(
+        "HDR detection: color_trc='%s', is_hdr=%s, is_pq=%s", color_trc, is_hdr, is_pq
+    )
 
     # Determine output bit depth from source pixel format
     if "output-depth" not in skip:
@@ -104,48 +107,27 @@ def build_global_x265_params(
         else:
             x265_params.append("--no-repeat-headers")
 
-    # Add hdr10: enable for HDR content, disable for SDR
+    # HDR10 signalling is PQ only. x265 documents --hdr10 as controlling the
+    # HDR10 SEI packet, which carries the mastering display and MaxCLL an HLG
+    # source does not have, and --hdr10-opt as a block-level optimisation for
+    # HDR10 content. HLG is HDR but not HDR10, so it gets neither.
     if "hdr10" not in skip and "no-hdr10" not in skip:
-        if is_hdr:
+        if is_pq:
             x265_params.append("--hdr10")
         else:
             x265_params.append("--no-hdr10")
 
-    # Add hdr10-opt for HDR content (separate check since it's a distinct param)
     if "hdr10-opt" not in skip and "no-hdr10-opt" not in skip:
-        if is_hdr:
+        if is_pq:
             x265_params.append("--hdr10-opt")
 
-    # Map color primaries
+    # These fields carry ffprobe's vocabulary, which already names primaries and
+    # transfers the way x265 does, so the value passes straight through.
     if "colorprim" not in skip and video_info.color_primaries:
-        colorprim_map = {
-            "BT.709": "bt709",
-            "BT.2020": "bt2020",
-            "BT.470M": "bt470m",
-            "BT.601 NTSC": "smpte170m",
-            "BT.601 PAL": "bt470bg",
-        }
-        primaries_val = video_info.color_primaries
-        colorprim = colorprim_map.get(
-            primaries_val,
-            primaries_val.lower().replace(".", "").replace(" ", ""),
-        )
-        x265_params.extend(["--colorprim", colorprim])
+        x265_params.extend(["--colorprim", video_info.color_primaries])
 
-    # Map transfer characteristics
     if "transfer" not in skip and color_trc:
-        transfer_map = {
-            "PQ": "smpte2084",
-            "HLG": "arib-std-b67",
-            "BT.709": "bt709",
-            "BT.601": "bt470m",
-            "SMPTE 170M": "smpte170m",
-        }
-        transfer = transfer_map.get(
-            color_trc,
-            color_trc.lower().replace(".", "").replace(" ", ""),
-        )
-        x265_params.extend(["--transfer", transfer])
+        x265_params.extend(["--transfer", color_trc])
 
     # Map color matrix
     # Infer from primaries if color_space is not a standard matrix identifier
@@ -154,31 +136,18 @@ def build_global_x265_params(
         color_space = video_info.color_space
         if color_space:
             colormatrix_map = {
-                # ffprobe uppercase values (from MediaInfo)
-                "BT.709": "bt709",
-                "BT.2020 non-constant": "bt2020nc",
-                "BT.2020 constant": "bt2020c",
-                "BT.601": "smpte170m",
-                "BT.470 System B/G": "bt470bg",
-                # ffprobe lowercase values (from JSON output)
                 "bt709": "bt709",
                 "bt2020nc": "bt2020nc",
                 "bt2020c": "bt2020c",
                 "smpte170m": "smpte170m",
+                "smpte240m": "smpte240m",
                 "bt470bg": "bt470bg",
             }
             colormatrix = colormatrix_map.get(color_space)
 
-        # Fallback: infer from color primaries if matrix is unknown
+        # Fallback: infer the matrix that goes with the primaries
         if colormatrix is None and video_info.color_primaries:
-            # Handle both uppercase and lowercase primaries
-            primaries_lower = video_info.color_primaries.lower()
-            if "bt.2020" in primaries_lower or primaries_lower == "bt2020":
-                colormatrix = "bt2020nc"  # Non-constant luminance is standard for UHD
-            elif "bt.709" in primaries_lower or primaries_lower == "bt709":
-                colormatrix = "bt709"
-            elif "bt.601" in primaries_lower or primaries_lower == "bt601":
-                colormatrix = "smpte170m"
+            colormatrix = MATRIX_FOR_PRIMARIES.get(video_info.color_primaries)
 
         logger.debug(
             f"Color matrix detection: color_space='{video_info.color_space}', colormatrix='{colormatrix}'"  # noqa: E501  # TODO(E501): shorten line

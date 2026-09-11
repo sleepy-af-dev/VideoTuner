@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 from collections.abc import Sequence
 from contextlib import suppress
@@ -10,6 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
+from .encoding_utils import is_hdr_video
 from .tool_parsers import get_float, get_int, get_str, parse_fraction
 
 logger = logging.getLogger(__name__)
@@ -160,6 +162,30 @@ def _run_ffprobe_json(
         return {}, {}
 
 
+def estimate_frame_count(
+    fps: float, *, track_duration: float | None, container_duration: float
+) -> int | None:
+    """Estimate a frame count for a file whose metadata carries none.
+
+    A container's duration spans every track it holds, so it can run past the
+    end of the video by a second or more, and multiplying it by the frame rate
+    then asks the sampler for frames that do not exist. The video track's own
+    duration is preferred wherever the metadata reported one.
+
+    Args:
+        fps: Frames per second.
+        track_duration: Video track duration in seconds, if known.
+        container_duration: Container duration in seconds.
+
+    Returns:
+        A frame count, or None if neither the rate nor any duration is usable.
+    """
+    duration = track_duration if track_duration is not None else container_duration
+    if fps <= 0 or duration <= 0:
+        return None
+    return int(fps * duration)
+
+
 # Mapping of ffprobe chroma_location to x265 chromaloc integers
 CHROMALOC_MAP: dict[str, int] = {
     "left": 0,
@@ -282,6 +308,7 @@ def parse_video_info(
     max_fall: str | None = None
     video_bitrate_kbps: float | None = None
     frame_count: int | None = None
+    track_duration: float | None = None
 
     try:
         from pymediainfo import MediaInfo
@@ -289,6 +316,13 @@ def parse_video_info(
         media_info = MediaInfo.parse(str(input_path))
         if media_info.video_tracks:
             video_track = media_info.video_tracks[0]
+
+            # Reported in milliseconds, and only used to estimate a frame count
+            # when the track carries none of its own.
+            raw_track_duration = cast(float | int | str | None, video_track.duration)
+            if raw_track_duration is not None:
+                with suppress(ValueError, TypeError):
+                    track_duration = float(raw_track_duration) / 1000.0
 
             mastering_display_primaries = cast(
                 str | None, video_track.mastering_display_color_primaries
@@ -366,9 +400,11 @@ def parse_video_info(
             "pymediainfo not available, HDR metadata and video bitrate will not be extracted"  # noqa: E501  # TODO(E501): shorten line
         )
 
-    # Fallback: calculate frame_count from fps × duration if not available from metadata
-    if frame_count is None and fps > 0 and duration > 0:
-        frame_count = int(fps * duration)
+    # Fallback: estimate from the frame rate when no track reported a count
+    if frame_count is None:
+        frame_count = estimate_frame_count(
+            fps, track_duration=track_duration, container_duration=duration
+        )
 
     return VideoInfo(
         fps=fps,
@@ -429,38 +465,66 @@ def get_assessment_frame_count(
     return get_frame_count(video_path, info)
 
 
+SUPPORTED_BIT_DEPTHS: frozenset[int] = frozenset({8, 10, 12, 14, 16})
+
+# Semi-planar formats put the chroma layout first and the depth second, so
+# p010le is 4:2:0 10-bit and p210le is 4:2:2 10-bit. Reading all three digits
+# as one number gives 210, which is why this has to be tried before the planar
+# pattern below.
+_SEMI_PLANAR_RE = re.compile(r"^p\d(\d{2})")
+
+# Planar formats put the depth after the plane marker: yuv420p10le, gbrp10le.
+_PLANAR_RE = re.compile(r"p(\d+)")
+
+# Packed RGB names the total across every component: rgb48le is 3 components of
+# 16 bits, bgra64le is 4 of 16. The component letters have to be followed
+# immediately by digits, which is what keeps this off planar gbrp10le.
+_PACKED_RGB_RE = re.compile(r"^(?P<comps>[abgr]+)(?P<bits>\d+)")
+
+
 def get_bit_depth_from_pix_fmt(pix_fmt: str | None) -> int:
-    """Extract bit depth from FFmpeg pixel format string.
+    """Extract the per-component bit depth from an FFmpeg pixel format name.
 
     Args:
         pix_fmt: Pixel format string from FFmpeg (e.g., 'yuv420p10le', 'yuv420p')
 
     Returns:
-        Bit depth as integer (8, 10, 12, 14, or 16), defaults to 8 if unable to parse
+        Bit depth as integer (8, 10, 12, 14, or 16), defaults to 8 if unable to
+        parse or if the depth is one no encoder here accepts
 
     Examples:
         >>> get_bit_depth_from_pix_fmt('yuv420p10le')
         10
+        >>> get_bit_depth_from_pix_fmt('p210le')
+        10
+        >>> get_bit_depth_from_pix_fmt('rgb48le')
+        16
         >>> get_bit_depth_from_pix_fmt('yuv420p')
         8
-        >>> get_bit_depth_from_pix_fmt('yuv420p12le')
-        12
     """
-    import re
-
     if not pix_fmt:
         return 8
 
-    # Match patterns like 'p10', 'p12' in the pixel format string
-    # Common formats: yuv420p, yuv420p10le, yuv420p12le, yuv444p10le, etc.
-    match = re.search(r"p(\d+)", pix_fmt)
-    if match:
-        depth = int(match.group(1))
-        # Support common bit depths
-        if depth in (8, 10, 12, 14, 16):
-            return depth
+    depth: int | None = None
 
-    # If no bit depth suffix found, assume 8-bit
+    semi_planar = _SEMI_PLANAR_RE.match(pix_fmt)
+    if semi_planar:
+        depth = int(semi_planar.group(1))
+    else:
+        planar = _PLANAR_RE.search(pix_fmt)
+        if planar:
+            depth = int(planar.group(1))
+        else:
+            packed = _PACKED_RGB_RE.match(pix_fmt)
+            if packed:
+                components = len(packed.group("comps"))
+                total_bits = int(packed.group("bits"))
+                depth = total_bits // components
+
+    if depth in SUPPORTED_BIT_DEPTHS:
+        return depth
+
+    # Unparseable, or a depth no encoder here accepts (9-bit, for instance)
     return 8
 
 
@@ -472,22 +536,15 @@ class VideoFormat(StrEnum):
 
 
 def get_video_format(video_info: VideoInfo) -> VideoFormat:
-    """
-    Determine video format (HDR vs SDR) from video metadata.
+    """Classify a source as HDR or SDR from its transfer characteristic.
 
     Args:
-        video_info: MediaInfo object from ffprobe
+        video_info: Parsed metadata for the source
 
     Returns:
-        VideoFormat enum (HDR or SDR)
+        VideoFormat.HDR for a PQ or HLG transfer, otherwise VideoFormat.SDR
     """
-    # PQ (SMPTE 2084) or HLG = HDR, otherwise SDR
-    is_hdr = (
-        video_info.color_trc in ("PQ", "SMPTE 2084", "HLG", "ARIB STD-B67")
-        if video_info.color_trc
-        else False
-    )
-    return VideoFormat.HDR if is_hdr else VideoFormat.SDR
+    return VideoFormat.HDR if is_hdr_video(video_info.color_trc) else VideoFormat.SDR
 
 
 @dataclass(frozen=True)

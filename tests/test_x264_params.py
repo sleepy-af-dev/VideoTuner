@@ -15,9 +15,9 @@ _SDR_INFO = VideoInfo(
     pix_fmt="yuv420p",
     width=1920,
     height=1080,
-    color_primaries="BT.709",
+    color_primaries="bt709",
     color_trc=None,
-    color_space="BT.709",
+    color_space="bt709",
     color_range="tv",
 )
 
@@ -131,9 +131,9 @@ class TestBuildGlobalX264Params:
         """Test HDR source does not produce HDR metadata flags."""
         info = replace(
             _SDR_INFO,
-            color_trc="PQ",
-            color_primaries="BT.2020",
-            color_space="BT.2020 non-constant",
+            color_trc="smpte2084",
+            color_primaries="bt2020",
+            color_space="bt2020nc",
             mastering_display_luminance="min: 0.0050 cd/m2, max: 1000.0000 cd/m2",
             maximum_content_light_level="1000",
         )
@@ -148,7 +148,7 @@ class TestBuildGlobalX264Params:
 
     def test_bt2020_color_primaries(self):
         """Test BT.2020 color primaries mapping."""
-        info = replace(_SDR_INFO, color_primaries="BT.2020")
+        info = replace(_SDR_INFO, color_primaries="bt2020")
         params = build_global_x264_params(info)
 
         idx = params.index("--colorprim")
@@ -156,8 +156,16 @@ class TestBuildGlobalX264Params:
 
     def test_bt2020nc_color_matrix(self):
         """Test BT.2020 non-constant color matrix mapping."""
-        info = replace(_SDR_INFO, color_space="BT.2020 non-constant")
+        info = replace(_SDR_INFO, color_space="bt2020nc")
         params = build_global_x264_params(info)
 
         idx = params.index("--colormatrix")
         assert params[idx + 1] == "bt2020nc"
+
+    def test_colormatrix_fallback_from_sd_primaries(self):
+        """ffprobe names SD primaries smpte170m and bt470bg, never bt601."""
+        info = replace(_SDR_INFO, color_primaries="smpte170m", color_space=None)
+        params = build_global_x264_params(info)
+
+        idx = params.index("--colormatrix")
+        assert params[idx + 1] == "smpte170m"

@@ -10,7 +10,57 @@ import pytest
 
 from videotuner import vmaf_assessment
 from videotuner.media import VideoInfo
-from videotuner.vmaf_assessment import build_vmaf_filter, run_vmaf
+from videotuner.vmaf_assessment import build_vmaf_filter, needs_tonemap, run_vmaf
+
+
+class TestNeedsTonemap:
+    """The values here are what ffprobe reports, verbatim.
+
+    parse_video_info fills these fields from ffprobe's JSON output, which names
+    transfers and primaries in lowercase with no punctuation. A fixture written
+    in any other vocabulary tests a VideoInfo the pipeline never builds.
+    """
+
+    def test_pq_source_needs_tonemap(self) -> None:
+        info = VideoInfo(
+            fps=24.0,
+            duration=100.0,
+            color_trc="smpte2084",
+            color_primaries="bt2020",
+        )
+        assert needs_tonemap(info) is True
+
+    def test_hlg_source_needs_tonemap(self) -> None:
+        info = VideoInfo(
+            fps=24.0,
+            duration=100.0,
+            color_trc="arib-std-b67",
+            color_primaries="bt2020",
+        )
+        assert needs_tonemap(info) is True
+
+    def test_bt709_source_does_not(self) -> None:
+        info = VideoInfo(
+            fps=24.0, duration=100.0, color_trc="bt709", color_primaries="bt709"
+        )
+        assert needs_tonemap(info) is False
+
+    def test_wide_gamut_sdr_does_not(self) -> None:
+        """A BT.2020 source with an SDR transfer wants gamut conversion, not tone
+        mapping. Keying on primaries would tonemap it and crush nothing."""
+        info = VideoInfo(
+            fps=24.0,
+            duration=100.0,
+            color_trc="bt2020-10",
+            color_primaries="bt2020",
+        )
+        assert needs_tonemap(info) is False
+
+    def test_untagged_source_does_not(self) -> None:
+        """ffprobe omits colour fields it has no value for, rather than naming
+        them unknown, so None is the normal case for an untagged file."""
+        info = VideoInfo(fps=24.0, duration=100.0)
+        assert needs_tonemap(info) is False
 
 
 class TestBuildVmafFilter:

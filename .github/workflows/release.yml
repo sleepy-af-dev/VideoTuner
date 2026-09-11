@@ -58,13 +58,23 @@ jobs:
       # built from a later commit. The pins live in the build script. Caching
       # vcpkg's compiled packages keeps this to seconds once warm; a cold cache
       # compiles FFmpeg, which is the long part.
+      - name: Read the runner image version
+        id: image
+        shell: pwsh
+        run: |
+          if (-not $env:ImageVersion) {
+            throw "ImageVersion is unset; the cache key would silently lose its image discriminator"
+          }
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$env:ImageVersion"
+
+      # Keyed on the runner image as well as the build script, because vcpkg
+      # matches archives by ABI hash and the MSVC toolset ships with the image.
+      # See the fuller note in ci.yml.
       - name: Cache vcpkg packages
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/vcpkg-cache
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('.github/scripts/build-ffms2.ps1') }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-
+          key: vcpkg-${{ runner.os }}-${{ steps.image.outputs.version }}-${{ hashFiles('.github/scripts/build-ffms2.ps1') }}
 
       - name: Build ffms2
         shell: pwsh

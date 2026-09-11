@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** VMAF scores with the v1 models. v1 rebuilds the feature set: VIF is gone, banding (CAMBI) and chroma are scored rather than treated as side metrics, and NEG behaviour is on by default. Scores are calibrated to the v0 scale so a target keeps roughly its meaning, but **they are not the same numbers** and should not be compared across the change. Netflix shipped these in libvmaf 3.2.0
+- The model is chosen by display and viewing distance rather than by source resolution, which is what the model names describe. A source at 2160p or above scores against `vmaf_v1.0.16_1d5h_2160`, anything below against `vmaf_v1.0.16_3d0h`, the 1080p living-room model Netflix treat as standard. A source at 47fps or above takes the matching `_hfr` variant
+- VMAF is measured at 10-bit whatever the encode depth, which is what lets CAMBI see banding. When the encode was 8-bit, `cambi.enc_bitdepth` tells CAMBI so, since it scales its detection by the depth the content was encoded at rather than the depth it is handed
+
+### Added
+
+- `--v0-vmaf`, which scores with the legacy v0 models and reverts the measurement depth to match the encode, so a run reproduces what earlier releases did and can be compared against them. Combining it with `--vmaf-model` naming a v1 model is an error rather than a silent choice between the two
+- The VMAF model generation is named in the settings header, and the exact model recorded in the job log. A fallback to v0 is marked as a fallback: v0 and v1 numbers are not comparable, and an unnoticed fallback otherwise produces v0 scores that pass for v1 against a v1 target
+- A startup probe for the v1 models, run once and cached. There is no way to ask FFmpeg which libvmaf it links, so the probe scores a synthetic pair and reads the exit code. It costs about 0.07s, is skipped when its answer cannot matter, and falls back to v0 with a warning to both the terminal and the log
+- A named model that the linked libvmaf cannot load now fails with a message naming the model and the libvmaf version needed, rather than an ffmpeg exit status
+
 ## [0.6.0] - 2026-09-11
 
 Colour metadata was read from one source and compared against the vocabulary of

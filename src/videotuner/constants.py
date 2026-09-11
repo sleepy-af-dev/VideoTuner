@@ -53,6 +53,10 @@ VMAF_THREAD_CPU_FRACTION: float = 0.5
 # Maximum threads for VMAF calculation
 VMAF_MAX_THREADS: int = 16
 
+# Frame rate at or above which the high frame rate model variant is chosen.
+# 47 separates 47.952/48/50/59.94/60 from 24/25/30 without landing on any of them.
+VMAF_HFR_FPS_THRESHOLD: float = 47.0
+
 # =============================================================================
 # Resolution Constants
 # =============================================================================

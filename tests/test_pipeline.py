@@ -19,6 +19,7 @@ from videotuner.pipeline_display import (
     format_bitrate_percentage,
 )
 from videotuner.pipeline_types import MultiProfileResult
+from videotuner.vmaf_types import VmafFamily, VmafModelChoice
 
 
 def strip_ansi(text: str) -> str:
@@ -637,3 +638,48 @@ class TestSettingsSummaryReporting:
         display_settings_summary(console, args, tonemap_backend=None)
 
         assert "Tonemapping:" not in strip_ansi(buffer.getvalue())
+
+    def test_names_the_vmaf_model_generation(self) -> None:
+        """The exact model depends on each comparison's resolution, but the
+        generation is settled before the run starts, and it is the generation
+        that decides whether a score means anything next to an old one."""
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(
+            console,
+            args,
+            vmaf_choice=VmafModelChoice(family=VmafFamily.V1),
+        )
+
+        assert "VMAF models: v1" in strip_ansi(buffer.getvalue())
+
+    def test_marks_a_fallback_rather_than_just_naming_v0(self) -> None:
+        """v0 by choice and v0 by fallback produce identical numbers, so the
+        header has to distinguish them."""
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(
+            console,
+            args,
+            vmaf_choice=VmafModelChoice(family=VmafFamily.V0, fell_back=True),
+        )
+
+        out = strip_ansi(buffer.getvalue())
+        assert "v0" in out
+        assert "fallback" in out.lower()
+
+    def test_names_an_explicitly_requested_model(self) -> None:
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(
+            console,
+            args,
+            vmaf_choice=VmafModelChoice(
+                family=VmafFamily.V1, explicit_model="vmaf_v1.0.16_5d0h"
+            ),
+        )
+
+        assert "vmaf_v1.0.16_5d0h" in strip_ansi(buffer.getvalue())

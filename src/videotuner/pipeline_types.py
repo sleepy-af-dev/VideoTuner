@@ -17,6 +17,7 @@ from .pipeline_cli import PipelineArgs
 from .profiles import Profile
 from .progress import PipelineDisplay
 from .utils import ensure_dir
+from .vmaf_types import VmafFamily
 
 
 @dataclass
@@ -59,6 +60,10 @@ class IterationContext:
 
     # Sample sharing: True when VMAF and SSIM2 use identical sampling parameters
     sharing_samples: bool = False
+
+    # VMAF model generation, settled once before the run rather than per
+    # iteration, since it depends on a probe that must not repeat.
+    vmaf_family: VmafFamily = VmafFamily.V1
 
     @property
     def usable_frames(self) -> int:

@@ -65,6 +65,7 @@ class PipelineArgs:
 
     vmaf: bool = True
     vmaf_model: str | None = None
+    v0_vmaf: bool = False
     vmaf_log: Path | None = None
     tonemap: str = "auto"
 
@@ -385,6 +386,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         metavar="MODEL",
         default=_get_default("vmaf_model"),
         help="VMAF model name or path (default: auto-select by resolution)",
+    )
+    _ = analysis_group.add_argument(
+        "--v0-vmaf",
+        action="store_true",
+        default=_get_default("v0_vmaf"),
+        help=(
+            "Score with the legacy v0 models, measuring at the encode bit depth"
+            " as earlier releases did, for comparison against them"
+        ),
     )
     _ = analysis_group.add_argument(
         "--tonemap",

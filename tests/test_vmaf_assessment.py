@@ -4,13 +4,259 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
+from typing import cast
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from videotuner import vmaf_assessment
 from videotuner.media import VideoInfo
-from videotuner.vmaf_assessment import build_vmaf_filter, needs_tonemap, run_vmaf
+from videotuner.vmaf_assessment import (
+    build_libvmaf_model_option,
+    build_vmaf_filter,
+    needs_tonemap,
+    resolve_vmaf_choice,
+    run_vmaf,
+    select_vmaf_model,
+    vmaf_model_load_error,
+    vmaf_v1_available,
+)
+from videotuner.vmaf_types import VmafFamily
+
+
+class TestSelectVmafModel:
+    """Model names are chosen by display and viewing distance, not by source
+    resolution. Every name here was confirmed to load as a libvmaf built-in.
+    """
+
+    def test_default_is_the_v1_living_room_model(self) -> None:
+        assert select_vmaf_model(1920, 1080, fps=24.0) == "vmaf_v1.0.16_3d0h"
+
+    def test_2160p_uses_the_v1_uhd_model(self) -> None:
+        assert select_vmaf_model(3840, 2160, fps=24.0) == "vmaf_v1.0.16_1d5h_2160"
+
+    def test_high_frame_rate_takes_the_hfr_variant(self) -> None:
+        """hfr is an infix, not a suffix."""
+        assert select_vmaf_model(1920, 1080, fps=60.0) == "vmaf_v1.0.16_hfr_3d0h"
+        assert select_vmaf_model(3840, 2160, fps=60.0) == "vmaf_v1.0.16_hfr_1d5h_2160"
+
+    def test_hfr_threshold_splits_broadcast_rates_from_film_rates(self) -> None:
+        """47 separates 47.952/48/50/59.94/60 from 24/25/30, and the boundary
+        itself counts as high frame rate."""
+        assert "_hfr_" not in select_vmaf_model(1920, 1080, fps=30.0)
+        assert "_hfr_" not in select_vmaf_model(1920, 1080, fps=46.9)
+        assert "_hfr_" in select_vmaf_model(1920, 1080, fps=47.0)
+        assert "_hfr_" in select_vmaf_model(1920, 1080, fps=47.952)
+
+    def test_unknown_frame_rate_is_not_treated_as_high(self) -> None:
+        assert select_vmaf_model(1920, 1080, fps=None) == "vmaf_v1.0.16_3d0h"
+        assert select_vmaf_model(1920, 1080, fps=0.0) == "vmaf_v1.0.16_3d0h"
+
+    def test_v0_returns_the_legacy_models(self) -> None:
+        assert select_vmaf_model(1920, 1080, fps=24.0, use_v0=True) == "vmaf_v0.6.1"
+        assert select_vmaf_model(3840, 2160, fps=24.0, use_v0=True) == "vmaf_4k_v0.6.1"
+
+    def test_v0_has_no_high_frame_rate_variant(self) -> None:
+        """The v0 generation ships no hfr models, so the frame rate cannot
+        change the answer."""
+        assert select_vmaf_model(1920, 1080, fps=60.0, use_v0=True) == "vmaf_v0.6.1"
+        assert select_vmaf_model(3840, 2160, fps=60.0, use_v0=True) == "vmaf_4k_v0.6.1"
+
+
+class TestBuildLibvmafModelOption:
+    """The override separator is a footgun.
+
+    ``:`` is also the filter-option delimiter, so libvmaf's model-config
+    overrides need it escaped with two literal backslashes. Verified against
+    ffmpeg: a bare colon and a single backslash both fail with "Error applying
+    option 'cambi.enc_bitdepth'". ``|`` is worse than failing, because it exits
+    0 while swallowing every option after it, including log_path, so no log is
+    written and the run looks fine.
+    """
+
+    def test_version_model_without_override(self) -> None:
+        assert (
+            build_libvmaf_model_option("vmaf_v1.0.16_3d0h")
+            == "model=version=vmaf_v1.0.16_3d0h"
+        )
+
+    def test_cambi_override_uses_two_literal_backslashes(self) -> None:
+        result = build_libvmaf_model_option("vmaf_v1.0.16_3d0h", enc_bitdepth=8)
+        assert result == (
+            "model=version=vmaf_v1.0.16_3d0h" + "\\\\" + ":cambi.enc_bitdepth=8"
+        )
+        # Spelled out, because the count is the whole point
+        assert result.count("\\") == 2
+        assert "|" not in result
+
+    def test_override_carries_the_encode_depth_not_the_measure_depth(self) -> None:
+        """CAMBI scales its banding detection by the depth the content was
+        encoded at, which is the source depth, while measurement is always at
+        10-bit."""
+        assert "cambi.enc_bitdepth=10" in build_libvmaf_model_option(
+            "vmaf_v1.0.16_3d0h", enc_bitdepth=10
+        )
+
+
+class TestVmafV1Available:
+    """There is no way to ask FFmpeg which libvmaf it links.
+
+    FFmpeg requires only libvmaf >= 2.0.0 and passes the model name through as
+    an opaque string, holding no model list of its own. `-version` and
+    `-buildconf` say nothing about it. So the only way to know whether the v1
+    models exist is to try one and read the exit code.
+    """
+
+    def setup_method(self) -> None:
+        vmaf_v1_available.cache_clear()
+
+    def test_available_when_the_probe_succeeds(self) -> None:
+        result = MagicMock()
+        result.returncode = 0
+        with patch("videotuner.vmaf_assessment.subprocess.run", return_value=result):
+            assert vmaf_v1_available("ffmpeg") is True
+
+    def test_unavailable_when_the_probe_fails(self) -> None:
+        """An older libvmaf exits non-zero: measured as 127, with 'could not
+        load libvmaf model with version'."""
+        result = MagicMock()
+        result.returncode = 127
+        with patch("videotuner.vmaf_assessment.subprocess.run", return_value=result):
+            assert vmaf_v1_available("ffmpeg") is False
+
+    def test_missing_ffmpeg_is_unavailable(self) -> None:
+        with patch(
+            "videotuner.vmaf_assessment.subprocess.run", side_effect=FileNotFoundError
+        ):
+            assert vmaf_v1_available("nonexistent") is False
+
+    def test_timeout_is_unavailable(self) -> None:
+        with patch(
+            "videotuner.vmaf_assessment.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="ffmpeg", timeout=30),
+        ):
+            assert vmaf_v1_available("ffmpeg") is False
+
+    def test_probes_once_per_process(self) -> None:
+        """It must not run per CRF iteration."""
+        result = MagicMock()
+        result.returncode = 0
+        with patch(
+            "videotuner.vmaf_assessment.subprocess.run", return_value=result
+        ) as run:
+            assert vmaf_v1_available("ffmpeg") is True
+            assert vmaf_v1_available("ffmpeg") is True
+            run.assert_called_once()
+
+    def test_probes_large_enough_for_every_model(self) -> None:
+        """Two independent minimum-size traps, both of which would silently
+        downgrade every run by reporting a false negative. CAMBI needs 216 in
+        both dimensions; SpEED chroma's floor varies by model, and the 4K@3H
+        model needs 640x480. Anything smaller passes for some models and fails
+        for others."""
+        result = MagicMock()
+        result.returncode = 0
+        with patch(
+            "videotuner.vmaf_assessment.subprocess.run", return_value=result
+        ) as run:
+            _ = vmaf_v1_available("ffmpeg")
+            cmd = " ".join(cast(list[str], run.call_args[0][0]))
+            assert "640x480" in cmd
+
+    def test_probes_with_a_v1_model(self) -> None:
+        result = MagicMock()
+        result.returncode = 0
+        with patch(
+            "videotuner.vmaf_assessment.subprocess.run", return_value=result
+        ) as run:
+            _ = vmaf_v1_available("ffmpeg")
+            cmd = " ".join(cast(list[str], run.call_args[0][0]))
+            assert "vmaf_v1.0.16" in cmd
+
+
+class TestResolveVmafChoice:
+    """A silent fallback is the failure that matters here.
+
+    v1 scores are calibrated to the v0 scale, so v0 numbers produced by an
+    unnoticed fallback look exactly like v1 numbers and compare cleanly against
+    a v1 target. The fallback has to be visible or it is worse than an error.
+    """
+
+    def test_v1_when_the_probe_finds_it(self) -> None:
+        choice = resolve_vmaf_choice(None, use_v0=False, v1_available=True)
+        assert choice.family is VmafFamily.V1
+        assert choice.fell_back is False
+        assert choice.explicit_model is None
+
+    def test_falls_back_to_v0_and_says_so(self) -> None:
+        choice = resolve_vmaf_choice(None, use_v0=False, v1_available=False)
+        assert choice.family is VmafFamily.V0
+        assert choice.fell_back is True
+
+    def test_v0_flag_wins_without_consulting_the_probe(self) -> None:
+        """The probe cannot change this answer, so callers skip it."""
+        choice = resolve_vmaf_choice(None, use_v0=True, v1_available=False)
+        assert choice.family is VmafFamily.V0
+        assert choice.fell_back is False
+
+    def test_explicit_model_is_carried_through(self) -> None:
+        choice = resolve_vmaf_choice(
+            "vmaf_v1.0.16_5d0h", use_v0=False, v1_available=True
+        )
+        assert choice.explicit_model == "vmaf_v1.0.16_5d0h"
+        assert choice.family is VmafFamily.V1
+
+    def test_explicit_v0_model_is_a_legitimate_choice(self) -> None:
+        """Naming a v0 model is a deliberate request, not a fallback, so it
+        carries no warning."""
+        choice = resolve_vmaf_choice("vmaf_v0.6.1", use_v0=False, v1_available=True)
+        assert choice.family is VmafFamily.V0
+        assert choice.fell_back is False
+
+    def test_explicit_model_needs_no_probe(self) -> None:
+        """A named model is used as given, so a failed probe is irrelevant and
+        must not silently substitute something else."""
+        choice = resolve_vmaf_choice(
+            "vmaf_v1.0.16_3d0h", use_v0=False, v1_available=False
+        )
+        assert choice.explicit_model == "vmaf_v1.0.16_3d0h"
+        assert choice.fell_back is False
+
+    def test_v0_flag_with_an_explicit_v1_model_is_a_contradiction(self) -> None:
+        """Picking a winner would silently ignore half of what was asked."""
+        with pytest.raises(ValueError, match="v0-vmaf"):
+            _ = resolve_vmaf_choice("vmaf_v1.0.16_3d0h", use_v0=True, v1_available=True)
+
+    def test_v0_flag_with_an_explicit_v0_model_agrees(self) -> None:
+        choice = resolve_vmaf_choice("vmaf_v0.6.1", use_v0=True, v1_available=False)
+        assert choice.family is VmafFamily.V0
+        assert choice.explicit_model == "vmaf_v0.6.1"
+
+
+class TestVmafModelLoadError:
+    """A named model that does not exist fails inside the filtergraph.
+
+    run() streams output rather than capturing it, so the RuntimeError it raises
+    carries only an exit status. Without reading the line as it goes past, the
+    user is told a command failed with code 127 and never which model was wrong.
+    """
+
+    def test_detects_the_model_load_failure(self) -> None:
+        # Verbatim from ffmpeg, which exits 127 on this
+        line = (
+            "[Parsed_libvmaf_2 @ 00000195c9c55d00] could not load libvmaf model"
+            " with version: vmaf_definitely_not_a_model"
+        )
+        assert vmaf_model_load_error(line) == "vmaf_definitely_not_a_model"
+
+    def test_ignores_ordinary_progress(self) -> None:
+        assert vmaf_model_load_error("frame=  123 fps=45 q=-0.0 size=N/A") is None
+
+    def test_ignores_an_unrelated_filter_error(self) -> None:
+        line = "[AVFilterGraph @ 000001] Error initializing filters"
+        assert vmaf_model_load_error(line) is None
 
 
 class TestNeedsTonemap:
@@ -149,13 +395,15 @@ class TestBuildVmafFilter:
         assert "tonemap=hable" in result
         assert "libplacebo" not in result
 
-    def test_pixel_format_8bit(self) -> None:
+    def test_measures_an_8bit_encode_at_10bit(self) -> None:
+        """v1 is measured at 10-bit whatever the encode depth, so banding is
+        represented in the signal CAMBI sees."""
         result = build_vmaf_filter(
             ref_needs_tonemap=False,
             _dis_needs_tonemap=False,
             dis_bit_depth=8,
         )
-        assert "format=yuv420p," in result
+        assert "format=yuv420p10le," in result
 
     def test_pixel_format_10bit(self) -> None:
         result = build_vmaf_filter(
@@ -164,6 +412,18 @@ class TestBuildVmafFilter:
             dis_bit_depth=10,
         )
         assert "format=yuv420p10le," in result
+
+    def test_v0_restores_the_depth_matched_pixel_format(self) -> None:
+        """--v0-vmaf has to reproduce pre-change behaviour to be useful for an
+        A/B, so it reverts the measurement depth as well as the model."""
+        result = build_vmaf_filter(
+            ref_needs_tonemap=False,
+            _dis_needs_tonemap=False,
+            dis_bit_depth=8,
+            use_v0=True,
+        )
+        assert "format=yuv420p," in result
+        assert "yuv420p10le" not in result
 
 
 class TestVmafLogPathLength:

@@ -91,7 +91,13 @@ from .utils import (
     sanitize_filename,
     use_utf8_output,
 )
-from .vmaf_assessment import VMAFResult, needs_tonemap
+from .vmaf_assessment import (
+    VMAFResult,
+    needs_tonemap,
+    resolve_vmaf_choice,
+    vmaf_v1_available,
+)
+from .vmaf_types import VmafFamily, VmafModelChoice
 
 
 def _budget_encoder(
@@ -373,6 +379,30 @@ def _run_pipeline_body(
             use_gpu=has_vulkan_support(args.ffmpeg_bin)
         )
 
+    # Settle the model generation once. The probe costs about 0.07s and must not
+    # run per CRF iteration; it is skipped entirely when its answer cannot
+    # change anything.
+    vmaf_choice: VmafModelChoice | None = None
+    vmaf_family = VmafFamily.V1
+    if args.vmaf:
+        needs_probe = args.vmaf_model is None and not args.v0_vmaf
+        vmaf_choice = resolve_vmaf_choice(
+            args.vmaf_model,
+            use_v0=args.v0_vmaf,
+            v1_available=vmaf_v1_available(args.ffmpeg_bin) if needs_probe else False,
+        )
+        vmaf_family = vmaf_choice.family
+        if vmaf_choice.fell_back:
+            # v1 scores are calibrated to the v0 scale, so an unnoticed fallback
+            # produces numbers that pass for v1 against a v1 target.
+            message = (
+                "VMAF v1 models not found; scoring with the legacy v0 models. "
+                "Scores are not comparable with v1. This needs libvmaf 3.2.0 or "
+                "newer, which is not the same thing as a newer FFmpeg."
+            )
+            log.warning(message)
+            display.console.print(f"[yellow]{message}[/yellow]")
+
     # Display active settings summary. The console tees this into the log, so
     # there is no second hand-written copy of it here.
     display_settings_summary(
@@ -381,6 +411,7 @@ def _run_pipeline_body(
         multi_profile_display,
         input_path.name,
         tonemap_backend=tonemap_backend,
+        vmaf_choice=vmaf_choice,
     )
 
     # Validate HDR + x264 combination (x264 cannot carry HDR10 metadata)
@@ -780,6 +811,7 @@ def _run_pipeline_body(
             log=log,
             crop_values=crop_values,
             sharing_samples=sharing_samples,
+            vmaf_family=vmaf_family,
         )
 
         # Detect bitrate vs CRF mode
@@ -853,6 +885,7 @@ def _run_pipeline_body(
             log=log,
             crop_values=crop_values,
             sharing_samples=sharing_samples,
+            vmaf_family=vmaf_family,
         )
 
         budget_ctx = ctx
@@ -1071,6 +1104,7 @@ def _run_pipeline_body(
                 log=log,
                 crop_values=crop_values,
                 sharing_samples=sharing_samples,
+                vmaf_family=vmaf_family,
             )
 
         # Run multi-profile search

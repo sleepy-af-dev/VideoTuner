@@ -7,9 +7,11 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -17,6 +19,7 @@ from .constants import (
     MIN_CROP_FRACTION,
     RESOLUTION_CONFIDENCE_THRESHOLD,
     RESOLUTION_RELATIVE_TOLERANCE,
+    VMAF_HFR_FPS_THRESHOLD,
     VMAF_MAX_THREADS,
     VMAF_THREAD_CPU_FRACTION,
 )
@@ -30,6 +33,7 @@ from .media import (
 from .tonemapping import build_tonemap_chain, has_vulkan_support, tonemap_will_apply
 from .tool_parsers import get_float
 from .utils import make_relative_path, run
+from .vmaf_types import VmafFamily, VmafModelChoice
 
 if TYPE_CHECKING:
     from .profiles import Profile
@@ -283,18 +287,23 @@ def validate_comparison(ref_info: VideoInfo, dis_info: VideoInfo) -> None:
         )
 
 
-def select_vmaf_model(width: int, height: int) -> str:
-    """Select appropriate VMAF model based on resolution tier classification.
+def select_vmaf_model(
+    width: int, height: int, *, fps: float | None = None, use_v0: bool = False
+) -> str:
+    """Select the VMAF model for a comparison.
 
-    Uses smart resolution detection to handle letterboxed, pillarboxed, ultra-wide,
-    and portrait content correctly.
+    Models are named for a display and a viewing distance rather than a source
+    resolution, so the resolution tier only answers the 2160-or-not question.
 
     Args:
         width: Video width in pixels
         height: Video height in pixels
+        fps: Frame rate of the source, used to pick a high frame rate variant
+        use_v0: Return the legacy v0 models instead, which have no high frame
+            rate variants and so ignore ``fps``
 
     Returns:
-        Model version string (e.g., "vmaf_4k_v0.6.1" or "vmaf_v0.6.1")
+        Model version string (e.g. ``"vmaf_v1.0.16_3d0h"``)
     """
     log = logging.getLogger(__name__)
 
@@ -312,10 +321,188 @@ def select_vmaf_model(width: int, height: int) -> str:
             f"Low confidence resolution classification for {width}x{height}: {result.notes}"  # noqa: E501  # TODO(E501): shorten line
         )
 
-    # Use 4K model for 2160p tier and above
-    if result.base_height >= 2160:
-        return "vmaf_4k_v0.6.1"
-    return "vmaf_v0.6.1"
+    is_uhd = result.base_height >= 2160
+
+    if use_v0:
+        return "vmaf_4k_v0.6.1" if is_uhd else "vmaf_v0.6.1"
+
+    # hfr is an infix rather than a suffix: vmaf_v1.0.16_hfr_1d5h_2160
+    hfr = "hfr_" if fps is not None and fps >= VMAF_HFR_FPS_THRESHOLD else ""
+    return f"vmaf_v1.0.16_{hfr}1d5h_2160" if is_uhd else f"vmaf_v1.0.16_{hfr}3d0h"
+
+
+# ffmpeg reports an unknown model from inside the filtergraph and exits 127:
+#   [Parsed_libvmaf_2 @ 0000...] could not load libvmaf model with version: <name>
+_VMAF_MODEL_LOAD_FAILURE = re.compile(
+    r"could not load libvmaf model with version:\s*(\S+)"
+)
+
+
+def vmaf_model_load_error(output_line: str) -> str | None:
+    """Spot a model that libvmaf could not load, in a line of ffmpeg output.
+
+    Args:
+        output_line: One line of ffmpeg's output.
+
+    Returns:
+        The model name that failed, or None if the line says nothing about it.
+    """
+    match = _VMAF_MODEL_LOAD_FAILURE.search(output_line)
+    return match.group(1) if match else None
+
+
+def family_of_vmaf_model(model_spec: str) -> VmafFamily:
+    """Read the model generation off a model name.
+
+    Args:
+        model_spec: A model version name, or a path to a model file.
+
+    Returns:
+        V1 for a v1 built-in. Anything else reads as V0, including a custom
+        model file, since only the built-ins carry the v1 feature set.
+    """
+    return VmafFamily.V1 if "v1.0" in model_spec.lower() else VmafFamily.V0
+
+
+def resolve_vmaf_choice(
+    requested_model: str | None, *, use_v0: bool, v1_available: bool
+) -> VmafModelChoice:
+    """Settle which model generation a run will use.
+
+    Args:
+        requested_model: Model named on the command line, if any.
+        use_v0: Whether ``--v0-vmaf`` was given.
+        v1_available: Result of the startup probe. Callers skip the probe and
+            pass False when it cannot change the answer.
+
+    Returns:
+        The resolved choice.
+    """
+    if requested_model is not None:
+        family = family_of_vmaf_model(requested_model)
+        if use_v0 and family is VmafFamily.V1:
+            raise ValueError(
+                f"--v0-vmaf conflicts with --vmaf-model {requested_model}, which "
+                + "is a v1 model. Drop one of them rather than having the tool "
+                + "choose."
+            )
+        # A named model is used as given. The probe cannot improve on that, and
+        # substituting something else would answer a question nobody asked.
+        return VmafModelChoice(family=family, explicit_model=requested_model)
+
+    if use_v0:
+        return VmafModelChoice(family=VmafFamily.V0)
+
+    if v1_available:
+        return VmafModelChoice(family=VmafFamily.V1)
+
+    return VmafModelChoice(family=VmafFamily.V0, fell_back=True)
+
+
+# 640x480 clears every model's minimum. Two independent floors apply, and both
+# fail by reporting a false negative that would silently downgrade every run:
+# CAMBI needs 216 in both dimensions, and SpEED chroma's floor varies by model,
+# with the 4K@3H model needing 640x480. Measured cost about 0.12s.
+VMAF_PROBE_SIZE = "640x480"
+
+# Any v1 name answers the question, since all eight ship in the same libvmaf.
+VMAF_PROBE_MODEL = "vmaf_v1.0.16_3d0h"
+
+VMAF_PROBE_TIMEOUT_SECONDS = 30
+
+
+@lru_cache(maxsize=1)
+def vmaf_v1_available(ffmpeg_bin: str = "ffmpeg") -> bool:
+    """Probe whether the linked libvmaf carries the v1 models.
+
+    FFmpeg holds no model list and passes the name through as an opaque string,
+    so the only way to tell is to score a trivial pair and read the exit code.
+    Cached for the process: it must never run per CRF iteration.
+
+    Args:
+        ffmpeg_bin: Path to the ffmpeg binary.
+
+    Returns:
+        True if a v1 model loaded and scored.
+    """
+    log = logging.getLogger(__name__)
+    src = f"testsrc2=s={VMAF_PROBE_SIZE}:r=5:d=0.4"
+    cmd = [
+        ffmpeg_bin,
+        "-hide_banner",
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        src,
+        "-f",
+        "lavfi",
+        "-i",
+        src,
+        "-lavfi",
+        "[0:v]format=yuv420p10le[a];[1:v]format=yuv420p10le[b];"
+        + f"[b][a]libvmaf=model=version={VMAF_PROBE_MODEL}",
+        "-f",
+        "null",
+        "-",
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=VMAF_PROBE_TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError:
+        log.warning("ffmpeg not found at '%s'; assuming no VMAF v1 support", ffmpeg_bin)
+        return False
+    except subprocess.TimeoutExpired:
+        log.warning("VMAF v1 probe timed out; assuming no VMAF v1 support")
+        return False
+
+    # The exit code, not the message: a v1 name on an older libvmaf fails
+    # differently from a name that does not exist at all.
+    return result.returncode == 0
+
+
+# libvmaf takes model-config overrides after the model name, separated by a
+# colon. That is also -filter_complex's own option delimiter, so it has to reach
+# FFmpeg escaped, and the escaping survives two layers of parsing: FFmpeg needs
+# to receive TWO literal backslashes.
+#
+# Measured against ffmpeg, scoring banding-prone content:
+#   bare colon        Error applying option 'cambi.enc_bitdepth'
+#   one backslash     Error applying option 'cambi.enc_bitdepth'
+#   two backslashes   works; score moves 47.19 -> 55.03 at enc_bitdepth=8
+#   pipe separator    exits 0, silently swallows every later option including
+#                     log_path, so no log is written and the run looks healthy
+#
+# Note this is a different count from _escape_filter_path() in run_vmaf, which
+# escapes a drive-letter colon with one backslash. They are not interchangeable.
+_MODEL_OVERRIDE_SEPARATOR = "\\\\" + ":"
+
+
+def build_libvmaf_model_option(
+    model_spec: str, *, enc_bitdepth: int | None = None
+) -> str:
+    """Build the ``model=`` option for the libvmaf filter.
+
+    Args:
+        model_spec: A built-in model version name.
+        enc_bitdepth: Bit depth the distorted content was *encoded* at, passed
+            to CAMBI when it differs from the depth being measured. CAMBI scales
+            its banding detection by the encode depth, so measuring an 8-bit
+            encode at 10-bit without this makes it assume 10 and mis-scale.
+
+    Returns:
+        The option string, with any override escaped for the filtergraph.
+    """
+    option = f"model=version={model_spec}"
+    if enc_bitdepth is not None:
+        option += f"{_MODEL_OVERRIDE_SEPARATOR}cambi.enc_bitdepth={enc_bitdepth}"
+    return option
 
 
 def build_vmaf_filter(
@@ -326,6 +513,7 @@ def build_vmaf_filter(
     height: int = 2160,
     tonemap_policy: str = "auto",  # auto|force|off
     use_gpu: bool = True,
+    use_v0: bool = False,
 ) -> str:
     # Only tonemap if the reference is BT.2020 under `auto`; validation ensures
     # the distorted cannot be BT.2020 when the reference is BT.709.
@@ -333,8 +521,14 @@ def build_vmaf_filter(
         tonemap_policy, source_needs_tonemap=ref_needs_tonemap
     )
 
-    # Use pixel format based on distorted bit depth
-    pix_fmt = "yuv420p10le" if dis_bit_depth == 10 else "yuv420p"
+    # v1 is measured at 10-bit whatever the encode depth, so that banding is
+    # present in the signal CAMBI reads. v0 kept the measurement depth matched
+    # to the encode, and --v0-vmaf reverts to that so an A/B compares like with
+    # like rather than a third thing matching neither generation.
+    if use_v0:
+        pix_fmt = "yuv420p10le" if dis_bit_depth == 10 else "yuv420p"
+    else:
+        pix_fmt = "yuv420p10le"
     final = f"format={pix_fmt},setpts=PTS-STARTPTS,settb=AVTB"
 
     if apply_tonemap:
@@ -360,6 +554,7 @@ def run_vmaf(
     tonemap_policy: str = "auto",
     cwd: Path | None = None,
     line_handler: Callable[[str], bool] | None = None,
+    family: VmafFamily = VmafFamily.V1,
 ) -> VMAFResult:
     log = logging.getLogger(__name__)
 
@@ -375,12 +570,27 @@ def run_vmaf(
         s = re.sub(r"^([A-Za-z]):/", r"\1\\:/", s)
         return s
 
+    use_v0 = family is VmafFamily.V0
+
     # Auto-select model based on distorted resolution if not specified
     if model_spec is None:
         if dis_info.width and dis_info.height:
-            model_spec = select_vmaf_model(dis_info.width, dis_info.height)
+            model_spec = select_vmaf_model(
+                dis_info.width, dis_info.height, fps=dis_info.fps, use_v0=use_v0
+            )
         else:
-            model_spec = "vmaf_v0.6.1"  # Default fallback
+            # 1080p at 3 display heights is the generation's default, and the
+            # direct successor to v0.6.1, so an unknown size keeps the same
+            # viewing assumptions rather than dropping a generation.
+            model_spec = "vmaf_v0.6.1" if use_v0 else "vmaf_v1.0.16_3d0h"
+
+    # Use distorted file's properties for scaling and pixel format
+    dis_bit_depth = get_bit_depth_from_pix_fmt(dis_info.pix_fmt)
+
+    # The header names the generation, which is settled before the run. Which of
+    # the generation's models ran depends on this comparison's resolution and
+    # frame rate, and only this says which one it was.
+    log.info("VMAF model: %s", model_spec)
 
     # Build model option: prefer explicit path if it exists; otherwise accept
     # direct 'name=' or 'version=' input; fallback to 'version=<spec>'.
@@ -395,10 +605,13 @@ def run_vmaf(
         ):
             model_opt = f"model={model_spec}"
         else:
-            model_opt = f"model=version={model_spec}"
-
-    # Use distorted file's properties for scaling and pixel format
-    dis_bit_depth = get_bit_depth_from_pix_fmt(dis_info.pix_fmt)
+            # CAMBI scales banding detection by the depth the content was
+            # encoded at. v1 measures at 10-bit regardless, so an 8-bit encode
+            # needs telling, or CAMBI assumes 10 and mis-scales.
+            enc_bitdepth = dis_bit_depth if not use_v0 and dis_bit_depth != 10 else None
+            model_opt = build_libvmaf_model_option(
+                model_spec, enc_bitdepth=enc_bitdepth
+            )
     target_width = dis_info.width or 3840
     target_height = dis_info.height or 2160
 
@@ -411,6 +624,7 @@ def run_vmaf(
         height=target_height,
         tonemap_policy=tonemap_policy,
         use_gpu=use_gpu,
+        use_v0=use_v0,
     )
     # libvmaf writes its JSON with a plain fopen, which is still capped at
     # MAX_PATH (260) on Windows even when long paths are enabled OS-wide, and it
@@ -455,8 +669,32 @@ def run_vmaf(
         "-",
     ]
     log.info("VMAF: %s", " ".join(shlex.quote(c) for c in cmd))
+
+    # run() streams rather than captures, so the model-load failure has to be
+    # caught as it goes past or the error is reduced to an exit status.
+    # A list rather than a rebound local: the write happens inside the callback,
+    # which a type checker cannot follow, so a plain str | None reads as never
+    # reassigned and the failure branch looks unreachable.
+    failed_models: list[str] = []
+
+    def watch(line: str) -> bool:
+        found = vmaf_model_load_error(line)
+        if found is not None:
+            failed_models.append(found)
+        return line_handler(line) if line_handler is not None else False
+
     try:
-        run(cmd, live=True, cwd=cwd, line_callback=line_handler)
+        try:
+            run(cmd, live=True, cwd=cwd, line_callback=watch)
+        except RuntimeError as e:
+            if failed_models:
+                raise RuntimeError(
+                    f"VMAF model '{failed_models[0]}' is not available in this "
+                    + "FFmpeg's libvmaf. The v1 models need libvmaf 3.2.0 or "
+                    + "newer; upgrading FFmpeg alone may not change which "
+                    + "libvmaf it links."
+                ) from e
+            raise
         if tmp_log.exists():
             _ = shutil.move(str(tmp_log), str(log_path))
         else:
@@ -577,6 +815,7 @@ def assess_with_vmaf(
     tonemap_policy: str = "auto",
     cwd: Path | None = None,
     line_handler: Callable[[str], bool] | None = None,
+    family: VmafFamily = VmafFamily.V1,
 ) -> VMAFResult:
     """High-level helper that probes both inputs and runs VMAF with optional tonemapping.
 
@@ -601,6 +840,7 @@ def assess_with_vmaf(
         tonemap_policy=tonemap_policy,
         cwd=cwd,
         line_handler=line_handler,
+        family=family,
     )
 
 
@@ -617,6 +857,7 @@ def assess_vmaf_concatenated(
     display: PipelineDisplay,
     log: logging.Logger,
     iteration: int,
+    family: VmafFamily = VmafFamily.V1,
 ) -> list[VMAFResult]:
     """Run VMAF assessment on concatenated reference and distorted files.
 
@@ -663,6 +904,7 @@ def assess_vmaf_concatenated(
             tonemap_policy=tonemap_policy,
             cwd=repo_root,
             line_handler=stage.make_ffmpeg_handler(total_frames=total_frames),
+            family=family,
         )
 
     log.info(

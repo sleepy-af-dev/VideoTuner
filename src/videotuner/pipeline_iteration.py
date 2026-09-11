@@ -111,6 +111,7 @@ def run_vmaf_assessment(
             display=ctx.display,
             log=ctx.log,
             iteration=iteration,
+            family=ctx.vmaf_family,
         )
     except Exception as e:
         ctx.log.error("VMAF assessment failed: %s", e)

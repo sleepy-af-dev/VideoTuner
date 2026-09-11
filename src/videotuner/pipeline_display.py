@@ -19,6 +19,7 @@ from .pipeline_cli import DEFAULT_CRF_INTERVAL, DEFAULT_CRF_START_VALUE, get_def
 
 if TYPE_CHECKING:
     from .pipeline_types import Budget, BudgetPoint, JobResult, MultiProfileResult
+    from .vmaf_types import VmafModelChoice
 
 #: Metric key to display name, in the order metrics are shown. Single source of
 #: truth for both the per-job assessment summary and the batch summary.
@@ -120,6 +121,7 @@ def display_settings_summary(
     multi_profile_display: str = "",
     source_name: str = "",
     tonemap_backend: str | None = None,
+    vmaf_choice: VmafModelChoice | None = None,
 ) -> None:
     """Display active settings summary to console.
 
@@ -131,6 +133,9 @@ def display_settings_summary(
         tonemap_backend: Label for the tonemapping backend in use, or None when
             this run will not tonemap. The two backends are different operators
             and move HDR scores, so a result is not interpretable without it.
+        vmaf_choice: Resolved VMAF model generation, or None when VMAF is off.
+            The exact model varies per comparison, but the generation is settled
+            before the run and decides whether a score compares with an old one.
     """  # noqa: E501  # TODO(E501): shorten line
     console.print()
     console.print("[bold]Settings[/bold]")
@@ -165,9 +170,18 @@ def display_settings_summary(
     if args.ssim2_region_frames != get_default("ssim2_region_frames"):
         console.print(f"  SSIM2 Region: {args.ssim2_region_frames} frames")
 
-    # Log non-default analysis options
-    if args.vmaf_model is not None:
-        console.print(f"  VMAF Model: {args.vmaf_model}")
+    # The generation always, since v0 and v1 numbers are not comparable and a
+    # fallback otherwise looks identical to a deliberate v0 run.
+    if vmaf_choice is not None:
+        if vmaf_choice.explicit_model is not None:
+            console.print(f"  VMAF models: {vmaf_choice.explicit_model}")
+        elif vmaf_choice.fell_back:
+            console.print(
+                f"  VMAF models: [yellow]{vmaf_choice.family} (fallback,"
+                + " v1 unavailable)[/yellow]"
+            )
+        else:
+            console.print(f"  VMAF models: {vmaf_choice.family}")
     if args.tonemap != get_default("tonemap"):
         console.print(f"  Tonemap: {args.tonemap}")
     if tonemap_backend is not None:

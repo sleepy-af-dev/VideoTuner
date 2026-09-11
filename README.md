@@ -181,7 +181,11 @@ VideoTuner and all bundled dependencies are 64-bit Windows binaries. Linux and m
 
 Both installation methods require these external tools on PATH:
 
-- **FFmpeg** (with libvmaf and libplacebo) and **FFprobe**
+- **FFmpeg** (with libvmaf and libplacebo) and **FFprobe**. The VMAF v1 models
+  need **libvmaf 3.2.0** or newer, which is a property of the libvmaf your
+  FFmpeg links rather than of the FFmpeg version. VideoTuner probes for them at
+  startup and falls back to the legacy v0 models with a warning if they are
+  missing; v0 and v1 scores are not comparable
 - **MKVToolNix** `mkvmerge` (used to mux encoder output)
 
 ### Pre-built Release (Recommended)
@@ -648,7 +652,8 @@ Run `videotuner --help` for complete options. Key options include:
 | -------------- | ------- | ---------------------------------------------------------- |
 | `--no-vmaf`    | -       | Disable VMAF assessment                                    |
 | `--no-ssim2`   | -       | Disable SSIMULACRA2 assessment                             |
-| `--vmaf-model` | `auto`  | VMAF model name or path (auto-selects based on resolution) |
+| `--vmaf-model` | `auto`  | VMAF model name or path (auto-selects by display and viewing distance) |
+| `--v0-vmaf`    | `off`   | Score with the legacy v0 models, for comparison with earlier releases |
 | `--tonemap`    | `auto`  | HDR tonemapping: auto\|force\|off                          |
 
 ### Guard Bands

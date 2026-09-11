@@ -15,6 +15,7 @@ from videotuner.pipeline_cli import (
 from videotuner.pipeline_display import (
     check_and_display_bitrate_warning,
     display_ignored_args_warnings,
+    display_settings_summary,
     format_bitrate_percentage,
 )
 from videotuner.pipeline_types import MultiProfileResult
@@ -611,3 +612,28 @@ class TestIgnoredArgsWarning:
         assert "Streaming 1080p" in output
         assert "Streaming 720p" in output
         assert "Streaming 480p" in output
+
+
+class TestSettingsSummaryReporting:
+    """The run header should name what the pipeline actually chose.
+
+    The tonemap backend moves HDR scores (measured: 0.40 VMAF mean, 2.55 min),
+    so a result is not interpretable without knowing which backend produced it.
+    """
+
+    def test_names_the_tonemap_backend(self) -> None:
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(console, args, tonemap_backend="GPU (libplacebo)")
+
+        assert "Tonemapping: GPU (libplacebo)" in strip_ansi(buffer.getvalue())
+
+    def test_omits_backend_when_no_tonemapping_will_happen(self) -> None:
+        """An SDR source never tonemaps, so naming a backend would be noise."""
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(console, args, tonemap_backend=None)
+
+        assert "Tonemapping:" not in strip_ansi(buffer.getvalue())

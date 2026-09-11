@@ -119,6 +119,7 @@ def display_settings_summary(
     args: PipelineArgsProtocol,
     multi_profile_display: str = "",
     source_name: str = "",
+    tonemap_backend: str | None = None,
 ) -> None:
     """Display active settings summary to console.
 
@@ -127,6 +128,9 @@ def display_settings_summary(
         args: Pipeline arguments
         multi_profile_display: Pre-formatted string showing profiles/groups for multi-profile mode
         source_name: Name of the source video file
+        tonemap_backend: Label for the tonemapping backend in use, or None when
+            this run will not tonemap. The two backends are different operators
+            and move HDR scores, so a result is not interpretable without it.
     """  # noqa: E501  # TODO(E501): shorten line
     console.print()
     console.print("[bold]Settings[/bold]")
@@ -166,6 +170,8 @@ def display_settings_summary(
         console.print(f"  VMAF Model: {args.vmaf_model}")
     if args.tonemap != get_default("tonemap"):
         console.print(f"  Tonemap: {args.tonemap}")
+    if tonemap_backend is not None:
+        console.print(f"  Tonemapping: {tonemap_backend}")
 
     # Log non-default guard bands
     if args.guard_start_percent > 0:

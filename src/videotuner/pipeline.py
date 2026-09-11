@@ -76,6 +76,11 @@ from .pipeline_validation import (
 from .profiles import Profile
 from .progress import PipelineDisplay, TranscriptFormatter
 from .ssimulacra2_assessment import SSIM2Result
+from .tonemapping import (
+    format_tonemap_backend,
+    has_vulkan_support,
+    tonemap_will_apply,
+)
 from .utils import (
     configure_logging,
     display_path,
@@ -86,7 +91,7 @@ from .utils import (
     sanitize_filename,
     use_utf8_output,
 )
-from .vmaf_assessment import VMAFResult
+from .vmaf_assessment import VMAFResult, needs_tonemap
 
 
 def _budget_encoder(
@@ -260,7 +265,11 @@ def _run_pipeline_body(
     log.info("Probing input with ffprobe ...")
     ffprobe_bin: str = args.ffprobe_bin
     try:
-        infos = [parse_video_info(p, ffprobe_bin=ffprobe_bin) for p in source_paths]
+        # Reported rather than silent: logging is file-only, and every source
+        # costs an ffprobe plus a full MediaInfo scan, so this is several
+        # seconds of apparently dead terminal on a large file.
+        with display.stage(f"Probing {input_path.name}"):
+            infos = [parse_video_info(p, ffprobe_bin=ffprobe_bin) for p in source_paths]
     except InvalidVideoFileError as e:
         display.console.print(f"\n[bold red]Error:[/bold red] {e}\n")
         log.error("Invalid video file: %s", e)
@@ -355,10 +364,23 @@ def _run_pipeline_body(
     except OSError as e:
         log.warning("Failed to log file/job folder paths due to OSError: %s", e)
 
+    # Name the tonemap backend only when this run will actually tonemap. The two
+    # backends are different operators and move HDR scores, so a result is not
+    # interpretable without knowing which one ran.
+    tonemap_backend: str | None = None
+    if tonemap_will_apply(args.tonemap, source_needs_tonemap=needs_tonemap(info)):
+        tonemap_backend = format_tonemap_backend(
+            use_gpu=has_vulkan_support(args.ffmpeg_bin)
+        )
+
     # Display active settings summary. The console tees this into the log, so
     # there is no second hand-written copy of it here.
     display_settings_summary(
-        display.console, args, multi_profile_display, input_path.name
+        display.console,
+        args,
+        multi_profile_display,
+        input_path.name,
+        tonemap_backend=tonemap_backend,
     )
 
     # Validate HDR + x264 combination (x264 cannot carry HDR10 metadata)

@@ -27,7 +27,7 @@ from .media import (
     get_bit_depth_from_pix_fmt,
     parse_video_info,
 )
-from .tonemapping import build_tonemap_chain, has_vulkan_support
+from .tonemapping import build_tonemap_chain, has_vulkan_support, tonemap_will_apply
 from .tool_parsers import get_float
 from .utils import make_relative_path, run
 
@@ -327,13 +327,11 @@ def build_vmaf_filter(
     tonemap_policy: str = "auto",  # auto|force|off
     use_gpu: bool = True,
 ) -> str:
-    apply_tonemap = False
-    if tonemap_policy == "force":
-        apply_tonemap = True
-    elif tonemap_policy == "auto":
-        # Only tonemap if reference is BT.2020
-        # (validation ensures distorted can't be BT.2020 if reference is BT.709)
-        apply_tonemap = ref_needs_tonemap
+    # Only tonemap if the reference is BT.2020 under `auto`; validation ensures
+    # the distorted cannot be BT.2020 when the reference is BT.709.
+    apply_tonemap = tonemap_will_apply(
+        tonemap_policy, source_needs_tonemap=ref_needs_tonemap
+    )
 
     # Use pixel format based on distorted bit depth
     pix_fmt = "yuv420p10le" if dis_bit_depth == 10 else "yuv420p"

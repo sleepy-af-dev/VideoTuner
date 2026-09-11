@@ -6,7 +6,67 @@ import subprocess
 from typing import cast
 from unittest.mock import MagicMock, patch
 
-from videotuner.tonemapping import build_tonemap_chain, has_vulkan_support
+from videotuner.tonemapping import (
+    build_tonemap_chain,
+    format_tonemap_backend,
+    has_vulkan_support,
+    tonemap_will_apply,
+    vulkan_device_is_hardware,
+)
+
+# Real output from `ffmpeg -v verbose -init_hw_device vulkan`. FFmpeg formats the
+# selected device as "Device %d selected: %s (%s) (0x%x)", where the second %s is
+# one of integrated/discrete/virtual/software/unknown (hwcontext_vulkan.c).
+DISCRETE_GPU = (
+    "[Vulkan @ 000001] Device 0 selected: Example Discrete GPU (discrete) (0x7550)\n"
+    "[Vulkan @ 000001] Using device: Example Discrete GPU\n"
+)
+SOFTWARE_RASTERISER = (
+    "[Vulkan @ 000001]     0: llvmpipe (LLVM 17.0.6, 256 bits) (software) (0x0)\n"
+    "[Vulkan @ 000001] Device 0 selected: llvmpipe (LLVM 17.0.6, 256 bits)"
+    " (software) (0x0)\n"
+)
+
+
+class TestVulkanDeviceIsHardware:
+    """A software Vulkan device is slower than the CPU path it would displace."""
+
+    def test_software_rasteriser_is_not_hardware(self) -> None:
+        assert vulkan_device_is_hardware(SOFTWARE_RASTERISER) is False
+
+    def test_software_listed_but_real_gpu_selected(self) -> None:
+        """Mesa installs lavapipe alongside real drivers, so it is often
+        enumerated on a machine that then selects a real GPU."""
+        probe = (
+            "[Vulkan @ 000001]     0: llvmpipe (LLVM 17.0.6, 256 bits)"
+            " (software) (0x0)\n"
+            "[Vulkan @ 000001]     1: Example Discrete GPU (discrete) (0x7550)\n"
+            "[Vulkan @ 000001] Device 1 selected: Example Discrete GPU"
+            " (discrete) (0x7550)\n"
+        )
+        assert vulkan_device_is_hardware(probe) is True
+
+    def test_discrete_gpu_is_hardware(self) -> None:
+        assert vulkan_device_is_hardware(DISCRETE_GPU) is True
+
+    def test_integrated_gpu_is_hardware(self) -> None:
+        probe = (
+            "[Vulkan @ 000001] Device 0 selected: Example Integrated GPU"
+            " (integrated) (0x9a60)\n"
+        )
+        assert vulkan_device_is_hardware(probe) is True
+
+    def test_unrecognised_device_type_is_treated_as_hardware(self) -> None:
+        """Failing open: the probe's exit status already proved Vulkan works, so an
+        unfamiliar type should not cost a working GPU."""
+        probe = (
+            "[Vulkan @ 0000026d994ff280] Device 0 selected: Some Future GPU"
+            " (unknown) (0x1234)\n"
+        )
+        assert vulkan_device_is_hardware(probe) is True
+
+    def test_missing_device_line_is_treated_as_hardware(self) -> None:
+        assert vulkan_device_is_hardware("") is True
 
 
 class TestHasVulkanSupport:
@@ -19,6 +79,7 @@ class TestHasVulkanSupport:
     def test_vulkan_available(self) -> None:
         mock_result = MagicMock()
         mock_result.returncode = 0
+        mock_result.stderr = DISCRETE_GPU
         with patch("videotuner.tonemapping.subprocess.run", return_value=mock_result):
             assert has_vulkan_support("ffmpeg") is True
 
@@ -41,9 +102,19 @@ class TestHasVulkanSupport:
         ):
             assert has_vulkan_support("ffmpeg") is False
 
+    def test_software_device_reports_no_vulkan_support(self) -> None:
+        """The probe succeeds on a software rasteriser, so exit status alone is not
+        enough to decide the GPU path is worth taking."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = SOFTWARE_RASTERISER
+        with patch("videotuner.tonemapping.subprocess.run", return_value=mock_result):
+            assert has_vulkan_support("ffmpeg") is False
+
     def test_caching(self) -> None:
         mock_result = MagicMock()
         mock_result.returncode = 0
+        mock_result.stderr = DISCRETE_GPU
         with patch(
             "videotuner.tonemapping.subprocess.run", return_value=mock_result
         ) as mock_run:
@@ -55,6 +126,7 @@ class TestHasVulkanSupport:
     def test_probe_command_structure(self) -> None:
         mock_result = MagicMock()
         mock_result.returncode = 0
+        mock_result.stderr = DISCRETE_GPU
         with patch(
             "videotuner.tonemapping.subprocess.run", return_value=mock_result
         ) as mock_run:
@@ -66,6 +138,46 @@ class TestHasVulkanSupport:
             assert "-init_hw_device" in cmd
             assert "vulkan" in cmd
             assert kwargs["timeout"] == 10
+
+    def test_probe_requests_verbose_output(self) -> None:
+        """The device type only appears at verbose level, so a quiet probe cannot
+        tell a GPU from a software rasteriser."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = DISCRETE_GPU
+        with patch(
+            "videotuner.tonemapping.subprocess.run", return_value=mock_result
+        ) as mock_run:
+            _ = has_vulkan_support("ffmpeg")
+            assert mock_run.call_args is not None
+            cmd = cast(list[str], mock_run.call_args[0][0])
+            assert "verbose" in cmd
+            assert "quiet" not in cmd
+
+
+class TestTonemapWillApply:
+    """One source of truth for the policy, so what the header reports cannot
+    drift from what the run actually does."""
+
+    def test_force_always_applies(self) -> None:
+        assert tonemap_will_apply("force", source_needs_tonemap=False) is True
+
+    def test_off_never_applies(self) -> None:
+        assert tonemap_will_apply("off", source_needs_tonemap=True) is False
+
+    def test_auto_follows_the_source(self) -> None:
+        assert tonemap_will_apply("auto", source_needs_tonemap=True) is True
+        assert tonemap_will_apply("auto", source_needs_tonemap=False) is False
+
+
+class TestFormatTonemapBackend:
+    """The backend moves HDR scores, so a result is not interpretable without it."""
+
+    def test_gpu_names_libplacebo(self) -> None:
+        assert format_tonemap_backend(use_gpu=True) == "GPU (libplacebo)"
+
+    def test_cpu_names_its_operator(self) -> None:
+        assert format_tonemap_backend(use_gpu=False) == "CPU (zscale + hable)"
 
 
 class TestBuildTonemapChain:

@@ -62,6 +62,40 @@ class TestParseMasterDisplayMetadata:
         assert "G(13250,34500)B(7500,3000)R(34000,16000)WP(15700,17550)" in result
         assert result.endswith("L(10000000,50)")
 
+    def test_explicit_coordinates_round_trip(self):
+        """MediaInfo names the primaries only when they match a set it knows,
+        and prints the coordinates otherwise.
+
+        The string here is MediaInfo's reading of a file encoded with
+        ``--master-display G(12000,34000)B(7000,3000)R(33000,16000)
+        WP(15635,16450)L(10000000,1)``, so the expected output is the input
+        x265 was given, not a value derived from the parser.
+        """
+        primaries = (
+            "R: x=0.660000 y=0.320000, G: x=0.240000 y=0.680000,"
+            " B: x=0.140000 y=0.060000, White point: x=0.312700 y=0.329000"
+        )
+        luminance = "min: 0.0001 cd/m2, max: 1000 cd/m2"
+
+        result = parse_master_display_metadata(primaries, luminance)
+
+        assert result == (
+            "G(12000,34000)B(7000,3000)R(33000,16000)WP(15635,16450)L(10000000,1)"
+        )
+
+    def test_explicit_coordinates_abbreviated_white_point(self):
+        """Some MediaInfo builds abbreviate the white point to W."""
+        primaries = (
+            "R: x=0.680000 y=0.320000, G: x=0.265000 y=0.690000,"
+            " B: x=0.150000 y=0.060000, W: x=0.312700 y=0.329000"
+        )
+        luminance = "min: 0.0001 cd/m2, max: 1000 cd/m2"
+
+        result = parse_master_display_metadata(primaries, luminance)
+
+        assert result is not None
+        assert result.startswith("G(13250,34500)B(7500,3000)R(34000,16000)")
+
     def test_unknown_color_space_returns_none(self):
         """Test that unknown color space returns None."""
         primaries = "Unknown Color Space"

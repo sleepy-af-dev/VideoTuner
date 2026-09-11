@@ -15,9 +15,9 @@ class TestBuildGlobalX265Params:
             fps=24.0,
             duration=100.0,
             pix_fmt="yuv420p",
-            color_trc="BT.709",
-            color_primaries="BT.709",
-            color_space="BT.709",
+            color_trc="bt709",
+            color_primaries="bt709",
+            color_space="bt709",
             color_range="tv",
         )
 
@@ -37,9 +37,9 @@ class TestBuildGlobalX265Params:
             fps=24.0,
             duration=100.0,
             pix_fmt="yuv420p10le",
-            color_trc="PQ",
-            color_primaries="BT.2020",
-            color_space="BT.2020 non-constant",
+            color_trc="smpte2084",
+            color_primaries="bt2020",
+            color_space="bt2020nc",
             color_range="tv",
         )
 
@@ -66,16 +66,49 @@ class TestBuildGlobalX265Params:
             fps=24.0,
             duration=100.0,
             pix_fmt="yuv420p10le",
-            color_trc="HLG",
-            color_primaries="BT.2020",
+            color_trc="arib-std-b67",
+            color_primaries="bt2020",
+        )
+
+        params = build_global_x265_params(video_info)
+
+        assert "--repeat-headers" in params
+        assert "--transfer" in params
+        assert "arib-std-b67" in params
+
+    def test_hlg_does_not_get_hdr10_signalling(self):
+        """HLG is HDR but not HDR10. x265 documents --hdr10 as dumping an HDR10
+        SEI packet and --hdr10-opt as a block-level optimisation for HDR10
+        content; an HLG source carries neither MaxCLL nor a mastering display
+        for the SEI to describe."""
+        video_info = VideoInfo(
+            fps=24.0,
+            duration=100.0,
+            pix_fmt="yuv420p10le",
+            color_trc="arib-std-b67",
+            color_primaries="bt2020",
+        )
+
+        params = build_global_x265_params(video_info)
+
+        assert "--hdr10" not in params
+        assert "--hdr10-opt" not in params
+        assert "--no-hdr10" in params
+
+    def test_pq_still_gets_hdr10_signalling(self):
+        video_info = VideoInfo(
+            fps=24.0,
+            duration=100.0,
+            pix_fmt="yuv420p10le",
+            color_trc="smpte2084",
+            color_primaries="bt2020",
         )
 
         params = build_global_x265_params(video_info)
 
         assert "--hdr10" in params
         assert "--hdr10-opt" in params
-        assert "--transfer" in params
-        assert "arib-std-b67" in params
+        assert "--repeat-headers" in params
 
     def test_lossless_mode_adds_flag(self):
         """Test that lossless mode adds --lossless flag."""
@@ -130,7 +163,7 @@ class TestBuildGlobalX265Params:
             fps=24.0,
             duration=100.0,
             pix_fmt="yuv420p10le",
-            color_trc="PQ",
+            color_trc="smpte2084",
             mastering_display_color_primaries="Display P3",
             mastering_display_luminance="min: 0.0050 cd/m2, max: 1000 cd/m2",
         )
@@ -167,8 +200,8 @@ class TestBuildGlobalX265Params:
             fps=24.0,
             duration=100.0,
             pix_fmt="yuv420p10le",
-            color_trc="PQ",
-            color_primaries="BT.2020",
+            color_trc="smpte2084",
+            color_primaries="bt2020",
         )
 
         skip = {"hdr10", "colorprim"}
@@ -208,8 +241,8 @@ class TestBuildGlobalX265Params:
             fps=24.0,
             duration=100.0,
             pix_fmt="yuv420p",
-            color_primaries="BT.601 NTSC",
-            color_space="BT.601",
+            color_primaries="smpte170m",
+            color_space="smpte170m",
         )
 
         params = build_global_x265_params(video_info)
@@ -219,13 +252,38 @@ class TestBuildGlobalX265Params:
         assert "--colormatrix" in params
         assert "smpte170m" in params
 
+    def test_colormatrix_fallback_from_sd_primaries(self):
+        """The inference previously looked for 'bt601', which ffprobe never
+        writes: it names SD primaries smpte170m and bt470bg. An SD source that
+        tagged its primaries but not its matrix therefore got no --colormatrix
+        at all."""
+        ntsc = VideoInfo(
+            fps=24.0,
+            duration=100.0,
+            pix_fmt="yuv420p",
+            color_primaries="smpte170m",
+            color_space=None,
+        )
+        params = build_global_x265_params(ntsc)
+        assert params[params.index("--colormatrix") + 1] == "smpte170m"
+
+        pal = VideoInfo(
+            fps=24.0,
+            duration=100.0,
+            pix_fmt="yuv420p",
+            color_primaries="bt470bg",
+            color_space=None,
+        )
+        params = build_global_x265_params(pal)
+        assert params[params.index("--colormatrix") + 1] == "bt470bg"
+
     def test_colormatrix_fallback_from_primaries(self):
         """Test that color matrix is inferred from primaries when color_space is unknown."""  # noqa: E501  # TODO(E501): shorten line
         video_info = VideoInfo(
             fps=24.0,
             duration=100.0,
             pix_fmt="yuv420p",
-            color_primaries="BT.2020",
+            color_primaries="bt2020",
             color_space=None,  # Unknown matrix
         )
 

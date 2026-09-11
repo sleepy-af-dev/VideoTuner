@@ -21,13 +21,12 @@ from .encoding_utils import (
     build_vspipe_command,
     calculate_sample_count,
     create_temp_encode_paths,
-    is_hdr_video,
     mux_and_cleanup,
     resolve_absolute_path,
     run_vspipe_encode,
     write_vpy_script,
 )
-from .media import VideoFormat
+from .media import get_video_format
 from .profiles import Profile, create_multipass_profile
 from .tonemapping import build_tonemap_chain, has_vulkan_support
 from .tool_parsers import CROPDETECT_RE
@@ -363,8 +362,7 @@ def encode_concatenated_reference(
     paths.validate()
 
     # Determine video format and build encoder params (lossless)
-    is_hdr = is_hdr_video(video_info.color_trc)
-    video_format = VideoFormat.HDR if is_hdr else VideoFormat.SDR
+    video_format = get_video_format(video_info)
     encoder_params = profile.to_encoder_params(
         crf=0.0,
         video_format=video_format,
@@ -504,8 +502,7 @@ def encode_concatenated_distorted(
     paths.validate()
 
     # Determine video format and build encoder params (CRF encoding)
-    is_hdr = is_hdr_video(video_info.color_trc)
-    video_format = VideoFormat.HDR if is_hdr else VideoFormat.SDR
+    video_format = get_video_format(video_info)
     encoder_params = profile.to_encoder_params(
         crf=crf,
         video_format=video_format,
@@ -665,8 +662,7 @@ def encode_concatenated_bitrate(
     paths.validate()
 
     # Determine video format
-    is_hdr = is_hdr_video(video_info.color_trc)
-    video_format = VideoFormat.HDR if is_hdr else VideoFormat.SDR
+    video_format = get_video_format(video_info)
 
     log_separator(log)
     log.info("Profile configuration:")

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from .encoding_utils import is_hdr_video
+from .encoding_utils import MATRIX_FOR_PRIMARIES, is_hdr_video
 from .media import VideoInfo, get_bit_depth_from_pix_fmt
 
 logger = logging.getLogger(__name__)
@@ -79,36 +79,13 @@ def build_global_x264_params(
             output_depth = 10
         x264_params.extend(["--output-depth", str(output_depth)])
 
-    # Map color primaries (same mapping as x265)
+    # These fields carry ffprobe's vocabulary, which already names primaries and
+    # transfers the way x264 does, so the value passes straight through.
     if "colorprim" not in skip and video_info.color_primaries:
-        colorprim_map = {
-            "BT.709": "bt709",
-            "BT.2020": "bt2020",
-            "BT.470M": "bt470m",
-            "BT.601 NTSC": "smpte170m",
-            "BT.601 PAL": "bt470bg",
-        }
-        primaries_val = video_info.color_primaries
-        colorprim = colorprim_map.get(
-            primaries_val,
-            primaries_val.lower().replace(".", "").replace(" ", ""),
-        )
-        x264_params.extend(["--colorprim", colorprim])
+        x264_params.extend(["--colorprim", video_info.color_primaries])
 
-    # Map transfer characteristics (same mapping as x265)
     if "transfer" not in skip and color_trc:
-        transfer_map = {
-            "PQ": "smpte2084",
-            "HLG": "arib-std-b67",
-            "BT.709": "bt709",
-            "BT.601": "bt470m",
-            "SMPTE 170M": "smpte170m",
-        }
-        transfer = transfer_map.get(
-            color_trc,
-            color_trc.lower().replace(".", "").replace(" ", ""),
-        )
-        x264_params.extend(["--transfer", transfer])
+        x264_params.extend(["--transfer", color_trc])
 
     # Map color matrix (same logic as x265)
     if "colormatrix" not in skip:
@@ -116,28 +93,18 @@ def build_global_x264_params(
         color_space = video_info.color_space
         if color_space:
             colormatrix_map = {
-                "BT.709": "bt709",
-                "BT.2020 non-constant": "bt2020nc",
-                "BT.2020 constant": "bt2020c",
-                "BT.601": "smpte170m",
-                "BT.470 System B/G": "bt470bg",
                 "bt709": "bt709",
                 "bt2020nc": "bt2020nc",
                 "bt2020c": "bt2020c",
                 "smpte170m": "smpte170m",
+                "smpte240m": "smpte240m",
                 "bt470bg": "bt470bg",
             }
             colormatrix = colormatrix_map.get(color_space)
 
-        # Fallback: infer from color primaries if matrix is unknown
+        # Fallback: infer the matrix that goes with the primaries
         if colormatrix is None and video_info.color_primaries:
-            primaries_lower = video_info.color_primaries.lower()
-            if "bt.2020" in primaries_lower or primaries_lower == "bt2020":
-                colormatrix = "bt2020nc"
-            elif "bt.709" in primaries_lower or primaries_lower == "bt709":
-                colormatrix = "bt709"
-            elif "bt.601" in primaries_lower or primaries_lower == "bt601":
-                colormatrix = "smpte170m"
+            colormatrix = MATRIX_FOR_PRIMARIES.get(video_info.color_primaries)
 
         logger.debug(
             "Color matrix detection: color_space='%s', colormatrix='%s'",

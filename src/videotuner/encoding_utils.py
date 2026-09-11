@@ -84,14 +84,21 @@ def combine_crop_values(values: Sequence[CropValues]) -> CropValues:
     )
 
 
-HDR_TRANSFER_CHARACTERISTICS: set[str] = {
+PQ_TRANSFER_CHARACTERISTICS: set[str] = {
     "pq",
     "smpte2084",
     "smpte 2084",
+}
+
+HLG_TRANSFER_CHARACTERISTICS: set[str] = {
     "hlg",
     "arib-std-b67",
     "arib std-b67",
 }
+
+HDR_TRANSFER_CHARACTERISTICS: set[str] = (
+    PQ_TRANSFER_CHARACTERISTICS | HLG_TRANSFER_CHARACTERISTICS
+)
 
 
 def is_hdr_video(color_trc: str | None) -> bool:
@@ -106,6 +113,37 @@ def is_hdr_video(color_trc: str | None) -> bool:
     if not color_trc:
         return False
     return color_trc.lower() in HDR_TRANSFER_CHARACTERISTICS
+
+
+# The matrix conventionally paired with a set of primaries, used only when the
+# source tagged its primaries but left the matrix unset. Keyed on ffprobe's
+# names, which is what VideoInfo carries. BT.2020 takes non-constant luminance,
+# which is what BT.2020 content uses in practice; constant luminance is rare.
+MATRIX_FOR_PRIMARIES: dict[str, str] = {
+    "bt2020": "bt2020nc",
+    "bt709": "bt709",
+    "smpte170m": "smpte170m",
+    "bt470bg": "bt470bg",
+    "smpte240m": "smpte240m",
+}
+
+
+def is_pq_video(color_trc: str | None) -> bool:
+    """Check whether a source is PQ specifically, rather than HDR generally.
+
+    HDR10 is PQ plus static mastering metadata, so the signalling that carries
+    that metadata applies to a PQ source and not to an HLG one, which has no
+    mastering display or MaxCLL for it to describe.
+
+    Args:
+        color_trc: Color transfer characteristic from video metadata
+
+    Returns:
+        True for a PQ (SMPTE ST 2084) transfer
+    """
+    if not color_trc:
+        return False
+    return color_trc.lower() in PQ_TRANSFER_CHARACTERISTICS
 
 
 def get_encoder_bin(encoder_type: EncoderType, cwd: Path | None = None) -> Path:

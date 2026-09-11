@@ -473,6 +473,46 @@ def run_capture(
     return "\n".join(captured)
 
 
+# x265 states mastering display chromaticity in units of 0.00002, so a
+# coordinate scales by 50000. Verified by round-tripping a file: encoding with
+# G(12000,34000) reads back from MediaInfo as G: x=0.240000 y=0.680000.
+CHROMATICITY_SCALE = 50000
+
+# "R: x=0.660000 y=0.320000, G: ..., B: ..., White point: x=0.312700 y=0.329000".
+# Builds differ on whether the white point is spelled out or abbreviated to W.
+_EXPLICIT_PRIMARY_RE = re.compile(
+    r"(?P<name>R|G|B|W(?:hite point)?)\s*:\s*"
+    + r"x\s*=\s*(?P<x>[\d.]+)\s+y\s*=\s*(?P<y>[\d.]+)",
+    re.IGNORECASE,
+)
+
+
+def _parse_explicit_primaries(primaries_str: str) -> str | None:
+    """Convert MediaInfo's coordinate form into x265's chromaticity triplets.
+
+    Args:
+        primaries_str: Mastering display primaries naming each coordinate.
+
+    Returns:
+        The ``G(x,y)B(x,y)R(x,y)WP(x,y)`` prefix, or None if any of the four
+        points is missing.
+    """
+    found: dict[str, tuple[int, int]] = {}
+    for match in _EXPLICIT_PRIMARY_RE.finditer(primaries_str):
+        key = match.group("name")[0].upper()
+        found[key] = (
+            round(float(match.group("x")) * CHROMATICITY_SCALE),
+            round(float(match.group("y")) * CHROMATICITY_SCALE),
+        )
+
+    if not all(k in found for k in ("R", "G", "B", "W")):
+        return None
+
+    # x265 wants green, blue, red, then the white point, in that order
+    g, b, r, w = found["G"], found["B"], found["R"], found["W"]
+    return f"G({g[0]},{g[1]})B({b[0]},{b[1]})R({r[0]},{r[1]})WP({w[0]},{w[1]})"
+
+
 def parse_master_display_metadata(primaries_str: str, luminance_str: str) -> str | None:
     """Parse PyMediaInfo master display metadata and convert to x265 format.
 
@@ -490,8 +530,6 @@ def parse_master_display_metadata(primaries_str: str, luminance_str: str) -> str
     Example x265 format:
         "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)"
     """
-    import re
-
     try:
         # Parse luminance: "min: 0.0050 cd/m2, max: 1000 cd/m2"
         luminance_pattern = r"min: ([\d.]+) cd/m2, max: ([\d.]+) cd/m2"
@@ -516,16 +554,23 @@ def parse_master_display_metadata(primaries_str: str, luminance_str: str) -> str
             "BT.2020": "G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)",
         }
 
-        # Look up color space coordinates
-        if primaries_str not in COLOR_SPACE_COORDS:
+        coords = COLOR_SPACE_COORDS.get(primaries_str)
+
+        # MediaInfo names the primaries only when they match a set it knows, and
+        # prints the coordinates otherwise. A display mastered outside the named
+        # sets is exactly the case where the metadata is worth carrying, so the
+        # coordinate form is parsed rather than dropped.
+        if coords is None:
+            coords = _parse_explicit_primaries(primaries_str)
+
+        if coords is None:
             logger.warning(
-                "Unknown color space '%s'. Supported: %s",
+                "Could not read mastering display primaries from '%s'. Named "
+                + "spaces: %s",
                 primaries_str,
                 list(COLOR_SPACE_COORDS.keys()),
             )
             return None
-
-        coords = COLOR_SPACE_COORDS[primaries_str]
 
         # Format: "G(x,y)B(x,y)R(x,y)WP(x,y)L(max,min)"
         master_display_str = f"{coords}L({max_lum},{min_lum})"

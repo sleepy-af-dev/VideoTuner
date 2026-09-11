@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-11
+
+Colour metadata was read from one source and compared against the vocabulary of
+another, so HDR sources were never tonemapped before assessment. Scores for HDR
+inputs are not comparable with those from earlier releases.
+
 ### Fixed
 
 - HDR sources are tonemapped before VMAF scoring. The check that decides compared the colour primaries against `BT.2020`, which is how pymediainfo spells it, but that field is filled from ffprobe, which writes `bt2020`. It never matched, so `--tonemap auto`, the default, scored HDR against raw PQ values, while cropdetect, which asks the question separately, tonemapped correctly throughout. **HDR VMAF scores from this release are not comparable with those from earlier ones.** SDR is unaffected
@@ -196,6 +202,7 @@ Initial release.
 - Multi-profile comparison mode
 - Rich console progress display
 
-[Unreleased]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sleepy-af-dev/VideoTuner/releases/tag/v0.4.1

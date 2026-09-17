@@ -474,8 +474,9 @@ def download_ffms2(plugin_dir: Path) -> None:
 def download_lsmashsource(plugin_dir: Path) -> None:
     """Download and extract LSMASHSource plugin."""
     dest_dll = plugin_dir / "LSMASHSource.dll"
-    if dest_dll.exists():
-        print("  LSMASHSource.dll already exists, skipping download")
+    dest_indexer = plugin_dir / "LSMASHSource_indexing.exe"
+    if dest_dll.exists() and dest_indexer.exists():
+        print("  LSMASHSource already exists, skipping download")
         return
 
     print(f"Downloading LSMASHSource {LSMASH_VERSION}...")
@@ -491,13 +492,14 @@ def download_lsmashsource(plugin_dir: Path) -> None:
 
         verify_checksum(archive_path, CHECKSUMS["lsmash"], "LSMASHSource")
 
-        # Extract LSMASHSource.dll from x64 folder
+        # The indexer executable builds .lwi files up front with progress
+        # output, the way ffmsindex.exe does for ffms2.
         extract_from_7z(
             archive_path,
-            ["x64/LSMASHSource.dll"],
+            ["x64/LSMASHSource.dll", "x64/LSMASHSource_indexing.exe"],
             plugin_dir,
         )
-        print(f"  Extracted LSMASHSource.dll to {plugin_dir}")
+        print(f"  Extracted LSMASHSource files to {plugin_dir}")
 
 
 def download_x264(tools_dir: Path) -> None:
@@ -661,6 +663,7 @@ REQUIRED_VAPOURSYNTH = (
     "vapoursynth-portable/vs-plugins/ffms2.dll",
     "vapoursynth-portable/vs-plugins/ffmsindex.exe",
     "vapoursynth-portable/vs-plugins/LSMASHSource.dll",
+    "vapoursynth-portable/vs-plugins/LSMASHSource_indexing.exe",
     "vapoursynth-portable/vs-plugins/vszip/vszip.dll",
     "vapoursynth-portable/vs-plugins/vszip/manifest.vs",
     "vapoursynth-portable/vs-plugins/vs-tonemap/vs-tonemap.dll",

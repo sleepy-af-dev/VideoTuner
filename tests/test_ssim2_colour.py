@@ -14,6 +14,7 @@ from videotuner.ssim2_colour import (
     linearisation_mode,
     missing_colour_tags,
 )
+from videotuner.ssimulacra2_assessment import _build_ssim2_script
 
 
 @pytest.mark.parametrize(
@@ -222,3 +223,34 @@ def test_tonemapping_consumes_the_mastering_display_metadata(tmp_path: Path) -> 
 
     assert got["absent_MasteringDisplayMaxLuminance"] is True
     assert got["absent_MasteringDisplayMinLuminance"] is True
+
+
+def _script(mode: LinearisationMode, *, retag: bool = False) -> str:
+    return _build_ssim2_script(
+        ref_path=Path("ref.mkv"),
+        dis_path=Path("dis.mkv"),
+        ref_cache=Path("ref.lwi"),
+        dis_cache=Path("dis.lwi"),
+        preamble=colour_preamble(mode, retag=retag),
+    )
+
+
+def test_both_clips_go_through_the_chain() -> None:
+    src = _script(LinearisationMode.PQ)
+    assert "ref = prepare(ref)" in src
+    assert "dis = prepare(dis)" in src
+
+
+def test_the_chain_runs_before_the_metric() -> None:
+    src = _script(LinearisationMode.PQ)
+    assert src.index("dis = prepare(dis)") < src.index("vszip.SSIMULACRA2(")
+
+
+def test_the_metric_call_is_unchanged() -> None:
+    # vszip takes no colour arguments; correctness comes from what it is given.
+    src = _script(LinearisationMode.SDR)
+    assert "ref.vszip.SSIMULACRA2(dis)" in src
+
+
+def test_sdr_scripts_carry_no_tonemapping() -> None:
+    assert "core.tonemap." not in _script(LinearisationMode.SDR)

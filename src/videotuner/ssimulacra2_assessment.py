@@ -11,9 +11,11 @@ from typing import TYPE_CHECKING
 
 from .encoding_utils import VapourSynthEnv, write_vpy_script
 from .media import get_assessment_frame_count
+from .ssim2_colour import colour_preamble, linearisation_mode, missing_colour_tags
 from .utils import ensure_dir, run_capture
 
 if TYPE_CHECKING:
+    from .media import VideoInfo
     from .profiles import Profile
     from .progress import PipelineDisplay
 
@@ -65,50 +67,32 @@ def _calculate_stats_from_scores(scores: list[float]) -> SSIM2Result:
     )
 
 
-def _run_vszip_assessment(
+def _build_ssim2_script(
     *,
     ref_path: Path,
     dis_path: Path,
-    vs_env: VapourSynthEnv,
-    temp_dir: Path,
-    line_handler: Callable[[str], bool] | None = None,
-) -> SSIM2Result:
-    """Run SSIMULACRA2 assessment via vszip VapourSynth plugin.
-
-    Creates a VapourSynth script that uses vszip.SSIMULACRA2 to compute
-    per-frame scores, then calculates summary statistics.
+    ref_cache: Path,
+    dis_cache: Path,
+    preamble: str,
+) -> str:
+    """Build the VapourSynth script that scores SSIMULACRA2.
 
     Args:
-        ref_path: Reference video path
-        dis_path: Distorted video path
-        vs_env: VapourSynth environment configuration
-        temp_dir: Directory for temporary files
-        line_handler: Optional callback for progress updates
+        ref_path: Reference video path.
+        dis_path: Distorted video path.
+        ref_cache: Index file for the reference.
+        dis_cache: Index file for the distorted encode.
+        preamble: Source defining ``prepare(clip)``, from ``colour_preamble``.
 
     Returns:
-        SSIM2Result with calculated metrics
-
-    Raises:
-        RuntimeError: If vszip execution fails or produces no scores
+        The .vpy contents.
     """
-    log = logging.getLogger(__name__)
-
-    python_exe = vs_env.vs_dir / "python.exe"
-    if not python_exe.exists():
-        raise FileNotFoundError(f"VapourSynth python.exe not found at: {python_exe}")
-
-    # Create temporary script
-    vpy_path = temp_dir / "vszip_ssim2.vpy"
-
-    # Build VapourSynth script that calculates SSIMULACRA2 and prints scores
-    # Using lsmas for video loading (same as our encoding pipeline)
-    ref_cache = temp_dir / "vszip_ref.lwi"
-    dis_cache = temp_dir / "vszip_dis.lwi"
-
-    vpy_content = f'''import vapoursynth as vs
+    return f'''import vapoursynth as vs
 import sys
 
 core = vs.core
+
+{preamble}
 
 # Force unbuffered output
 sys.stdout.reconfigure(line_buffering=True)
@@ -140,8 +124,14 @@ try:
         print("ERROR: vszip plugin not loaded", file=sys.stderr, flush=True)
         sys.exit(1)
 
+    print("[vszip] Converting to linear light...", file=sys.stderr, flush=True)
+    # vszip mishandles colour: it forces sRGB on the transfer and ignores the
+    # primaries. Both of its conversion paths early-return on a linear RGBS
+    # clip, so the conversion is done here and vszip is handed the result.
+    ref = prepare(ref)
+    dis = prepare(dis)
+
     print("[vszip] Running SSIMULACRA2 comparison...", file=sys.stderr, flush=True)
-    # vszip.SSIMULACRA2 handles format conversion internally
     result = ref.vszip.SSIMULACRA2(dis)
 
     total_frames = len(result)
@@ -171,6 +161,70 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 '''  # noqa: E501  # TODO(E501): shorten line
+
+
+def _run_vszip_assessment(
+    *,
+    ref_path: Path,
+    dis_path: Path,
+    vs_env: VapourSynthEnv,
+    temp_dir: Path,
+    info: VideoInfo,
+    line_handler: Callable[[str], bool] | None = None,
+) -> SSIM2Result:
+    """Run SSIMULACRA2 assessment via vszip VapourSynth plugin.
+
+    Creates a VapourSynth script that uses vszip.SSIMULACRA2 to compute
+    per-frame scores, then calculates summary statistics.
+
+    Args:
+        ref_path: Reference video path
+        dis_path: Distorted video path
+        vs_env: VapourSynth environment configuration
+        temp_dir: Directory for temporary files
+        info: Probed metadata for the input, used to pick the colour
+            conversion the reference and distorted clips are scored through.
+        line_handler: Optional callback for progress updates
+
+    Returns:
+        SSIM2Result with calculated metrics
+
+    Raises:
+        RuntimeError: If vszip execution fails or produces no scores
+    """
+    log = logging.getLogger(__name__)
+
+    python_exe = vs_env.vs_dir / "python.exe"
+    if not python_exe.exists():
+        raise FileNotFoundError(f"VapourSynth python.exe not found at: {python_exe}")
+
+    # Create temporary script
+    vpy_path = temp_dir / "vszip_ssim2.vpy"
+
+    # Build VapourSynth script that calculates SSIMULACRA2 and prints scores
+    # Using lsmas for video loading (same as our encoding pipeline)
+    ref_cache = temp_dir / "vszip_ref.lwi"
+    dis_cache = temp_dir / "vszip_dis.lwi"
+
+    mode = linearisation_mode(info.color_trc)
+    absent = missing_colour_tags(info)
+    if absent:
+        log.warning(
+            "Input declares no %s; assuming BT.709 for SSIMULACRA2. "
+            "Scores stay comparable between encodes of this input, but not "
+            "against a differently tagged one.",
+            ", ".join(absent),
+        )
+    preamble = colour_preamble(mode, retag=bool(absent))
+    log.info("SSIMULACRA2 colour conversion: %s", mode.value)
+
+    vpy_content = _build_ssim2_script(
+        ref_path=ref_path,
+        dis_path=dis_path,
+        ref_cache=ref_cache,
+        dis_cache=dis_cache,
+        preamble=preamble,
+    )
 
     write_vpy_script(vpy_path, vpy_content)
     log.debug("vszip script written to: %s", vpy_path)
@@ -223,6 +277,7 @@ def assess_ssim2_concatenated(
     display: PipelineDisplay,
     log: logging.Logger,
     iteration: int,
+    info: VideoInfo,
 ) -> list[SSIM2Result]:
     """Run SSIMULACRA2 assessment on concatenated reference and distorted files.
 
@@ -238,6 +293,8 @@ def assess_ssim2_concatenated(
         display: Progress display manager
         log: Logger instance
         iteration: Current iteration number
+        info: Probed metadata for the input, used to pick the colour
+            conversion the reference and distorted clips are scored through.
 
     Returns:
         List containing single SSIM2Result for the concatenated comparison
@@ -263,6 +320,7 @@ def assess_ssim2_concatenated(
             dis_path=distorted_path,
             vs_env=vs_env,
             temp_dir=temp_dir,
+            info=info,
             line_handler=stage.make_vszip_handler(total_frames=total_frames),
         )
 

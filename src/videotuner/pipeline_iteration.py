@@ -157,6 +157,7 @@ def run_ssim2_assessment(
             display=ctx.display,
             log=ctx.log,
             iteration=iteration,
+            info=ctx.info,
         )
     except Exception as e:
         ctx.log.error("SSIM2 assessment failed: %s", e)

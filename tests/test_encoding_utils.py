@@ -922,6 +922,7 @@ def test_ffms2_spec_names_its_own_filter_and_tools() -> None:
     assert spec.index_suffix == ".ffindex"
     assert spec.indexer_exe == "ffmsindex.exe"
     assert spec.plugin_dll == "ffms2.dll"
+    assert spec.display_name == "FFMS2"
 
 
 def test_lsmash_spec_names_its_own_filter_and_tools() -> None:
@@ -929,6 +930,7 @@ def test_lsmash_spec_names_its_own_filter_and_tools() -> None:
     assert spec.index_suffix == ".lwi"
     assert spec.indexer_exe == "LSMASHSource_indexing.exe"
     assert spec.plugin_dll == "LSMASHSource.dll"
+    assert spec.display_name == "LSMASHSource"
 
 
 def test_ffms2_source_expression_is_positional() -> None:

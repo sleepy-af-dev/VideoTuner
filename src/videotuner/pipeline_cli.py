@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from .constants import METRIC_DECIMALS
 from .encoder_type import EncoderType
+from .encoding_utils import IndexerType
 
 if TYPE_CHECKING:
     from .profiles import Profile
@@ -38,6 +39,7 @@ class PipelineArgs:
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
     mkvmerge_bin: str = "mkvmerge"
+    indexer: IndexerType = IndexerType.FFMS2
 
     encoder: str | None = None  # "x264" or "x265"; required with --preset
     profile: str | None = None

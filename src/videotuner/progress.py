@@ -25,7 +25,7 @@ from .constants import PROGRESS_BAR_WIDTH
 from .encoder_type import EncoderType
 from .tool_parsers import (
     FFMPEG_FRAME_RE,
-    FFMSINDEX_PROGRESS_RE,
+    INDEX_PROGRESS_RE,
     MKVMERGE_PCT_RE,
     SSIM_LINE_RE,
     VSZIP_PROGRESS_RE,
@@ -399,18 +399,18 @@ class Stage:
 
         return handler
 
-    def make_ffmsindex_handler(self) -> LineHandler:
-        """Create a handler for ffmsindex progress output.
+    def make_index_handler(self) -> LineHandler:
+        """Create a handler for index-building progress output.
 
-        ffmsindex outputs progress in the format:
-            "Indexing, please wait... 0%"
-            "Indexing, please wait... 50%"
-            "Indexing, please wait... 100%"
+        Both indexers report a percentage, just with different surrounding
+        text:
+            "Indexing, please wait... 50%"       (ffmsindex)
+            "Creating lwi index file 50%"        (LSMASHSource_indexing)
         """
 
         def handler(line: str) -> bool:
             line = clean_ansi(line)
-            match = FFMSINDEX_PROGRESS_RE.search(line)
+            match = INDEX_PROGRESS_RE.search(line)
             if not match:
                 return False
 

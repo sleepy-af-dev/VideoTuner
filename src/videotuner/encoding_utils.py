@@ -52,7 +52,7 @@ class SampledSource:
 
     Attributes:
         path: Source video path
-        cache_file: FFMS2 index for that source
+        cache_file: Index for that source, built by whichever indexer ran
         usable_range: Frames left after this file's own guard bands
     """
 
@@ -296,12 +296,15 @@ class IndexerSpec:
             switching indexers cannot collide.
         indexer_exe: Executable that builds an index up front, with progress.
         plugin_dll: Plugin the source filter lives in.
+        display_name: Name shown to a user, as distinct from the enum value,
+            which is the ``--indexer`` CLI token.
     """
 
     source_call: str
     index_suffix: str
     indexer_exe: str
     plugin_dll: str
+    display_name: str
 
     def source_expr(self, source_path: str, cache_file: str) -> str:
         """Build the VapourSynth expression that loads a file.
@@ -322,6 +325,7 @@ _INDEXERS: dict[IndexerType, IndexerSpec] = {
         index_suffix=".ffindex",
         indexer_exe="ffmsindex.exe",
         plugin_dll="ffms2.dll",
+        display_name="FFMS2",
     ),
     IndexerType.LSMASH: IndexerSpec(
         source_call=(
@@ -330,6 +334,7 @@ _INDEXERS: dict[IndexerType, IndexerSpec] = {
         index_suffix=".lwi",
         indexer_exe="LSMASHSource_indexing.exe",
         plugin_dll="LSMASHSource.dll",
+        display_name="LSMASHSource",
     ),
 }
 

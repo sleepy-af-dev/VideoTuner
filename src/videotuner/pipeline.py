@@ -13,7 +13,7 @@ from .constants import (
     METRIC_DECIMALS,
 )
 from .create_encodes import (
-    build_ffms2_index,
+    build_source_index,
     calculate_cropdetect_values,
 )
 from .crf_search import (
@@ -26,6 +26,7 @@ from .encoding_utils import (
     SampledSource,
     UsableRange,
     combine_crop_values,
+    indexer_spec,
     is_hdr_video,
 )
 from .media import (
@@ -479,31 +480,34 @@ def _run_pipeline_body(
         log.error("Reduce guard settings")
         return JobResult.failure(input_path, "guard bands leave no usable duration")
 
-    # Build FFMS2 index for source (shared across cropdetect and all encodes)
-    # This is done BEFORE cropdetect to avoid delays during crop detection
-    # Index is stored alongside the source file for persistence across job runs
-    cache_files = {p: p.parent / f"{p.stem}.ffindex" for p in source_paths}
+    # Build the source index once, shared across cropdetect and all encodes.
+    # Done BEFORE cropdetect to avoid delays during crop detection, and stored
+    # alongside the source file for persistence across job runs.
+    spec = indexer_spec(args.indexer)
+    cache_files = {p: p.parent / f"{p.stem}{spec.index_suffix}" for p in source_paths}
     if crop_detect or args.vmaf or args.ssim2:
         for source in source_paths:
             cache_file = cache_files[source]
             # Only build if index doesn't exist
             if not cache_file.exists():
                 with display.stage(
-                    f"Building FFMS2 Index ({source.name})",
-                    total=1,  # Placeholder - updated when ffmsindex reports frames
+                    f"Building {spec.display_name} Index ({source.name})",
+                    total=1,  # Placeholder - updated when the indexer reports frames
                     show_eta=True,
                     transient=True,  # Transient to avoid duplicate header line
                     show_done=True,
                 ) as index_stage:
-                    _ = build_ffms2_index(
+                    _ = build_source_index(
                         source_path=source,
                         cache_file=cache_file,
+                        indexer=args.indexer,
                         cwd=repo_root,
-                        line_handler=index_stage.make_ffmsindex_handler(),
+                        line_handler=index_stage.make_index_handler(),
                     )
             else:
                 display.console.print(
-                    f"[cyan]Using Existing FFMS2 Index[/cyan] ({source.name})"
+                    f"[cyan]Using Existing {spec.display_name} Index[/cyan] "
+                    f"({source.name})"
                 )
 
     log_section(log, "Analysis")

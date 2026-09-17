@@ -63,8 +63,10 @@ SSIM_LINE_RE = re.compile(
 # vszip progress: "vszip progress: 50/100"
 VSZIP_PROGRESS_RE = re.compile(r"vszip progress:\s*(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 
-# ffmsindex progress: "Indexing, please wait... 50%"
-FFMSINDEX_PROGRESS_RE = re.compile(r"(\d+)%", re.IGNORECASE)
+# Index progress. ffmsindex prints "Indexing, please wait... 50%";
+# LSMASHSource_indexing prints "Creating lwi index file 50%". One pattern
+# matches both.
+INDEX_PROGRESS_RE = re.compile(r"(\d+)%", re.IGNORECASE)
 
 # FFmpeg cropdetect output: "crop=W:H:X:Y"
 CROPDETECT_RE = re.compile(r"crop=(\d+):(\d+):(\d+):(\d+)")

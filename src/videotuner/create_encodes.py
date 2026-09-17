@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from .encoding_utils import (
     CropValues,
     EncoderPaths,
+    IndexerType,
     SampledSource,
     VapourSynthEnv,
     build_encoder_command,
@@ -21,6 +22,7 @@ from .encoding_utils import (
     build_vspipe_command,
     calculate_sample_count,
     create_temp_encode_paths,
+    indexer_spec,
     mux_and_cleanup,
     resolve_absolute_path,
     run_vspipe_encode,
@@ -62,27 +64,28 @@ def mux_to_mkv(
     _ = run_capture(mux_args, cwd=cwd, line_callback=line_handler)
 
 
-def build_ffms2_index(
+def build_source_index(
     source_path: Path,
     cache_file: Path,
     *,
+    indexer: IndexerType,
     cwd: Path | None = None,
     line_handler: Callable[[str], bool] | None = None,
 ) -> bool:
-    """
-    Build FFMS2 index for a source video file using ffmsindex.exe.
+    """Build a source index up front, so encodes and assessment share one.
 
-    This function creates an FFMS2 index file that can be shared across all
-    encodes from the same source, significantly speeding up subsequent operations.
+    The index is built ahead of time purely for the progress display: the
+    source filter builds its own silently if this is skipped.
 
     Args:
         source_path: Path to the source video file
         cache_file: Path where the index file should be created
+        indexer: Which indexer to run
         cwd: Working directory (for locating vapoursynth-portable)
         line_handler: Optional callback for progress parsing
 
     Returns:
-        True if indexing succeeded, False if ffmsindex.exe not found or failed
+        True if indexing succeeded, False if the executable is missing or failed
 
     Raises:
         RuntimeError: If indexing fails critically
@@ -91,16 +94,18 @@ def build_ffms2_index(
 
     # If index already exists, skip
     if cache_file.exists():
-        log.debug("FFMS2 index already exists: %s", cache_file)
+        log.debug("Index already exists: %s", cache_file)
         return True
 
-    # VapourSynth portable paths
+    spec = indexer_spec(indexer)
     vs_env = VapourSynthEnv.from_cwd(cwd)
-    ffmsindex_exe = vs_env.vs_plugin_dir / "ffmsindex.exe"
+    indexer_exe = vs_env.vs_plugin_dir / spec.indexer_exe
 
-    if not ffmsindex_exe.exists():
+    if not indexer_exe.exists():
         log.debug(
-            "ffmsindex.exe not found, FFMS2 will build index automatically (no progress display)"  # noqa: E501  # TODO(E501): shorten line
+            "%s not found, %s will build its index automatically (no progress display)",
+            spec.indexer_exe,
+            spec.display_name,
         )
         return False
 
@@ -110,20 +115,23 @@ def build_ffms2_index(
     # Build absolute path for source
     abs_source_path = resolve_absolute_path(source_path, cwd)
 
-    index_args = [str(ffmsindex_exe), str(abs_source_path), str(cache_file)]
+    index_args = [str(indexer_exe), str(abs_source_path), str(cache_file)]
 
     try:
-        log.info("Building FFMS2 index for source...")
+        log.info("Building %s index for source...", spec.display_name)
         _ = run_capture(
             index_args,
             cwd=cwd,
             line_callback=line_handler,
         )
-        log.info("FFMS2 index created successfully")
+        log.info("%s index created successfully", spec.display_name)
         return True
     except Exception as e:
-        log.warning("ffmsindex failed, FFMS2 will build index automatically: %s", e)
-        # If ffmsindex fails, FFMS2 plugin will create index (but without progress)
+        log.warning(
+            "%s failed, the index will be built automatically: %s",
+            spec.indexer_exe,
+            e,
+        )
         if cache_file.exists():
             cache_file.unlink()  # Remove partial index
         return False

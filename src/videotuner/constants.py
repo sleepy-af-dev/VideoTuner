@@ -57,6 +57,11 @@ VMAF_MAX_THREADS: int = 16
 # 47 separates 47.952/48/50/59.94/60 from 24/25/30 without landing on any of them.
 VMAF_HFR_FPS_THRESHOLD: float = 47.0
 
+# Reference white for the tonemapped SSIMULACRA2 input, in cd/m2. BT.2408 puts
+# HDR reference white at 203 cd/m2 and vs-tonemap scales its output so that
+# becomes 1.0; this is the SDR display luminance the conversion is anchored to.
+SSIM2_NOMINAL_LUMINANCE = 100
+
 # =============================================================================
 # Resolution Constants
 # =============================================================================

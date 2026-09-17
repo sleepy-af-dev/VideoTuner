@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -59,19 +60,19 @@ def test_partially_tagged_source_names_only_what_is_absent() -> None:
 
 
 def test_pq_preamble_tonemaps_and_maps_gamut() -> None:
-    src = colour_preamble(LinearisationMode.PQ, retag=False)
+    src = colour_preamble(LinearisationMode.PQ, missing=[])
     assert "core.tonemap.BT2390(" in src
     assert "core.tonemap.BT2407(" in src
     assert "core.tonemap.HLG(" not in src
 
 
 def test_hlg_preamble_decodes_the_ootf_before_tonemapping() -> None:
-    src = colour_preamble(LinearisationMode.HLG, retag=False)
+    src = colour_preamble(LinearisationMode.HLG, missing=[])
     assert src.index("core.tonemap.HLG(") < src.index("core.tonemap.BT2390(")
 
 
 def test_sdr_preamble_does_not_tonemap() -> None:
-    src = colour_preamble(LinearisationMode.SDR, retag=False)
+    src = colour_preamble(LinearisationMode.SDR, missing=[])
     assert "core.tonemap." not in src
 
 
@@ -80,22 +81,43 @@ def test_src_max_is_never_passed_to_the_tone_curve() -> None:
     # returns wrong colour on a mis-wired chain. The mastering display
     # properties must carry them instead.
     for mode in LinearisationMode:
-        src = colour_preamble(mode, retag=False)
+        src = colour_preamble(mode, missing=[])
         assert "src_max" not in src
         assert "src_min" not in src
 
 
-def test_retag_writes_the_fallback_properties() -> None:
-    src = colour_preamble(LinearisationMode.SDR, retag=True)
+def test_fully_missing_sdr_writes_all_three_bt709_fallbacks() -> None:
+    src = colour_preamble(
+        LinearisationMode.SDR, missing=["transfer", "primaries", "matrix"]
+    )
     assert "SetFrameProps" in src
     assert "_Transfer=1" in src
     assert "_Primaries=1" in src
     assert "_Matrix=1" in src
 
 
-def test_no_retag_leaves_the_properties_alone() -> None:
-    src = colour_preamble(LinearisationMode.SDR, retag=False)
-    assert "SetFrameProps" not in src
+@pytest.mark.parametrize("mode", list(LinearisationMode))
+def test_fully_tagged_input_leaves_the_properties_alone(
+    mode: LinearisationMode,
+) -> None:
+    assert "SetFrameProps" not in colour_preamble(mode, missing=[])
+
+
+def test_pq_with_only_primaries_missing_does_not_touch_transfer() -> None:
+    # The regression this guards: a partially-tagged PQ input had its
+    # correct transfer overwritten with BT.709 just because primaries was
+    # also missing, silently linearising real PQ samples through the wrong
+    # curve.
+    src = colour_preamble(LinearisationMode.PQ, missing=["primaries"])
+    assert "_Primaries=9" in src
+    assert "_Transfer=" not in src
+
+
+def test_hlg_with_only_matrix_missing_touches_only_matrix() -> None:
+    src = colour_preamble(LinearisationMode.HLG, missing=["matrix"])
+    assert "_Matrix=9" in src
+    assert "_Transfer=" not in src
+    assert "_Primaries=" not in src
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -147,7 +169,7 @@ def _run_chain(tmp_path: Path, mode: LinearisationMode) -> dict[str, Any]:
     _ = script.write_text(
         "import vapoursynth as vs\n"
         "core = vs.core\n\n"
-        f"{colour_preamble(mode, retag=False)}\n"
+        f"{colour_preamble(mode, missing=[])}\n"
         f"{construction}\n"
         "out = prepare(clip)\n"
         "f = out.get_frame(0)\n"
@@ -225,13 +247,13 @@ def test_tonemapping_consumes_the_mastering_display_metadata(tmp_path: Path) -> 
     assert got["absent_MasteringDisplayMinLuminance"] is True
 
 
-def _script(mode: LinearisationMode, *, retag: bool = False) -> str:
+def _script(mode: LinearisationMode, *, missing: Sequence[str] = ()) -> str:
     return _build_ssim2_script(
         ref_path=Path("ref.mkv"),
         dis_path=Path("dis.mkv"),
         ref_cache=Path("ref.lwi"),
         dis_cache=Path("dis.lwi"),
-        preamble=colour_preamble(mode, retag=retag),
+        preamble=colour_preamble(mode, missing=missing),
     )
 
 

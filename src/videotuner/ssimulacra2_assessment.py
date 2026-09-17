@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING
 
 from .encoding_utils import VapourSynthEnv, write_vpy_script
 from .media import get_assessment_frame_count
-from .ssim2_colour import colour_preamble, linearisation_mode, missing_colour_tags
+from .ssim2_colour import (
+    LinearisationMode,
+    colour_preamble,
+    linearisation_mode,
+    missing_colour_tags,
+)
 from .utils import ensure_dir, run_capture
 
 if TYPE_CHECKING:
@@ -209,13 +214,21 @@ def _run_vszip_assessment(
     mode = linearisation_mode(info.color_trc)
     absent = missing_colour_tags(info)
     if absent:
+        # BT.709 is the right guess for an untagged SDR input; an HDR one
+        # that omits primaries or matrix is overwhelmingly BT.2020, not
+        # BT.709 - see colour_preamble's fallback table. Naming what was
+        # assumed, not just what was missing, is what a prior defect here
+        # lacked: it silently reset an HDR input's correct transfer to
+        # BT.709 and the warning gave no way to notice.
+        assumed = "BT.709" if mode is LinearisationMode.SDR else "BT.2020"
         log.warning(
-            "Input declares no %s; assuming BT.709 for SSIMULACRA2. "
+            "Input declares no %s; assuming %s for SSIMULACRA2. "
             "Scores stay comparable between encodes of this input, but not "
             "against a differently tagged one.",
             ", ".join(absent),
+            assumed,
         )
-    preamble = colour_preamble(mode, retag=bool(absent))
+    preamble = colour_preamble(mode, missing=absent)
     log.info("SSIMULACRA2 colour conversion: %s", mode.value)
 
     vpy_content = _build_ssim2_script(

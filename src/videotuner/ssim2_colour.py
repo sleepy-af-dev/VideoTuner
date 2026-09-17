@@ -17,6 +17,7 @@ pre-converted frames reach the metric untouched.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -74,15 +75,27 @@ def missing_colour_tags(info: VideoInfo) -> list[str]:
     return absent
 
 
-# Written when an input declares no colour tags. BT.709 is what every other
-# tool in the chain assumes for an untagged input, and an untagged PQ input
-# does not occur in practice because playback needs the tags. Writing the
-# properties rather than passing resize's `_in` arguments makes the assumption
-# visible in the frame properties, and is the only thing that works: a present
-# property beats those arguments, and an absent one is what is being fixed.
-_FALLBACK_TAGS = (
-    "clip = core.std.SetFrameProps(clip, _Transfer=1, _Primaries=1, _Matrix=1)"
-)
+# Written only for the tags a partially- or un-tagged input actually omits.
+# BT.709 is the right guess for an SDR input with no tags at all - it is what
+# every other tool in the chain assumes for an untagged input. It is the
+# WRONG guess for an HDR one: a PQ or HLG input that omits its primaries or
+# matrix is overwhelmingly BT.2020, not BT.709, so those modes fall back to
+# BT.2020 instead. A missing transfer always selects SDR mode -
+# linearisation_mode(None) returns SDR - so the transfer fallback is only
+# ever reachable there; the PQ and HLG tables below correctly have no
+# transfer entry, and a lookup that needed one would be a bug upstream.
+#
+# Writing the properties rather than passing resize's `_in` arguments makes
+# the assumption visible in the frame properties, and is the only thing that
+# works: a present property beats those arguments, and an absent one is what
+# is being fixed.
+_TAG_PROPS = {"transfer": "_Transfer", "primaries": "_Primaries", "matrix": "_Matrix"}
+
+_FALLBACK_VALUES: dict[LinearisationMode, dict[str, int]] = {
+    LinearisationMode.SDR: {"transfer": 1, "primaries": 1, "matrix": 1},
+    LinearisationMode.PQ: {"primaries": 9, "matrix": 9},
+    LinearisationMode.HLG: {"primaries": 9, "matrix": 9},
+}
 
 _PQ_CHAIN = f"""\
     lin = core.resize.Bicubic(clip, format=vs.RGBS, transfer_s="linear",
@@ -113,7 +126,7 @@ _CHAINS = {
 }
 
 
-def colour_preamble(mode: LinearisationMode, *, retag: bool) -> str:
+def colour_preamble(mode: LinearisationMode, *, missing: Sequence[str]) -> str:
     """Emit the VapourSynth source defining ``prepare(clip)``.
 
     ``prepare`` converts a tagged clip to linear light in BT.709 primaries,
@@ -132,8 +145,10 @@ def colour_preamble(mode: LinearisationMode, *, retag: bool) -> str:
 
     Args:
         mode: Which conversion the input's transfer requires.
-        retag: Write BT.709 fallback properties first, for an input that
-            declares no colour tags.
+        missing: Tag names to write a fallback value for, from
+            ``missing_colour_tags``. A tag that is present is left alone;
+            only the ones actually absent get overwritten. Empty means the
+            input is fully tagged, and no ``SetFrameProps`` call is emitted.
 
     Returns:
         Python source defining ``prepare(clip)``, for embedding in a .vpy.
@@ -142,7 +157,9 @@ def colour_preamble(mode: LinearisationMode, *, retag: bool) -> str:
         "def prepare(clip):",
         '    """Convert a tagged clip to linear RGBS, tonemapping HDR first."""',
     ]
-    if retag:
-        lines.append(f"    {_FALLBACK_TAGS}")
+    if missing:
+        values = _FALLBACK_VALUES[mode]
+        assigns = ", ".join(f"{_TAG_PROPS[tag]}={values[tag]}" for tag in missing)
+        lines.append(f"    clip = core.std.SetFrameProps(clip, {assigns})")
     lines.append(_CHAINS[mode])
     return "\n".join(lines) + "\n"

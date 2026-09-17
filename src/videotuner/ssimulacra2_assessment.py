@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .constants import SSIM2_ASSUMED_MASTERING_PEAK
 from .encoding_utils import (
     IndexerType,
     VapourSynthEnv,
@@ -22,6 +23,7 @@ from .ssim2_colour import (
     colour_preamble,
     linearisation_mode,
     missing_colour_tags,
+    missing_mastering_display,
 )
 from .utils import ensure_dir, run_capture
 
@@ -299,7 +301,23 @@ def _run_vszip_assessment(
             ", ".join(absent),
             assumed,
         )
-    preamble = colour_preamble(mode, missing=absent)
+    # A PQ input that declares no mastering display gives BT2390 no peak
+    # luminance, and it raises rather than guessing. Assume the BT.2100
+    # reference display instead, so the metric is scored rather than dropped.
+    # One decision reaches both clips, since prepare() is one function applied
+    # to each. HLG needs no equivalent: tonemap.HLG defaults its own peak.
+    is_pq = mode is LinearisationMode.PQ
+    mastering_missing = is_pq and missing_mastering_display(info)
+    if mastering_missing:
+        log.warning(
+            "Input declares no mastering display; assuming a %d cd/m2 peak "
+            "for SSIMULACRA2. Scores stay comparable between encodes of this "
+            "input, but not against one that declares its own peak.",
+            SSIM2_ASSUMED_MASTERING_PEAK,
+        )
+    preamble = colour_preamble(
+        mode, missing=absent, mastering_missing=mastering_missing
+    )
     log.info("SSIMULACRA2 colour conversion: %s", mode.value)
 
     vpy_content = _build_ssim2_script(

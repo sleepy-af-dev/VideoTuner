@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from collections.abc import Sequence
@@ -8,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from videotuner.encoding_utils import IndexerType
+from videotuner.encoding_utils import IndexerType, VapourSynthEnv
 from videotuner.media import VideoInfo
 from videotuner.ssim2_colour import (
     LinearisationMode,
@@ -17,7 +18,7 @@ from videotuner.ssim2_colour import (
     missing_colour_tags,
     missing_mastering_display,
 )
-from videotuner.ssimulacra2_assessment import _build_ssim2_script
+from videotuner.ssimulacra2_assessment import _build_ssim2_script, _run_vszip_assessment
 
 
 @pytest.mark.parametrize(
@@ -461,3 +462,71 @@ def test_ssim2_script_can_still_load_through_lsmash() -> None:
     )
     assert "core.lsmas.LWLibavSource(" in src
     assert "core.ffms2.Source(" not in src
+
+
+def _write_pq_pair(tmp_path: Path) -> tuple[Path, Path]:
+    """Write a lossless PQ reference and a CRF 32 encode of the same source.
+
+    Both are tagged PQ and neither declares a mastering display, which is
+    exactly the case the assumption exists for. ffmpeg's own test pattern
+    gives the metric real structure to score, so the result is not the
+    degenerate 100 a flat colour field produces.
+    """
+    made: list[Path] = []
+    for rate, name in (("lossless=1", "ref.mkv"), ("crf=32", "dis.mkv")):
+        out = tmp_path / name
+        _ = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=256x256:rate=24:duration=1",
+                "-pix_fmt",
+                "yuv420p10le",
+                "-c:v",
+                "libx265",
+                "-x265-params",
+                f"{rate}:colorprim=bt2020:transfer=smpte2084"
+                ":colormatrix=bt2020nc:repeat-headers=1",
+                str(out),
+            ],
+            capture_output=True,
+            check=True,
+        )
+        made.append(out)
+    return made[0], made[1]
+
+
+@requires_vapoursynth
+def test_a_pq_input_with_no_mastering_display_is_still_scored(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Before the assumption this took the VapourSynth process down: BT2390
+    # raises for want of a peak, and vszip does not survive an error from the
+    # node it is scoring.
+    ref, dis = _write_pq_pair(tmp_path)
+    info = VideoInfo(
+        fps=24.0,
+        duration=1.0,
+        color_trc="smpte2084",
+        color_primaries="bt2020",
+        color_space="bt2020nc",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = _run_vszip_assessment(
+            ref_path=ref,
+            dis_path=dis,
+            vs_env=VapourSynthEnv.from_cwd(REPO_ROOT),
+            temp_dir=tmp_path,
+            info=info,
+            indexer=IndexerType.FFMS2,
+        )
+
+    assert result.count == 24
+    assert "no mastering display" in caplog.text
+    assert "1000 cd/m2" in caplog.text

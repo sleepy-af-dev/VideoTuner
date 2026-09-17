@@ -206,6 +206,7 @@ Download the latest release from the [Releases page](https://github.com/sleepy-a
 | [ffms2](https://github.com/FFMS/ffms2)                                       | 5.1.2 (3af2ef2) | Frame-accurate video indexing (`ffms2.dll`, `ffmsindex.exe`), built from source |
 | [LSMASHSource](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works) | 1310.0.0.0     | Video loading for SSIMULACRA2                                |
 | [vszip](https://github.com/dnjulek/vapoursynth-zip)                          | 22.1.0         | SSIMULACRA2 quality metric calculation                       |
+| [vs-tonemap](https://github.com/sleepy-af-dev/vs-tonemap)                    | 0.2.0          | Tonemapping for SSIMULACRA2 (BT.2390 tone curve, BT.2407 gamut mapping) |
 
 ### From Source
 
@@ -252,11 +253,21 @@ Create `vapoursynth-portable/vs-plugins/` and place the following plugins in it.
 | ffms2        | 5.0        | [ffms2-5.0-msvc.7z](https://github.com/FFMS/ffms2/releases/tag/5.0)                                                  | `x64/ffms2.dll`, `x64/ffmsindex.exe` |
 | LSMASHSource | 1310.0.0.0 | [L-SMASH-Works-r1310.0.0.0.7z](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/releases/tag/1310.0.0.0) | `x64/LSMASHSource.dll`               |
 | vszip        | 22.1.0     | [vapoursynth_vszip-22.1.0-py3-none-win_amd64.whl](https://pypi.org/project/vapoursynth-vszip/22.1.0/#files)          | `vapoursynth/plugins/vszip/` → `vs-plugins/vszip/` |
+| vs-tonemap   | 0.2.0      | [vs-tonemap-v0.2.0.zip](https://github.com/sleepy-af-dev/vs-tonemap/releases/tag/v0.2.0)                             | `vs-tonemap/` → `vs-plugins/vs-tonemap/` |
 
 > **Note:** 5.0 is the newest ffms2 binary published, and the project has taken
 > commits since. Pre-built releases bundle an ffms2 built from a later commit, so
 > a manual setup using the archive above is on a slightly older ffms2 unless you
 > build it from source yourself.
+
+> **Note:** vs-tonemap installs as a whole directory, so the DLL, its `LICENSE`
+> and its `NOTICE` stay together. The DLL statically links libraries whose
+> licences ask a redistributor to carry their attribution, and the `NOTICE` is
+> that attribution.
+>
+> Skip it and HDR SSIMULACRA2 stops working. The metric is only defined on SDR,
+> so an HDR input is tonemapped before it is scored, and without the plugin that
+> step fails. SDR inputs are unaffected.
 
 #### 4. Install Encoders
 
@@ -654,7 +665,11 @@ Run `videotuner --help` for complete options. Key options include:
 | `--no-ssim2`   | -       | Disable SSIMULACRA2 assessment                             |
 | `--vmaf-model` | `auto`  | VMAF model name or path (auto-selects by display and viewing distance) |
 | `--v0-vmaf`    | `off`   | Score with the legacy v0 models, for comparison with earlier releases |
-| `--tonemap`    | `auto`  | HDR tonemapping: auto\|force\|off                          |
+| `--tonemap`    | `auto`  | HDR tonemapping for VMAF: auto\|force\|off                 |
+
+`--tonemap` governs VMAF's tonemapping only. SSIMULACRA2 always converts an HDR
+input to SDR, because the metric is only defined on SDR, so `--tonemap off`
+leaves that conversion in place.
 
 ### Guard Bands
 

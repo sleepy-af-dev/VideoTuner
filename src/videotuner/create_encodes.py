@@ -16,13 +16,11 @@ from .encoding_utils import (
     EncoderPaths,
     IndexerType,
     SampledSource,
-    VapourSynthEnv,
     build_encoder_command,
     build_sampling_vpy_script,
     build_vspipe_command,
     calculate_sample_count,
     create_temp_encode_paths,
-    indexer_spec,
     mux_and_cleanup,
     resolve_absolute_path,
     run_vspipe_encode,
@@ -32,7 +30,7 @@ from .media import get_video_format
 from .profiles import Profile, create_multipass_profile
 from .tonemapping import build_tonemap_chain, has_vulkan_support
 from .tool_parsers import CROPDETECT_RE
-from .utils import ensure_dir, log_separator, run_capture
+from .utils import log_separator, run_capture
 
 logger = logging.getLogger(__name__)
 
@@ -62,82 +60,6 @@ def mux_to_mkv(
 
     log.debug("mkvmerge mux cmd: %s", " ".join(shlex.quote(str(c)) for c in mux_args))
     _ = run_capture(mux_args, cwd=cwd, line_callback=line_handler)
-
-
-def build_source_index(
-    source_path: Path,
-    cache_file: Path,
-    *,
-    indexer: IndexerType,
-    cwd: Path | None = None,
-    line_handler: Callable[[str], bool] | None = None,
-) -> bool:
-    """Build a source index up front, so encodes and assessment share one.
-
-    The index is built ahead of time purely for the progress display: the
-    source filter builds its own silently if this is skipped.
-
-    Args:
-        source_path: Path to the source video file
-        cache_file: Path where the index file should be created
-        indexer: Which indexer to run
-        cwd: Working directory (for locating vapoursynth-portable)
-        line_handler: Optional callback for progress parsing
-
-    Returns:
-        True if indexing succeeded, False if the executable is missing or failed
-
-    Raises:
-        RuntimeError: If indexing fails critically
-    """
-    log = logging.getLogger(__name__)
-
-    # If index already exists, skip
-    if cache_file.exists():
-        log.debug("Index already exists: %s", cache_file)
-        return True
-
-    spec = indexer_spec(indexer)
-    vs_env = VapourSynthEnv.from_cwd(cwd)
-    indexer_exe = vs_env.vs_plugin_dir / spec.indexer_exe
-
-    if not indexer_exe.exists():
-        log.debug(
-            "%s not found, %s will build its index automatically (no progress display)",
-            spec.indexer_exe,
-            spec.display_name,
-        )
-        return False
-
-    # Ensure cache directory exists
-    _ = ensure_dir(cache_file.parent)
-
-    # Build absolute path for source
-    abs_source_path = resolve_absolute_path(source_path, cwd)
-
-    index_args = [str(indexer_exe), str(abs_source_path), str(cache_file)]
-
-    try:
-        log.info("Building %s index for source...", spec.display_name)
-        _ = run_capture(
-            index_args,
-            cwd=cwd,
-            line_callback=line_handler,
-        )
-        log.info("%s index created successfully", spec.display_name)
-        return True
-    except Exception as e:
-        other = next(member for member in IndexerType if member is not indexer)
-        log.warning(
-            "%s failed, the index will be built automatically: %s. "
-            "If this input cannot be read at all, try --indexer %s",
-            spec.indexer_exe,
-            e,
-            other.value,
-        )
-        if cache_file.exists():
-            cache_file.unlink()  # Remove partial index
-        return False
 
 
 def calculate_cropdetect_values(

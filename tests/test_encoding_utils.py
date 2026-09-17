@@ -13,6 +13,7 @@ from videotuner.encoding_utils import (
     VS_PACKAGE_SUBDIR,
     CropValues,
     EncoderPaths,
+    IndexerType,
     SampledSource,
     UsableRange,
     VapourSynthEnv,
@@ -25,6 +26,7 @@ from videotuner.encoding_utils import (
     create_temp_encode_paths,
     get_encoder_bin,
     get_vapoursynth_portable_dir,
+    indexer_spec,
     is_hdr_video,
     resolve_absolute_path,
 )
@@ -842,6 +844,7 @@ class TestBuildSamplingVpyScriptOneSource:
             interval_frames=1600,
             region_frames=20,
             fps=24.0,
+            indexer=IndexerType.FFMS2,
         )
 
         assert script.count("ffms2.Source") == 1
@@ -854,6 +857,7 @@ class TestBuildSamplingVpyScriptOneSource:
             interval_frames=1600,
             region_frames=20,
             fps=24.0,
+            indexer=IndexerType.FFMS2,
         )
 
         assert "Splice" not in script
@@ -872,6 +876,7 @@ class TestBuildSamplingVpyScriptManySources:
             interval_frames=1600,
             region_frames=20,
             fps=24.0,
+            indexer=IndexerType.FFMS2,
         )
 
         assert script.count("ffms2.Source") == 3
@@ -885,6 +890,7 @@ class TestBuildSamplingVpyScriptManySources:
             interval_frames=1600,
             region_frames=20,
             fps=24.0,
+            indexer=IndexerType.FFMS2,
         )
 
         assert script.count("std.Splice") == 1
@@ -897,16 +903,11 @@ class TestBuildSamplingVpyScriptManySources:
             region_frames=20,
             fps=24.0,
             crop_values=CropValues(left=0, right=0, top=140, bottom=140),
+            indexer=IndexerType.FFMS2,
         )
 
         assert script.count("std.Crop") == 1
         assert script.index("std.Splice") < script.index("std.Crop")
-
-
-from videotuner.encoding_utils import (
-    IndexerType,
-    indexer_spec,
-)
 
 
 def test_each_indexer_has_its_own_index_suffix() -> None:
@@ -945,8 +946,6 @@ def test_lsmash_source_expression_names_its_source_argument() -> None:
 
 
 def test_sampling_script_uses_the_selected_filter(tmp_path: Path) -> None:
-    from videotuner.encoding_utils import SampledSource, UsableRange
-
     source = SampledSource(
         path=tmp_path / "in.mkv",
         cache_file=tmp_path / "in.lwi",
@@ -961,17 +960,3 @@ def test_sampling_script_uses_the_selected_filter(tmp_path: Path) -> None:
     )
     assert "core.lsmas.LWLibavSource(" in script
     assert "core.ffms2.Source(" not in script
-
-
-def test_sampling_script_defaults_to_ffms2(tmp_path: Path) -> None:
-    from videotuner.encoding_utils import SampledSource, UsableRange
-
-    source = SampledSource(
-        path=tmp_path / "in.mkv",
-        cache_file=tmp_path / "in.ffindex",
-        usable_range=UsableRange(start=0, end=100, frame_count=100),
-    )
-    script = build_sampling_vpy_script(
-        [source], interval_frames=10, region_frames=2, fps=24.0
-    )
-    assert "core.ffms2.Source(" in script

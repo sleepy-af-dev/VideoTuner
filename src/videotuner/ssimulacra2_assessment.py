@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .encoding_utils import IndexerType, VapourSynthEnv, indexer_spec, write_vpy_script
+from .encoding_utils import (
+    IndexerType,
+    VapourSynthEnv,
+    build_source_index,
+    indexer_spec,
+    write_vpy_script,
+)
 from .media import get_assessment_frame_count
 from .ssim2_colour import (
     LinearisationMode,
@@ -375,7 +381,6 @@ def assess_ssim2_concatenated(
     Returns:
         List containing single SSIM2Result for the concatenated comparison
     """
-    from .create_encodes import build_source_index
     from .pipeline_types import get_profile_dir
 
     ssim2_log_path = (

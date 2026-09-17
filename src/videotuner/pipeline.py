@@ -12,10 +12,7 @@ from .constants import (
     CRF_SEARCH_MAX_ITERATIONS,
     METRIC_DECIMALS,
 )
-from .create_encodes import (
-    build_source_index,
-    calculate_cropdetect_values,
-)
+from .create_encodes import calculate_cropdetect_values
 from .crf_search import (
     CRFFloorError,
     CRFSearchState,
@@ -25,6 +22,7 @@ from .encoding_utils import (
     CropValues,
     SampledSource,
     UsableRange,
+    build_source_index,
     combine_crop_values,
     indexer_spec,
     is_hdr_video,

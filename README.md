@@ -113,7 +113,7 @@ The CRF search uses interpolated binary search to efficiently find the optimal C
 
 **How it works:**
 
-1. **Early Pipeline Stage**: Runs immediately after building the FFMS2 index, before any encoding
+1. **Early Pipeline Stage**: Runs immediately after building the source index, before any encoding
 2. **Smart sampling**: Samples one frame every 30 seconds across the middle 80% of the video
 3. **Conservative cropping**: Uses the minimum (safest) crop values across all sampled frames to avoid accidentally cropping content
 4. **Consistent application**: The same crop values are applied to ALL encodes - reference clips, distorted clips, and across all phases
@@ -204,7 +204,7 @@ Download the latest release from the [Releases page](https://github.com/sleepy-a
 | [x265](https://github.com/Patman86/x265-Mod-by-Patman)                       | 4.2+68+68      | HEVC encoder in `tools/x265.exe`                             |
 | [VapourSynth](https://github.com/vapoursynth/vapoursynth)                    | R79            | Portable environment in `vapoursynth-portable/`              |
 | [ffms2](https://github.com/FFMS/ffms2)                                       | 5.1.2 (3af2ef2) | Frame-accurate video indexing (`ffms2.dll`, `ffmsindex.exe`), built from source |
-| [LSMASHSource](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works) | 1310.0.0.0     | Video loading for SSIMULACRA2                                |
+| [LSMASHSource](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works) | 1310.0.0.0     | Alternative video indexing (`LSMASHSource.dll`, `LSMASHSource_indexing.exe`), selected with `--indexer lsmash` |
 | [vszip](https://github.com/dnjulek/vapoursynth-zip)                          | 22.1.0         | SSIMULACRA2 quality metric calculation                       |
 | [vs-tonemap](https://github.com/sleepy-af-dev/vs-tonemap)                    | 0.2.0          | Tonemapping for SSIMULACRA2 (BT.2390 tone curve, BT.2407 gamut mapping) |
 
@@ -251,7 +251,7 @@ Create `vapoursynth-portable/vs-plugins/` and place the following plugins in it.
 | Plugin       | Version    | Download                                                                                                             | Extract                              |
 | ------------ | ---------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
 | ffms2        | 5.0        | [ffms2-5.0-msvc.7z](https://github.com/FFMS/ffms2/releases/tag/5.0)                                                  | `x64/ffms2.dll`, `x64/ffmsindex.exe` |
-| LSMASHSource | 1310.0.0.0 | [L-SMASH-Works-r1310.0.0.0.7z](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/releases/tag/1310.0.0.0) | `x64/LSMASHSource.dll`               |
+| LSMASHSource | 1310.0.0.0 | [L-SMASH-Works-r1310.0.0.0.7z](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/releases/tag/1310.0.0.0) | `x64/LSMASHSource.dll`, `x64/LSMASHSource_indexing.exe` |
 | vszip        | 22.1.0     | [vapoursynth_vszip-22.1.0-py3-none-win_amd64.whl](https://pypi.org/project/vapoursynth-vszip/22.1.0/#files)          | `vapoursynth/plugins/vszip/` → `vs-plugins/vszip/` |
 | vs-tonemap   | 0.2.0      | [vs-tonemap-v0.2.0.zip](https://github.com/sleepy-af-dev/vs-tonemap/releases/tag/v0.2.0)                             | `vs-tonemap/` → `vs-plugins/vs-tonemap/` |
 
@@ -388,7 +388,9 @@ Files must agree on resolution, frame rate and HDR status. If any differ the run
 
 Given a single file rather than a folder, the flag is an error rather than a warning. `--carry-crf` has no effect alongside it, since there is only one job.
 
-**Note:** batch mode writes an `.ffindex` file next to each source video, the same as a single-file run. They are reused on later runs over the same folder, which is the largest available time saving when re-running a batch.
+**Note:** batch mode writes an index file next to each source video, the same as a single-file run. The name follows the indexer: `.ffindex` under the default `--indexer ffms2`, `.lwi` under `--indexer lsmash`. They are reused on later runs over the same folder, which is the largest available time saving when re-running a batch.
+
+Replacing a source file in place leaves an index that describes the old file, and the two indexers differ in what happens next: `ffms2.Source` stops with "The index does not match the source file", while `lsmas.LWLibavSource` rebuilds the index without saying so. Delete the index whenever you replace a source file.
 
 ### Quality Targets
 
@@ -666,10 +668,16 @@ Run `videotuner --help` for complete options. Key options include:
 | `--vmaf-model` | `auto`  | VMAF model name or path (auto-selects by display and viewing distance) |
 | `--v0-vmaf`    | `off`   | Score with the legacy v0 models, for comparison with earlier releases |
 | `--tonemap`    | `auto`  | HDR tonemapping for VMAF: auto\|force\|off                 |
+| `--indexer`    | `ffms2` | Source filter that reads and indexes video: ffms2\|lsmash  |
 
 `--tonemap` governs VMAF's tonemapping only. SSIMULACRA2 always converts an HDR
 input to SDR, because the metric is only defined on SDR, so `--tonemap off`
 leaves that conversion in place.
+
+`--indexer` applies to every operation that builds an index: sample extraction
+for encoding, and SSIMULACRA2. One run therefore reads video one way throughout.
+Cropdetect and VMAF read through FFmpeg and build no index, so they are
+unaffected.
 
 ### Guard Bands
 

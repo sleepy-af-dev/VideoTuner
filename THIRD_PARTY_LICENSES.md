@@ -108,7 +108,7 @@ Full license text: [licenses/GPL-3.0.txt](licenses/GPL-3.0.txt)
 
 ## LSMASHSource
 
-**Location:** `vapoursynth-portable/vs-plugins/LSMASHSource.dll`\
+**Location:** `vapoursynth-portable/vs-plugins/LSMASHSource.dll`, `LSMASHSource_indexing.exe`\
 **License:** ISC License (L-SMASH portions) + LGPL-2.1 (VapourSynth portions)\
 **Copyright:** Copyright (C) 2011-2015 L-SMASH Works project contributors
 

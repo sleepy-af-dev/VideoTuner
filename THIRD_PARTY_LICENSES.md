@@ -60,7 +60,7 @@ Full license text: [licenses/LGPL-2.1.txt](licenses/LGPL-2.1.txt)
 
 ## vapoursynth-zip (vszip)
 
-**Location:** `vapoursynth-portable/vs-plugins/vszip.dll`\
+**Location:** `vapoursynth-portable/vs-plugins/vszip/`, holding `vszip.dll`, its per-CPU variants and `manifest.vs`\
 **License:** MIT License\
 **Copyright:** Copyright (c) 2024 Julek
 

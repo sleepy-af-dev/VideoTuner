@@ -441,9 +441,8 @@ def install_ffms2_from(source_dir: Path, plugin_dir: Path) -> None:
 
 def download_ffms2(plugin_dir: Path) -> None:
     """Download and extract ffms2 plugin."""
-    dest_dll = plugin_dir / "ffms2.dll"
-    if dest_dll.exists():
-        print("  ffms2.dll already exists, skipping download")
+    if all((plugin_dir / name).exists() for name in FFMS2_FILES):
+        print("  ffms2 already exists, skipping download")
         return
 
     print(f"Downloading ffms2 {FFMS2_VERSION}...")

@@ -15,6 +15,7 @@ from videotuner.ssim2_colour import (
     colour_preamble,
     linearisation_mode,
     missing_colour_tags,
+    missing_mastering_display,
 )
 from videotuner.ssimulacra2_assessment import _build_ssim2_script
 
@@ -77,14 +78,55 @@ def test_sdr_preamble_does_not_tonemap() -> None:
     assert "core.tonemap." not in src
 
 
-def test_src_max_is_never_passed_to_the_tone_curve() -> None:
+def test_bounds_are_not_passed_while_the_properties_carry_them() -> None:
     # Supplying the bounds by hand defeats the plugin's contract check and
-    # returns wrong colour on a mis-wired chain. The mastering display
-    # properties must carry them instead.
+    # returns wrong colour on a mis-wired chain. While the mastering display
+    # properties are there to read, they carry them instead.
     for mode in LinearisationMode:
         src = colour_preamble(mode, missing=[])
         assert "src_max" not in src
         assert "src_min" not in src
+
+
+def test_pq_assumes_a_peak_when_no_mastering_display_will_be_there() -> None:
+    # The literal rather than the constant on purpose: changing the assumed
+    # peak should break a test and be argued for, not pass silently.
+    src = colour_preamble(LinearisationMode.PQ, missing=[], mastering_missing=True)
+    assert "src_max=1000" in src
+    assert "src_min=0" in src
+
+
+@pytest.mark.parametrize("mode", [LinearisationMode.HLG, LinearisationMode.SDR])
+def test_only_pq_assumes_a_peak(mode: LinearisationMode) -> None:
+    # tonemap.HLG already defaults its own peak to 1000 and writes the
+    # properties BT2390 then reads. SDR never tonemaps at all.
+    src = colour_preamble(mode, missing=[], mastering_missing=True)
+    assert "src_max" not in src
+    assert "src_min" not in src
+
+
+def test_untagged_source_has_no_mastering_display() -> None:
+    info = VideoInfo(fps=24.0, duration=1.0)
+    assert missing_mastering_display(info) is True
+
+
+def test_a_declared_mastering_display_is_not_missing() -> None:
+    info = VideoInfo(
+        fps=24.0,
+        duration=1.0,
+        mastering_display_color_primaries="BT.2020",
+        mastering_display_luminance="min: 0.0001 cd/m2, max: 1000 cd/m2",
+    )
+    assert missing_mastering_display(info) is False
+
+
+def test_luminance_without_primaries_is_still_missing() -> None:
+    info = VideoInfo(
+        fps=24.0,
+        duration=1.0,
+        mastering_display_luminance="min: 0.0001 cd/m2, max: 1000 cd/m2",
+    )
+    assert missing_mastering_display(info) is True
 
 
 def test_fully_missing_sdr_writes_all_three_bt709_fallbacks() -> None:
@@ -136,8 +178,8 @@ requires_vapoursynth = pytest.mark.skipif(
 # point every SSIMULACRA2 score is computed at.
 #
 # _Range=0 is limited range, _Range=1 is full.
-_CASES: dict[str, tuple[LinearisationMode, str, tuple[float, float, float]]] = {
-    # case: (mode, clip construction, expected linear value per channel)
+_CASES: dict[str, tuple[LinearisationMode, str, tuple[float, float, float], bool]] = {
+    # case: (mode, clip construction, expected linear value, mastering_missing)
     "sdr": (
         LinearisationMode.SDR,
         "clip = core.std.BlankClip(format=vs.RGB24, width=64, height=64, "
@@ -145,6 +187,7 @@ _CASES: dict[str, tuple[LinearisationMode, str, tuple[float, float, float]]] = {
         "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=1, "
         "_Primaries=1, _Range=0)",
         (0.200013, 0.200013, 0.200013),
+        False,
     ),
     "pq": (
         LinearisationMode.PQ,
@@ -154,6 +197,7 @@ _CASES: dict[str, tuple[LinearisationMode, str, tuple[float, float, float]]] = {
         "_Primaries=9, _Range=0, MasteringDisplayMaxLuminance=1000.0, "
         "MasteringDisplayMinLuminance=0.0001)",
         (0.504053, 0.504053, 0.504053),
+        False,
     ),
     "hlg": (
         LinearisationMode.HLG,
@@ -162,6 +206,7 @@ _CASES: dict[str, tuple[LinearisationMode, str, tuple[float, float, float]]] = {
         "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=18, "
         "_Primaries=9, _Range=0)",
         (0.263935, 0.263935, 0.263935),
+        False,
     ),
     # Neutral grey is white-point invariant, so the cases above exercise the
     # primaries conversion not at all, and on grey the failure the HLG chain is
@@ -181,22 +226,38 @@ _CASES: dict[str, tuple[LinearisationMode, str, tuple[float, float, float]]] = {
         "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=18, "
         "_Primaries=9, _Range=1)",
         (0.062000, 0.112774, 1.000000),
+        False,
+    ),
+    # The same PQ grey with its mastering display stripped. BT2390 raises
+    # without a peak, so the chain hands it the assumed one. 0.504143 rather
+    # than the tagged case's 0.504053 because that case declares a 0.0001
+    # cd/m2 black and the assumption uses 0. The gap is 9e-5, just inside the
+    # 1e-4 tolerance, so the two cases carry their own measured values rather
+    # than sharing one.
+    "pq-no-mastering-display": (
+        LinearisationMode.PQ,
+        "clip = core.std.BlankClip(format=vs.RGB48, width=64, height=64, "
+        "length=1, color=[32768, 32768, 32768])\n"
+        "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=16, "
+        "_Primaries=9, _Range=0)",
+        (0.504143, 0.504143, 0.504143),
+        True,
     ),
 }
 
 
 def test_every_conversion_has_an_executing_case() -> None:
-    assert {mode for mode, _, _ in _CASES.values()} == set(LinearisationMode)
+    assert {mode for mode, _, _, _ in _CASES.values()} == set(LinearisationMode)
 
 
 def _run_chain(tmp_path: Path, case: str) -> dict[str, Any]:
     """Execute the emitted chain under the portable VapourSynth."""
-    mode, construction, _ = _CASES[case]
+    mode, construction, _, mastering_missing = _CASES[case]
     script = tmp_path / "chain.vpy"
     _ = script.write_text(
         "import vapoursynth as vs\n"
         "core = vs.core\n\n"
-        f"{colour_preamble(mode, missing=[])}\n"
+        f"{colour_preamble(mode, missing=[], mastering_missing=mastering_missing)}\n"
         f"{construction}\n"
         "out = prepare(clip)\n"
         "f = out.get_frame(0)\n"
@@ -251,7 +312,7 @@ def test_chain_emits_linear_rgbs_in_bt709_primaries(tmp_path: Path, case: str) -
 @requires_vapoursynth
 @pytest.mark.parametrize("case", list(_CASES))
 def test_chain_produces_the_measured_linear_value(tmp_path: Path, case: str) -> None:
-    _, _, expected = _CASES[case]
+    _, _, expected, _ = _CASES[case]
     got = _run_chain(tmp_path, case)
 
     assert got["values"] == pytest.approx(expected, abs=1e-4)
@@ -267,6 +328,38 @@ def test_tonemapping_consumes_the_mastering_display_metadata(tmp_path: Path) -> 
 
     assert got["absent_MasteringDisplayMaxLuminance"] is True
     assert got["absent_MasteringDisplayMinLuminance"] is True
+
+
+@requires_vapoursynth
+def test_pq_without_a_mastering_display_fails_without_the_assumption(
+    tmp_path: Path,
+) -> None:
+    # The gap this closes, at the point where it is still a clean error.
+    # Wrapped in vszip.SSIMULACRA2 the same failure takes the whole process
+    # down instead, which Task 3 covers. Same clip, same chain, assumption
+    # withheld.
+    mode, construction, _, _ = _CASES["pq-no-mastering-display"]
+    script = tmp_path / "chain.vpy"
+    _ = script.write_text(
+        "import vapoursynth as vs\n"
+        "core = vs.core\n\n"
+        f"{colour_preamble(mode, missing=[])}\n"
+        f"{construction}\n"
+        "prepare(clip).get_frame(0)\n",
+        encoding="utf-8",
+    )
+
+    env = {**os.environ, "VAPOURSYNTH_EXTRA_PLUGIN_PATH": str(VS_PLUGINS)}
+    proc = subprocess.run(
+        [str(VS_PYTHON), str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert proc.returncode != 0
+    assert "MasteringDisplayMaxLuminance" in proc.stderr
 
 
 def _script(mode: LinearisationMode, *, missing: Sequence[str] = ()) -> str:

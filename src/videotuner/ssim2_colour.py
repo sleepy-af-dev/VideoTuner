@@ -21,8 +21,9 @@ from collections.abc import Sequence
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from .constants import SSIM2_NOMINAL_LUMINANCE
+from .constants import SSIM2_ASSUMED_MASTERING_PEAK, SSIM2_NOMINAL_LUMINANCE
 from .encoding_utils import is_hdr_video, is_pq_video
+from .utils import master_display_arg
 
 if TYPE_CHECKING:
     from .media import VideoInfo
@@ -82,6 +83,27 @@ def missing_colour_tags(info: VideoInfo) -> list[str]:
     return absent
 
 
+def missing_mastering_display(info: VideoInfo) -> bool:
+    """Say whether the scored clips will carry no mastering display.
+
+    The reference and the distorted encode both take their metadata from
+    x265, which writes it from this same probe. When the probe yields no
+    ``--master-display`` argument, neither file carries the properties, and
+    ``tonemap.BT2390`` has no peak luminance to build its curve from.
+
+    Args:
+        info: Probed metadata for the input.
+
+    Returns:
+        True when the mastering display metadata is absent or unparseable.
+    """
+    arg = master_display_arg(
+        info.mastering_display_color_primaries,
+        info.mastering_display_luminance,
+    )
+    return arg is None
+
+
 # Written only for the tags a partially- or un-tagged input actually omits.
 # BT.709 is the right guess for an SDR input with no tags at all - it is what
 # every other tool in the chain assumes for an untagged input. It is the
@@ -104,12 +126,27 @@ _FALLBACK_VALUES: dict[LinearisationMode, dict[str, int]] = {
     LinearisationMode.HLG: {"primaries": 9, "matrix": 9},
 }
 
-_PQ_CHAIN = f"""\
+
+def _pq_chain(*, assumed_peak: int | None) -> str:
+    """Emit the PQ conversion, optionally assuming a mastering display.
+
+    Args:
+        assumed_peak: Peak luminance in cd/m2 to hand the tone curve, or
+            None to let it read the mastering display properties.
+
+    Returns:
+        The body of ``prepare`` for a PQ input.
+    """
+    bounds = "" if assumed_peak is None else f"src_max={assumed_peak}, src_min=0, "
+    return f"""\
     lin = core.resize.Bicubic(clip, format=vs.RGBS, transfer_s="linear",
                               primaries_s="2020", range_s="full",
                               nominal_luminance={SSIM2_NOMINAL_LUMINANCE})
-    lin = core.tonemap.BT2390(lin, nominal_luminance={SSIM2_NOMINAL_LUMINANCE})
+    lin = core.tonemap.BT2390(
+        lin, {bounds}nominal_luminance={SSIM2_NOMINAL_LUMINANCE}
+    )
     return core.tonemap.BT2407(lin)"""
+
 
 # The signal must reach tonemap.HLG still HLG-encoded. The OOTF applies one
 # scalar derived from scene luminance to all three channels together, which a
@@ -126,14 +163,20 @@ _SDR_CHAIN = """\
     return core.resize.Bicubic(clip, format=vs.RGBS, transfer_s="linear",
                                primaries_s="709", range_s="full")"""
 
+# PQ is built by _pq_chain instead, since it varies with whether the mastering
+# display properties will be there for the tone curve to read.
 _CHAINS = {
-    LinearisationMode.PQ: _PQ_CHAIN,
     LinearisationMode.HLG: _HLG_CHAIN,
     LinearisationMode.SDR: _SDR_CHAIN,
 }
 
 
-def colour_preamble(mode: LinearisationMode, *, missing: Sequence[str]) -> str:
+def colour_preamble(
+    mode: LinearisationMode,
+    *,
+    missing: Sequence[str],
+    mastering_missing: bool = False,
+) -> str:
     """Emit the VapourSynth source defining ``prepare(clip)``.
 
     ``prepare`` converts a tagged clip to linear light in BT.709 primaries,
@@ -145,10 +188,12 @@ def colour_preamble(mode: LinearisationMode, *, missing: Sequence[str]) -> str:
     arguments as fallbacks for an absent property, so passing them on a tagged
     clip would have no effect.
 
-    ``src_min`` and ``src_max`` are deliberately not passed to ``BT2390``. The
-    mastering display properties carry them - from the input for PQ, written by
-    ``tonemap.HLG`` for HLG - and supplying them by hand defeats the plugin's
-    contract check, which is what catches a mis-wired chain.
+    ``src_min`` and ``src_max`` are not passed to ``BT2390`` while the
+    mastering display properties carry them - from the input for PQ, written
+    by ``tonemap.HLG`` for HLG. Supplying them by hand defeats the plugin's
+    contract check, which is what catches a mis-wired chain. They are passed
+    only when ``mastering_missing`` says the properties will not be there,
+    where the alternative is the filter raising and the metric being dropped.
 
     Args:
         mode: Which conversion the input's transfer requires.
@@ -156,6 +201,12 @@ def colour_preamble(mode: LinearisationMode, *, missing: Sequence[str]) -> str:
             ``missing_colour_tags``. A tag that is present is left alone;
             only the ones actually absent get overwritten. Empty means the
             input is fully tagged, and no ``SetFrameProps`` call is emitted.
+        mastering_missing: True when the clips will carry no mastering
+            display metadata, from ``missing_mastering_display``. A PQ input
+            then hands the tone curve an assumed peak and a black of 0,
+            which it would otherwise raise for want of. Ignored for HLG,
+            whose peak the plugin already defaults, and for SDR, which never
+            tonemaps.
 
     Returns:
         Python source defining ``prepare(clip)``, for embedding in a .vpy.
@@ -168,5 +219,9 @@ def colour_preamble(mode: LinearisationMode, *, missing: Sequence[str]) -> str:
         values = _FALLBACK_VALUES[mode]
         assigns = ", ".join(f"{_TAG_PROPS[tag]}={values[tag]}" for tag in missing)
         lines.append(f"    clip = core.std.SetFrameProps(clip, {assigns})")
-    lines.append(_CHAINS[mode])
+    if mode is LinearisationMode.PQ:
+        peak = SSIM2_ASSUMED_MASTERING_PEAK if mastering_missing else None
+        lines.append(_pq_chain(assumed_peak=peak))
+    else:
+        lines.append(_CHAINS[mode])
     return "\n".join(lines) + "\n"

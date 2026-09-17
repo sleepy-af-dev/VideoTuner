@@ -68,6 +68,15 @@ VMAF_HFR_FPS_THRESHOLD: float = 47.0
 # separately as `dst_max` and defaults to 203 cd/m2, BT.2408 reference white.
 SSIM2_NOMINAL_LUMINANCE: int = 100
 
+# Mastering display peak assumed for a PQ input that declares none, in cd/m2.
+# BT.2390's tone curve needs the peak the content was graded for, and a PQ
+# input carrying no mastering display gives it none, so vs-tonemap raises
+# rather than guessing. 1000 cd/m2 is the reference display both BT.2100 and
+# BT.2408 are written around, and the value vs-tonemap itself defaults its HLG
+# peak to. BT.2408 also names 10000, the PQ container ceiling, but that is what
+# the signal can hold rather than what any display is graded for.
+SSIM2_ASSUMED_MASTERING_PEAK: int = 1000
+
 # =============================================================================
 # Resolution Constants
 # =============================================================================

@@ -18,7 +18,7 @@ VideoTuner bundles the following third-party software components. This document 
 
 ## Source Code Availability
 
-For GPL and LGPL licensed components, source code is available at the URLs listed above. You may also request source code by contacting the VideoTuner maintainers.
+For GPL and LGPL licensed components, the corresponding source is the upstream project linked in the table above. `build.py` pins the exact release or commit of every bundled component, so the source that matches a given binary is the one that pin names. FFMS2 is built from source during the release rather than downloaded, and its section below records the commit it was built from.
 
 ---
 

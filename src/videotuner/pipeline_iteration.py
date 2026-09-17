@@ -158,6 +158,8 @@ def run_ssim2_assessment(
             log=ctx.log,
             iteration=iteration,
             info=ctx.info,
+            indexer=ctx.args.indexer,
+            repo_root=ctx.repo_root,
         )
     except Exception as e:
         ctx.log.error("SSIM2 assessment failed: %s", e)
@@ -326,6 +328,7 @@ def _encode_crf_metric(
                 profile=ctx.selected_profile,
                 video_info=ctx.info,
                 crf=crf,
+                indexer=ctx.args.indexer,
                 mkvmerge_bin=ctx.args.mkvmerge_bin,
                 cwd=ctx.repo_root,
                 temp_dir=ctx.temp_dir,
@@ -814,6 +817,7 @@ def _encode_bitrate_metric(
                 fps=ctx.info.fps,
                 profile=pass1_profile,
                 video_info=ctx.info,
+                indexer=ctx.args.indexer,
                 mkvmerge_bin=ctx.args.mkvmerge_bin,
                 cwd=ctx.repo_root,
                 temp_dir=ctx.temp_dir,
@@ -864,6 +868,7 @@ def _encode_bitrate_metric(
                     fps=ctx.info.fps,
                     profile=pass3_profile,
                     video_info=ctx.info,
+                    indexer=ctx.args.indexer,
                     mkvmerge_bin=ctx.args.mkvmerge_bin,
                     cwd=ctx.repo_root,
                     temp_dir=ctx.temp_dir,
@@ -911,6 +916,7 @@ def _encode_bitrate_metric(
                 fps=ctx.info.fps,
                 profile=pass2_profile,
                 video_info=ctx.info,
+                indexer=ctx.args.indexer,
                 mkvmerge_bin=ctx.args.mkvmerge_bin,
                 cwd=ctx.repo_root,
                 temp_dir=ctx.temp_dir,
@@ -943,6 +949,7 @@ def _encode_bitrate_metric(
                 fps=ctx.info.fps,
                 profile=profile,
                 video_info=ctx.info,
+                indexer=ctx.args.indexer,
                 mkvmerge_bin=ctx.args.mkvmerge_bin,
                 cwd=ctx.repo_root,
                 temp_dir=ctx.temp_dir,

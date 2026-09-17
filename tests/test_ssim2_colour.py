@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from videotuner.encoding_utils import IndexerType
 from videotuner.media import VideoInfo
 from videotuner.ssim2_colour import (
     LinearisationMode,
@@ -275,6 +276,7 @@ def _script(mode: LinearisationMode, *, missing: Sequence[str] = ()) -> str:
         ref_cache=Path("ref.lwi"),
         dis_cache=Path("dis.lwi"),
         preamble=colour_preamble(mode, missing=missing),
+        indexer=IndexerType.LSMASH,
     )
 
 
@@ -329,3 +331,29 @@ def test_a_tonemapped_script_guards_on_the_plugin() -> None:
 def test_an_sdr_script_does_not_demand_the_tonemap_plugin() -> None:
     # SDR never calls it, so requiring it would fail a run that works.
     assert "hasattr(core, 'tonemap')" not in _script(LinearisationMode.SDR)
+
+
+def test_ssim2_script_loads_through_the_selected_indexer() -> None:
+    src = _build_ssim2_script(
+        ref_path=Path("ref.mkv"),
+        dis_path=Path("dis.mkv"),
+        ref_cache=Path("ref.ffindex"),
+        dis_cache=Path("dis.ffindex"),
+        preamble=colour_preamble(LinearisationMode.SDR, missing=[]),
+        indexer=IndexerType.FFMS2,
+    )
+    assert "core.ffms2.Source(" in src
+    assert "core.lsmas.LWLibavSource(" not in src
+
+
+def test_ssim2_script_can_still_load_through_lsmash() -> None:
+    src = _build_ssim2_script(
+        ref_path=Path("ref.mkv"),
+        dis_path=Path("dis.mkv"),
+        ref_cache=Path("ref.lwi"),
+        dis_cache=Path("dis.lwi"),
+        preamble=colour_preamble(LinearisationMode.SDR, missing=[]),
+        indexer=IndexerType.LSMASH,
+    )
+    assert "core.lsmas.LWLibavSource(" in src
+    assert "core.ffms2.Source(" not in src

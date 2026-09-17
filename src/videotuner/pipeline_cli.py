@@ -404,6 +404,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=_get_default("tonemap"),
         help="HDR tonemapping: auto|force|off (default: auto)",
     )
+    _ = analysis_group.add_argument(
+        "--indexer",
+        type=IndexerType,
+        choices=list(IndexerType),
+        default=_get_default("indexer"),
+        help=(
+            "Source filter used to read and index video: ffms2|lsmash"
+            " (default: ffms2). Applies to every operation that builds an"
+            " index. Cropdetect and VMAF read through FFmpeg and index"
+            " nothing, so they are unaffected"
+        ),
+    )
     p.set_defaults(vmaf=_get_default("vmaf"), ssim2=_get_default("ssim2"))
 
     # -------------------------------------------------------------------------

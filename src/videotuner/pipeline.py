@@ -707,6 +707,7 @@ def _run_pipeline_body(
             temp_dir=temp_dir,
             display=display,
             log=log,
+            indexer=args.indexer,
             crop_detect=crop_detect,
             crop_values=crop_values,
         )
@@ -737,6 +738,7 @@ def _run_pipeline_body(
                 temp_dir=temp_dir,
                 display=display,
                 log=log,
+                indexer=args.indexer,
                 crop_detect=crop_detect,
                 crop_values=crop_values,
             )
@@ -761,6 +763,7 @@ def _run_pipeline_body(
                 temp_dir=temp_dir,
                 display=display,
                 log=log,
+                indexer=args.indexer,
                 crop_detect=crop_detect,
                 crop_values=crop_values,
             )

@@ -127,10 +127,13 @@ def build_source_index(
         log.info("%s index created successfully", spec.display_name)
         return True
     except Exception as e:
+        other = next(member for member in IndexerType if member is not indexer)
         log.warning(
-            "%s failed, the index will be built automatically: %s",
+            "%s failed, the index will be built automatically: %s. "
+            "If this input cannot be read at all, try --indexer %s",
             spec.indexer_exe,
             e,
+            other.value,
         )
         if cache_file.exists():
             cache_file.unlink()  # Remove partial index
@@ -320,6 +323,7 @@ def encode_concatenated_reference(
     profile: Profile,
     video_info: VideoInfo,
     *,
+    indexer: IndexerType,
     mkvmerge_bin: str = "mkvmerge",
     cwd: Path | None = None,
     temp_dir: Path | None = None,
@@ -346,6 +350,7 @@ def encode_concatenated_reference(
         fps: Video framerate
         profile: Encoding profile (should use preset="ultrafast")
         video_info: MediaInfo from ffprobe
+        indexer: Source filter to load each file with.
         mkvmerge_bin: Path to mkvmerge binary
         cwd: Working directory
         temp_dir: Directory for temporary files
@@ -392,6 +397,7 @@ def encode_concatenated_reference(
         fps=fps,
         cwd=cwd,
         crop_values=effective_crop,
+        indexer=indexer,
     )
 
     write_vpy_script(vpy_path, vpy_content)
@@ -459,6 +465,7 @@ def encode_concatenated_distorted(
     crf: float,
     video_info: VideoInfo,
     *,
+    indexer: IndexerType,
     mkvmerge_bin: str = "mkvmerge",
     cwd: Path | None = None,
     temp_dir: Path | None = None,
@@ -486,6 +493,7 @@ def encode_concatenated_distorted(
         profile: Encoding profile
         crf: CRF value for encoding
         video_info: MediaInfo from ffprobe
+        indexer: Source filter to load each file with.
         mkvmerge_bin: Path to mkvmerge binary
         cwd: Working directory
         temp_dir: Directory for temporary files
@@ -534,6 +542,7 @@ def encode_concatenated_distorted(
         fps=fps,
         cwd=cwd,
         crop_values=effective_crop,
+        indexer=indexer,
     )
 
     write_vpy_script(vpy_path, vpy_content)
@@ -601,6 +610,7 @@ def encode_concatenated_bitrate(
     profile: Profile,
     video_info: VideoInfo,
     *,
+    indexer: IndexerType,
     mkvmerge_bin: str = "mkvmerge",
     cwd: Path | None = None,
     temp_dir: Path | None = None,
@@ -630,6 +640,7 @@ def encode_concatenated_bitrate(
         fps: Video framerate
         profile: Encoding profile (must have bitrate set)
         video_info: MediaInfo from ffprobe
+        indexer: Source filter to load each file with.
         mkvmerge_bin: Path to mkvmerge binary
         cwd: Working directory
         temp_dir: Directory for temporary files
@@ -716,6 +727,7 @@ def encode_concatenated_bitrate(
         fps=fps,
         cwd=cwd,
         crop_values=effective_crop,
+        indexer=indexer,
     )
 
     write_vpy_script(vpy_path, vpy_content)
@@ -849,6 +861,7 @@ def encode_multipass_bitrate(
     profile: Profile,
     video_info: VideoInfo,
     *,
+    indexer: IndexerType,
     mkvmerge_bin: str = "mkvmerge",
     cwd: Path | None = None,
     temp_dir: Path | None = None,
@@ -881,6 +894,7 @@ def encode_multipass_bitrate(
         fps: Video framerate
         profile: Encoding profile (must have pass=2 or pass=3)
         video_info: MediaInfo from ffprobe
+        indexer: Source filter to load each file with.
         mkvmerge_bin: Path to mkvmerge binary
         cwd: Working directory
         temp_dir: Directory for temporary files
@@ -928,6 +942,7 @@ def encode_multipass_bitrate(
         fps=fps,
         profile=pass1_profile,
         video_info=video_info,
+        indexer=indexer,
         mkvmerge_bin=mkvmerge_bin,
         cwd=cwd,
         temp_dir=temp_dir,
@@ -967,6 +982,7 @@ def encode_multipass_bitrate(
             fps=fps,
             profile=pass3_profile,
             video_info=video_info,
+            indexer=indexer,
             mkvmerge_bin=mkvmerge_bin,
             cwd=cwd,
             temp_dir=temp_dir,
@@ -1002,6 +1018,7 @@ def encode_multipass_bitrate(
         fps=fps,
         profile=pass2_profile,  # Always use pass 2 for final encode
         video_info=video_info,
+        indexer=indexer,
         mkvmerge_bin=mkvmerge_bin,
         cwd=cwd,
         temp_dir=temp_dir,

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Literal
 from .encoding_utils import SampledSource
 
 if TYPE_CHECKING:
-    from .encoding_utils import CropValues
+    from .encoding_utils import CropValues, IndexerType
     from .media import VideoInfo
     from .pipeline_cli import PipelineArgs
     from .profiles import Profile
@@ -82,6 +82,7 @@ def generate_metric_reference(
     temp_dir: Path,
     display: PipelineDisplay,
     log: logging.Logger,
+    indexer: IndexerType,
     crop_detect: bool = False,
     crop_values: CropValues | None = None,
 ) -> Path | None:
@@ -102,6 +103,7 @@ def generate_metric_reference(
         temp_dir: Temporary directory for intermediate files
         display: Pipeline display for progress UI
         log: Logger for status messages
+        indexer: Source filter to load each file with.
         crop_detect: Whether to apply cropdetect
         crop_values: Crop values for cropping
 
@@ -140,6 +142,7 @@ def generate_metric_reference(
                 fps=fps,
                 profile=lossless_profile,
                 video_info=video_info,
+                indexer=indexer,
                 mkvmerge_bin=mkvmerge_bin,
                 cwd=repo_root,
                 temp_dir=temp_dir,

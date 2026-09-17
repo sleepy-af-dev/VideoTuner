@@ -174,6 +174,26 @@ requires_vapoursynth = pytest.mark.skipif(
     reason="vapoursynth-portable is not provisioned; run tools/update_vs.py",
 )
 
+
+def _ffmpeg_has_libx265() -> bool:
+    """Decide once whether the ffmpeg on PATH can encode libx265."""
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return False
+    return "libx265" in proc.stdout
+
+
+requires_libx265 = pytest.mark.skipif(
+    not _ffmpeg_has_libx265(),
+    reason="ffmpeg on PATH has no libx265 encoder",
+)
+
 # Measured against vs-tonemap 0.2.0. A plugin update that moves these is a
 # result worth seeing rather than a test to relax: the numbers are the operating
 # point every SSIMULACRA2 score is computed at.
@@ -502,6 +522,7 @@ def _write_pq_pair(tmp_path: Path) -> tuple[Path, Path]:
 
 
 @requires_vapoursynth
+@requires_libx265
 def test_a_pq_input_with_no_mastering_display_is_still_scored(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

@@ -147,8 +147,7 @@ try:
         sys.exit(1)
 
     # Iterate frames and collect scores
-    for i in range(total_frames):
-        frame = result.get_frame(i)
+    for i, frame in enumerate(result.frames()):
         score = frame.props.get("SSIMULACRA2", None)
         if score is not None:
             # Print score to stdout for parsing

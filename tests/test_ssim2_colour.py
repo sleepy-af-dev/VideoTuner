@@ -276,3 +276,12 @@ def test_the_metric_call_is_unchanged() -> None:
 
 def test_sdr_scripts_carry_no_tonemapping() -> None:
     assert "core.tonemap." not in _script(LinearisationMode.SDR)
+
+
+def test_frames_are_requested_concurrently() -> None:
+    # A serial get_frame(i) loop forbids frame-level parallelism, which costs
+    # about 3x on the tonemapped path. clip.frames() prefetches across the
+    # core's worker threads and yields in order, so SCORE: lines stay ordered.
+    src = _script(LinearisationMode.PQ)
+    assert ".frames()" in src
+    assert "get_frame(" not in src

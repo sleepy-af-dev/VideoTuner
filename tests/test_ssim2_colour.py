@@ -135,36 +135,62 @@ requires_vapoursynth = pytest.mark.skipif(
 # point every SSIMULACRA2 score is computed at.
 #
 # _Range=0 is limited range, _Range=1 is full.
-_CASES = {
-    # mode: (clip construction, expected linear value)
+_CASES: dict[str, tuple[LinearisationMode, str, tuple[float, float, float]]] = {
+    # case: (mode, clip construction, expected linear value per channel)
     "sdr": (
+        LinearisationMode.SDR,
         "clip = core.std.BlankClip(format=vs.RGB24, width=64, height=64, "
         "length=1, color=[128, 128, 128])\n"
         "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=1, "
         "_Primaries=1, _Range=0)",
-        0.200013,
+        (0.200013, 0.200013, 0.200013),
     ),
     "pq": (
+        LinearisationMode.PQ,
         "clip = core.std.BlankClip(format=vs.RGB48, width=64, height=64, "
         "length=1, color=[32768, 32768, 32768])\n"
         "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=16, "
         "_Primaries=9, _Range=0, MasteringDisplayMaxLuminance=1000.0, "
         "MasteringDisplayMinLuminance=0.0001)",
-        0.504053,
+        (0.504053, 0.504053, 0.504053),
     ),
     "hlg": (
+        LinearisationMode.HLG,
         "clip = core.std.BlankClip(format=vs.RGB48, width=64, height=64, "
         "length=1, color=[32768, 32768, 32768])\n"
         "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=18, "
         "_Primaries=9, _Range=0)",
-        0.263935,
+        (0.263935, 0.263935, 0.263935),
+    ),
+    # Neutral grey is white-point invariant, so the cases above exercise the
+    # primaries conversion not at all, and on grey the failure the HLG chain is
+    # shaped to avoid separates correct from incorrect by 1.28e-4 against a
+    # 1e-4 tolerance. Saturated blue is where that failure has signal:
+    # linearising each channel through zimg's std-b67, instead of letting
+    # tonemap.HLG apply one OOTF scalar, measures (0.203753, 0.246870, 1.0)
+    # here. That is 0.14 away on red and green, and 1.76x the BT.709 luminance,
+    # which is the "76% too bright" ssim2_colour.py's HLG comment names.
+    #
+    # Tagged full range so peak blue is unambiguous rather than sitting past a
+    # limited-range white point.
+    "hlg-saturated-blue": (
+        LinearisationMode.HLG,
+        "clip = core.std.BlankClip(format=vs.RGB48, width=64, height=64, "
+        "length=1, color=[0, 0, 65535])\n"
+        "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=18, "
+        "_Primaries=9, _Range=1)",
+        (0.062000, 0.112774, 1.000000),
     ),
 }
 
 
-def _run_chain(tmp_path: Path, mode: LinearisationMode) -> dict[str, Any]:
+def test_every_conversion_has_an_executing_case() -> None:
+    assert {mode for mode, _, _ in _CASES.values()} == set(LinearisationMode)
+
+
+def _run_chain(tmp_path: Path, case: str) -> dict[str, Any]:
     """Execute the emitted chain under the portable VapourSynth."""
-    construction, _ = _CASES[mode.value]
+    mode, construction, _ = _CASES[case]
     script = tmp_path / "chain.vpy"
     _ = script.write_text(
         "import vapoursynth as vs\n"
@@ -210,11 +236,9 @@ def _run_chain(tmp_path: Path, mode: LinearisationMode) -> dict[str, Any]:
 
 
 @requires_vapoursynth
-@pytest.mark.parametrize("mode", list(LinearisationMode))
-def test_chain_emits_linear_rgbs_in_bt709_primaries(
-    tmp_path: Path, mode: LinearisationMode
-) -> None:
-    got = _run_chain(tmp_path, mode)
+@pytest.mark.parametrize("case", list(_CASES))
+def test_chain_emits_linear_rgbs_in_bt709_primaries(tmp_path: Path, case: str) -> None:
+    got = _run_chain(tmp_path, case)
 
     assert got["format"] == "RGBS"
     assert got["_Matrix"] == 0  # RGB
@@ -224,16 +248,13 @@ def test_chain_emits_linear_rgbs_in_bt709_primaries(
 
 
 @requires_vapoursynth
-@pytest.mark.parametrize("mode", list(LinearisationMode))
-def test_chain_produces_the_measured_linear_value(
-    tmp_path: Path, mode: LinearisationMode
-) -> None:
-    _, expected = _CASES[mode.value]
-    got = _run_chain(tmp_path, mode)
+@pytest.mark.parametrize("case", list(_CASES))
+def test_chain_produces_the_measured_linear_value(tmp_path: Path, case: str) -> None:
+    _, _, expected = _CASES[case]
+    got = _run_chain(tmp_path, case)
 
-    assert len(got["values"]) == 3
+    assert got["values"] == pytest.approx(expected, abs=1e-4)
     for channel in got["values"]:
-        assert channel == pytest.approx(expected, abs=1e-4)
         assert 0.0 <= channel <= 1.0
 
 
@@ -241,7 +262,7 @@ def test_chain_produces_the_measured_linear_value(
 def test_tonemapping_consumes_the_mastering_display_metadata(tmp_path: Path) -> None:
     # BT2390 reads src_min/src_max from these and removes them. If they survive,
     # the tone curve did not run.
-    got = _run_chain(tmp_path, LinearisationMode.PQ)
+    got = _run_chain(tmp_path, "pq")
 
     assert got["absent_MasteringDisplayMaxLuminance"] is True
     assert got["absent_MasteringDisplayMinLuminance"] is True
@@ -283,5 +304,28 @@ def test_frames_are_requested_concurrently() -> None:
     # about 3x on the tonemapped path. clip.frames() prefetches across the
     # core's worker threads and yields in order, so SCORE: lines stay ordered.
     src = _script(LinearisationMode.PQ)
-    assert ".frames()" in src
+    assert ".frames(" in src
     assert "get_frame(" not in src
+
+
+def test_the_frame_loop_bounds_what_it_holds() -> None:
+    # Uncapped, prefetch follows the core's thread count and every in-flight
+    # frame is an RGBS clip at source resolution, so peak memory scales with
+    # core count: measured at 19.2 GiB on 32 threads against 13.3 GiB capped.
+    src = _script(LinearisationMode.PQ)
+    assert "result.frames(prefetch=8, close=True)" in src
+
+
+def test_a_tonemapped_script_guards_on_the_plugin() -> None:
+    # Missing, the plugin raises AttributeError, which is swallowed upstream:
+    # the SSIMULACRA2 column comes back empty with nothing said on the
+    # terminal, and only HDR is affected, so it looks like it works.
+    src = _script(LinearisationMode.PQ)
+    assert "hasattr(core, 'tonemap')" in src
+    assert "vs-tonemap" in src
+    assert "tools/update_vs.py" in src
+
+
+def test_an_sdr_script_does_not_demand_the_tonemap_plugin() -> None:
+    # SDR never calls it, so requiring it would fail a run that works.
+    assert "hasattr(core, 'tonemap')" not in _script(LinearisationMode.SDR)

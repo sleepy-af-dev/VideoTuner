@@ -19,6 +19,7 @@ from videotuner.pipeline_display import (
     format_bitrate_percentage,
 )
 from videotuner.pipeline_types import MultiProfileResult
+from videotuner.ssim2_colour import SSIM2_TONEMAP_BACKEND
 from videotuner.vmaf_types import VmafFamily, VmafModelChoice
 
 
@@ -628,7 +629,7 @@ class TestSettingsSummaryReporting:
 
         display_settings_summary(console, args, tonemap_backend="GPU (libplacebo)")
 
-        assert "Tonemapping: GPU (libplacebo)" in strip_ansi(buffer.getvalue())
+        assert "Tonemapping (VMAF): GPU (libplacebo)" in strip_ansi(buffer.getvalue())
 
     def test_omits_backend_when_no_tonemapping_will_happen(self) -> None:
         """An SDR source never tonemaps, so naming a backend would be noise."""
@@ -637,7 +638,36 @@ class TestSettingsSummaryReporting:
 
         display_settings_summary(console, args, tonemap_backend=None)
 
-        assert "Tonemapping:" not in strip_ansi(buffer.getvalue())
+        assert "Tonemapping" not in strip_ansi(buffer.getvalue())
+
+    def test_names_the_ssim2_tonemapper_alongside_vmafs(self) -> None:
+        """The two metrics tonemap with different operators, and on a machine
+        with no usable GPU they disagree, so one unlabelled line describes half
+        the run."""
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(
+            console,
+            args,
+            tonemap_backend="CPU (zscale + hable)",
+            ssim2_tonemap=SSIM2_TONEMAP_BACKEND,
+        )
+
+        output = strip_ansi(buffer.getvalue())
+        assert "Tonemapping (VMAF): CPU (zscale + hable)" in output
+        assert f"Tonemapping (SSIMULACRA2): {SSIM2_TONEMAP_BACKEND}" in output
+
+    def test_omits_the_ssim2_line_when_ssim2_will_not_tonemap(self) -> None:
+        """SSIMULACRA2 converts only HDR, so an SDR run must not claim it."""
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(
+            console, args, tonemap_backend="GPU (libplacebo)", ssim2_tonemap=None
+        )
+
+        assert "Tonemapping (SSIMULACRA2)" not in strip_ansi(buffer.getvalue())
 
     def test_names_the_vmaf_model_generation(self) -> None:
         """The exact model depends on each comparison's resolution, but the

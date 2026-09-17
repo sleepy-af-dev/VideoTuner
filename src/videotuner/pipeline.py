@@ -75,6 +75,7 @@ from .pipeline_validation import (
 )
 from .profiles import Profile
 from .progress import PipelineDisplay, TranscriptFormatter
+from .ssim2_colour import SSIM2_TONEMAP_BACKEND
 from .ssimulacra2_assessment import SSIM2Result
 from .tonemapping import (
     format_tonemap_backend,
@@ -379,6 +380,14 @@ def _run_pipeline_body(
             use_gpu=has_vulkan_support(args.ffmpeg_bin)
         )
 
+    # SSIMULACRA2 tonemaps with a different operator, and --tonemap does not
+    # govern it: the metric is only defined on SDR, so an HDR input is always
+    # converted. Reported separately: otherwise the header names one backend
+    # for a run in which two of them ran.
+    ssim2_tonemap: str | None = None
+    if args.ssim2 and is_hdr_video(info.color_trc):
+        ssim2_tonemap = SSIM2_TONEMAP_BACKEND
+
     # Settle the model generation once. The probe costs about 0.07s and must not
     # run per CRF iteration; it is skipped entirely when its answer cannot
     # change anything.
@@ -411,6 +420,7 @@ def _run_pipeline_body(
         multi_profile_display,
         input_path.name,
         tonemap_backend=tonemap_backend,
+        ssim2_tonemap=ssim2_tonemap,
         vmaf_choice=vmaf_choice,
     )
 

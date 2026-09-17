@@ -57,10 +57,16 @@ VMAF_MAX_THREADS: int = 16
 # 47 separates 47.952/48/50/59.94/60 from 24/25/30 without landing on any of them.
 VMAF_HFR_FPS_THRESHOLD: float = 47.0
 
-# Reference white for the tonemapped SSIMULACRA2 input, in cd/m2. BT.2408 puts
-# HDR reference white at 203 cd/m2 and vs-tonemap scales its output so that
-# becomes 1.0; this is the SDR display luminance the conversion is anchored to.
-SSIM2_NOMINAL_LUMINANCE = 100
+# =============================================================================
+# SSIMULACRA2 Assessment Constants
+# =============================================================================
+
+# Peak luminance of the SDR display the conversion is anchored to, in cd/m2.
+# It is zimg's and vs-tonemap's `nominal_luminance`: the absolute luminance a
+# code value of 1.0 stands for on the SDR side, and 100 cd/m2 is the reference
+# SDR display. It is not the tone curve's destination peak, which BT.2390 takes
+# separately as `dst_max` and defaults to 203 cd/m2, BT.2408 reference white.
+SSIM2_NOMINAL_LUMINANCE: int = 100
 
 # =============================================================================
 # Resolution Constants

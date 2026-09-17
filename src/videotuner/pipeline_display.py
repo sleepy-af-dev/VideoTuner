@@ -121,6 +121,7 @@ def display_settings_summary(
     multi_profile_display: str = "",
     source_name: str = "",
     tonemap_backend: str | None = None,
+    ssim2_tonemap: str | None = None,
     vmaf_choice: VmafModelChoice | None = None,
 ) -> None:
     """Display active settings summary to console.
@@ -130,9 +131,14 @@ def display_settings_summary(
         args: Pipeline arguments
         multi_profile_display: Pre-formatted string showing profiles/groups for multi-profile mode
         source_name: Name of the source video file
-        tonemap_backend: Label for the tonemapping backend in use, or None when
-            this run will not tonemap. The two backends are different operators
-            and move HDR scores, so a result is not interpretable without it.
+        tonemap_backend: Label for the tonemapping backend VMAF will use, or
+            None when VMAF will not tonemap. The two backends are different
+            operators and move HDR scores, so a result is not interpretable
+            without it.
+        ssim2_tonemap: Label for the operator SSIMULACRA2 will tonemap with, or
+            None when it will not. It is a different one from VMAF's and is not
+            governed by ``--tonemap``, so naming only VMAF's would mislabel
+            half the run.
         vmaf_choice: Resolved VMAF model generation, or None when VMAF is off.
             The exact model varies per comparison, but the generation is settled
             before the run and decides whether a score compares with an old one.
@@ -184,8 +190,12 @@ def display_settings_summary(
             console.print(f"  VMAF models: {vmaf_choice.family}")
     if args.tonemap != get_default("tonemap"):
         console.print(f"  Tonemap: {args.tonemap}")
+    # Named per metric: the two tonemap with different operators, and only
+    # VMAF's is under --tonemap.
     if tonemap_backend is not None:
-        console.print(f"  Tonemapping: {tonemap_backend}")
+        console.print(f"  Tonemapping (VMAF): {tonemap_backend}")
+    if ssim2_tonemap is not None:
+        console.print(f"  Tonemapping (SSIMULACRA2): {ssim2_tonemap}")
 
     # Log non-default guard bands
     if args.guard_start_percent > 0:

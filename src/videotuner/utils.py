@@ -588,8 +588,10 @@ def master_display_arg(
 ) -> str | None:
     """Build x265's ``--master-display`` argument, or nothing.
 
-    The single gate on whether mastering display metadata survives into an
-    encode: both probed fields must be present and the pair must parse.
+    The single gate on whether the probe's mastering display metadata
+    survives into an encode: both probed fields must be present and the pair
+    must parse. A profile that names ``master-display`` in its own settings
+    supplies its own value instead, bypassing this gate.
     A caller that needs to know whether the properties will reach a decoded
     frame asks this rather than repeating the test.
 

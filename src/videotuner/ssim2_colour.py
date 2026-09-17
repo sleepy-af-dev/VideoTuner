@@ -87,7 +87,9 @@ def missing_mastering_display(info: VideoInfo) -> bool:
     """Say whether the scored clips will carry no mastering display.
 
     The reference and the distorted encode both take their metadata from
-    x265, which writes it from this same probe. When the probe yields no
+    x265, which writes it from this same probe, unless a profile names
+    ``master-display`` in its own settings, in which case that encode
+    carries the profile's value instead. When the probe yields no
     ``--master-display`` argument, neither file carries the properties, and
     ``tonemap.BT2390`` has no peak luminance to build its curve from.
 

@@ -135,6 +135,9 @@ core = vs.core
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
+# Only a failure to open a file can be answered by switching indexers, so the
+# hint is scoped to the loads. Everything after them - the colour chain, the
+# tone curve, the metric - fails for reasons no indexer change can fix.
 try:
     print("[vszip] Loading reference video...", file=sys.stderr, flush=True)
     # Load reference and distorted videos
@@ -144,7 +147,18 @@ try:
     print("[vszip] Loading distorted video...", file=sys.stderr, flush=True)
     dis = {indexer_spec(indexer).source_expr(str(dis_path.resolve()), str(dis_cache))}
     print(f"[vszip] Distorted: {{dis.width}}x{{dis.height}}, {{dis.format.name}}, {{len(dis)}} frames", file=sys.stderr, flush=True)
+except Exception as e:
+    print(f"ERROR: {{e}}", file=sys.stderr, flush=True)
+    print(
+        "HINT: this run used the {display_name} indexer."
+        " If the input cannot be read, try --indexer {other.value}",
+        file=sys.stderr, flush=True,
+    )
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
 
+try:
     # Validate dimensions match
     if ref.width != dis.width or ref.height != dis.height:
         print(f"ERROR: Resolution mismatch - ref={{ref.width}}x{{ref.height}}, dis={{dis.width}}x{{dis.height}}", file=sys.stderr, flush=True)
@@ -194,11 +208,6 @@ try:
 
 except Exception as e:
     print(f"ERROR: {{e}}", file=sys.stderr, flush=True)
-    print(
-        "HINT: this run used the {display_name} indexer."
-        " If the input cannot be read, try --indexer {other.value}",
-        file=sys.stderr, flush=True,
-    )
     import traceback
     traceback.print_exc()
     sys.exit(1)
@@ -336,9 +345,10 @@ def _run_vszip_assessment(
         # Clean up temporary files
         if vpy_path.exists():
             vpy_path.unlink()
-        # Clean up cache files
-        if ref_cache.exists():
-            ref_cache.unlink()
+        # Only the distorted index. The reference is one file for the whole CRF
+        # search and the largest in the run, so deleting its index here meant
+        # rebuilding it on every iteration. What is left behind is one index in
+        # the job's own temp folder, which no later job reads.
         if dis_cache.exists():
             dis_cache.unlink()
 
@@ -397,6 +407,13 @@ def assess_ssim2_concatenated(
     # sides compute them.
     spec = indexer_spec(indexer)
     ref_cache, dis_cache = _vszip_cache_paths(temp_dir, indexer)
+    # The distorted path holds a different encode every iteration, so anything
+    # left at its index path describes a file that is gone. ffms2 rejects a
+    # mismatched index outright ("The index does not match the source file")
+    # rather than rebuilding it, and that failure is swallowed into a dropped
+    # metric. The reference index is kept instead: it is built from a file that
+    # does not change for the life of the job.
+    dis_cache.unlink(missing_ok=True)
     for label, path, cache in (
         ("reference", reference_path, ref_cache),
         ("distorted", distorted_path, dis_cache),

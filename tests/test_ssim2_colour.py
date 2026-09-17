@@ -346,6 +346,17 @@ def test_ssim2_script_loads_through_the_selected_indexer() -> None:
     assert "core.lsmas.LWLibavSource(" not in src
 
 
+def test_the_indexer_hint_only_answers_a_failed_load() -> None:
+    # The likeliest HDR failure is a PQ input with no mastering display
+    # metadata, where the tone curve raises for want of a peak luminance.
+    # Switching indexers cannot help with that, or with anything else the
+    # colour chain or the metric raises, so the hint sits with the loads and
+    # the handler around the rest of the script does not repeat it.
+    src = _script(LinearisationMode.PQ)
+    assert src.count("HINT:") == 1
+    assert src.index("dis = core.") < src.index("HINT:") < src.index("ref = prepare(")
+
+
 def test_ssim2_script_can_still_load_through_lsmash() -> None:
     src = _build_ssim2_script(
         ref_path=Path("ref.mkv"),

@@ -10,6 +10,7 @@ import tempfile
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from io import TextIOWrapper
 from pathlib import Path
 from typing import IO
@@ -277,6 +278,74 @@ def create_temp_encode_paths(
     return vpy_path, bitstream_path
 
 
+class IndexerType(StrEnum):
+    """Which source filter reads and indexes a video file."""
+
+    FFMS2 = "ffms2"
+    LSMASH = "lsmash"
+
+
+@dataclass(frozen=True)
+class IndexerSpec:
+    """How one indexer is called, what it names its index, and what builds it.
+
+    Attributes:
+        source_call: Format string for the VapourSynth source-filter call,
+            taking ``source`` and ``cache`` fields.
+        index_suffix: Extension for the index file. The two differ, so
+            switching indexers cannot collide.
+        indexer_exe: Executable that builds an index up front, with progress.
+        plugin_dll: Plugin the source filter lives in.
+    """
+
+    source_call: str
+    index_suffix: str
+    indexer_exe: str
+    plugin_dll: str
+
+    def source_expr(self, source_path: str, cache_file: str) -> str:
+        """Build the VapourSynth expression that loads a file.
+
+        Args:
+            source_path: Absolute path to the video file.
+            cache_file: Absolute path to its index.
+
+        Returns:
+            A VapourSynth source-filter call.
+        """
+        return self.source_call.format(source=source_path, cache=cache_file)
+
+
+_INDEXERS: dict[IndexerType, IndexerSpec] = {
+    IndexerType.FFMS2: IndexerSpec(
+        source_call='core.ffms2.Source(r"{source}", cachefile=r"{cache}")',
+        index_suffix=".ffindex",
+        indexer_exe="ffmsindex.exe",
+        plugin_dll="ffms2.dll",
+    ),
+    IndexerType.LSMASH: IndexerSpec(
+        source_call=(
+            'core.lsmas.LWLibavSource(source=r"{source}", cachefile=r"{cache}")'
+        ),
+        index_suffix=".lwi",
+        indexer_exe="LSMASHSource_indexing.exe",
+        plugin_dll="LSMASHSource.dll",
+    ),
+}
+
+
+def indexer_spec(indexer: IndexerType) -> IndexerSpec:
+    """Look up how an indexer is called and indexed.
+
+    Args:
+        indexer: The selected indexer.
+
+    Returns:
+        Its specification.
+    """
+    return _INDEXERS[indexer]
+
+
 @dataclass(frozen=True)
 class VapourSynthEnv:
     """Unified VapourSynth environment for encoding and assessment tools.
@@ -294,6 +363,7 @@ class VapourSynthEnv:
     vs_plugin_dir: Path
     vsscript_dll: Path
     ffms2_dll: Path
+    lsmash_dll: Path
     vspipe_bin: Path
 
     @classmethod
@@ -322,6 +392,7 @@ class VapourSynthEnv:
             vs_plugin_dir=vs_plugin_dir,
             vsscript_dll=package_dir / "vsscript.dll",
             ffms2_dll=vs_plugin_dir / "ffms2.dll",
+            lsmash_dll=vs_plugin_dir / "LSMASHSource.dll",
             vspipe_bin=package_dir / "vspipe.exe",
         )
 
@@ -358,7 +429,8 @@ class VapourSynthEnv:
         """Validate that required VapourSynth files exist.
 
         Raises:
-            FileNotFoundError: If vsscript.dll or ffms2.dll is missing.
+            FileNotFoundError: If vsscript.dll, ffms2.dll, or LSMASHSource.dll
+                is missing.
         """
         if not self.vsscript_dll.exists():
             raise FileNotFoundError(
@@ -366,6 +438,10 @@ class VapourSynthEnv:
             )
         if not self.ffms2_dll.exists():
             raise FileNotFoundError(f"FFMS2 plugin not found at: {self.ffms2_dll}")
+        if not self.lsmash_dll.exists():
+            raise FileNotFoundError(
+                f"LSMASHSource plugin not found at: {self.lsmash_dll}"
+            )
         if not self.vspipe_bin.exists():
             raise FileNotFoundError(f"vspipe not found at: {self.vspipe_bin}")
 
@@ -447,7 +523,8 @@ class EncoderPaths:
         """Validate that all required encoder files exist.
 
         Raises:
-            FileNotFoundError: If encoder binary, vsscript.dll, or ffms2.dll is missing.
+            FileNotFoundError: If encoder binary, vsscript.dll, ffms2.dll, or
+                LSMASHSource.dll is missing.
         """
         if not self.encoder_bin.exists():
             raise FileNotFoundError(
@@ -567,6 +644,7 @@ def build_sampling_vpy_script(
     fps: float,
     cwd: Path | None = None,
     crop_values: CropValues | None = None,
+    indexer: IndexerType = IndexerType.FFMS2,
 ) -> str:
     """Build VapourSynth script for periodic frame sampling.
 
@@ -587,6 +665,7 @@ def build_sampling_vpy_script(
         fps: Video framerate
         cwd: Working directory for path resolution
         crop_values: Optional crop values to apply
+        indexer: Source filter to load each file with.
 
     Returns:
         VapourSynth script content as string
@@ -609,7 +688,9 @@ def build_sampling_vpy_script(
         abs_cache_file = resolve_absolute_path(source.cache_file, cwd)
         name = f"sampled{index}"
         names.append(name)
-        load = f'core.ffms2.Source(r"{abs_source_path}", cachefile=r"{abs_cache_file}")'
+        load = indexer_spec(indexer).source_expr(
+            str(abs_source_path), str(abs_cache_file)
+        )
         trim = f"[{source.usable_range.start}:{source.usable_range.end}]"
         vpy_lines += [
             f"clip{index} = {load}",

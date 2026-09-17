@@ -395,6 +395,24 @@ class TestVapourSynthEnv:
                 env.validate()
             assert "ffms2.dll" in str(exc_info.value)
 
+    def test_validate_raises_when_lsmash_missing(self):
+        """Test validate raises FileNotFoundError when LSMASHSource.dll is missing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = Path(tmpdir)
+            vs_dir = cwd / "vapoursynth-portable"
+            plugins_dir = vs_dir / "vs-plugins"
+            plugins_dir.mkdir(parents=True)
+            package_dir = vs_dir / VS_PACKAGE_SUBDIR
+            package_dir.mkdir(parents=True, exist_ok=True)
+            (package_dir / "vsscript.dll").touch()
+            (plugins_dir / "ffms2.dll").touch()
+
+            env = VapourSynthEnv.from_cwd(cwd)
+
+            with pytest.raises(FileNotFoundError) as exc_info:
+                env.validate()
+            assert "LSMASHSource.dll" in str(exc_info.value)
+
     def test_validate_raises_when_vspipe_missing(self):
         """Test validate raises FileNotFoundError when vspipe.exe is missing."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -406,6 +424,7 @@ class TestVapourSynthEnv:
             package_dir.mkdir(parents=True, exist_ok=True)
             (package_dir / "vsscript.dll").touch()
             (plugins_dir / "ffms2.dll").touch()
+            (plugins_dir / "LSMASHSource.dll").touch()
 
             env = VapourSynthEnv.from_cwd(cwd)
 
@@ -425,6 +444,7 @@ class TestVapourSynthEnv:
             (package_dir / "vsscript.dll").touch()
             (package_dir / "vspipe.exe").touch()
             (plugins_dir / "ffms2.dll").touch()
+            (plugins_dir / "LSMASHSource.dll").touch()
 
             env = VapourSynthEnv.from_cwd(cwd)
             # Should not raise
@@ -520,6 +540,7 @@ class TestEncoderPaths:
             (package_dir / "vsscript.dll").touch()
             (package_dir / "vspipe.exe").touch()
             (plugins_dir / "ffms2.dll").touch()
+            (plugins_dir / "LSMASHSource.dll").touch()
 
             paths = EncoderPaths.from_cwd(cwd, EncoderType.X265)
             # Should not raise
@@ -880,3 +901,75 @@ class TestBuildSamplingVpyScriptManySources:
 
         assert script.count("std.Crop") == 1
         assert script.index("std.Splice") < script.index("std.Crop")
+
+
+from videotuner.encoding_utils import (
+    IndexerType,
+    indexer_spec,
+)
+
+
+def test_each_indexer_has_its_own_index_suffix() -> None:
+    # Different suffixes mean switching indexers cannot collide: an index of
+    # the other kind stays on disk unused rather than being read as the wrong
+    # format.
+    suffixes = {indexer_spec(i).index_suffix for i in IndexerType}
+    assert suffixes == {".ffindex", ".lwi"}
+
+
+def test_ffms2_spec_names_its_own_filter_and_tools() -> None:
+    spec = indexer_spec(IndexerType.FFMS2)
+    assert spec.index_suffix == ".ffindex"
+    assert spec.indexer_exe == "ffmsindex.exe"
+    assert spec.plugin_dll == "ffms2.dll"
+
+
+def test_lsmash_spec_names_its_own_filter_and_tools() -> None:
+    spec = indexer_spec(IndexerType.LSMASH)
+    assert spec.index_suffix == ".lwi"
+    assert spec.indexer_exe == "LSMASHSource_indexing.exe"
+    assert spec.plugin_dll == "LSMASHSource.dll"
+
+
+def test_ffms2_source_expression_is_positional() -> None:
+    expr = indexer_spec(IndexerType.FFMS2).source_expr("C:/in.mkv", "C:/in.ffindex")
+    assert expr == 'core.ffms2.Source(r"C:/in.mkv", cachefile=r"C:/in.ffindex")'
+
+
+def test_lsmash_source_expression_names_its_source_argument() -> None:
+    expr = indexer_spec(IndexerType.LSMASH).source_expr("C:/in.mkv", "C:/in.lwi")
+    expected = 'core.lsmas.LWLibavSource(source=r"C:/in.mkv", cachefile=r"C:/in.lwi")'
+    assert expr == expected
+
+
+def test_sampling_script_uses_the_selected_filter(tmp_path: Path) -> None:
+    from videotuner.encoding_utils import SampledSource, UsableRange
+
+    source = SampledSource(
+        path=tmp_path / "in.mkv",
+        cache_file=tmp_path / "in.lwi",
+        usable_range=UsableRange(start=0, end=100, frame_count=100),
+    )
+    script = build_sampling_vpy_script(
+        [source],
+        interval_frames=10,
+        region_frames=2,
+        fps=24.0,
+        indexer=IndexerType.LSMASH,
+    )
+    assert "core.lsmas.LWLibavSource(" in script
+    assert "core.ffms2.Source(" not in script
+
+
+def test_sampling_script_defaults_to_ffms2(tmp_path: Path) -> None:
+    from videotuner.encoding_utils import SampledSource, UsableRange
+
+    source = SampledSource(
+        path=tmp_path / "in.mkv",
+        cache_file=tmp_path / "in.ffindex",
+        usable_range=UsableRange(start=0, end=100, frame_count=100),
+    )
+    script = build_sampling_vpy_script(
+        [source], interval_frames=10, region_frames=2, fps=24.0
+    )
+    assert "core.ffms2.Source(" in script

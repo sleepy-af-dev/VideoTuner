@@ -15,9 +15,11 @@ from rich.table import Table
 
 from .constants import METRIC_DECIMALS
 from .crf_search import CRF_CEILING, QualityTarget
+from .encoding_utils import indexer_spec
 from .pipeline_cli import DEFAULT_CRF_INTERVAL, DEFAULT_CRF_START_VALUE, get_default
 
 if TYPE_CHECKING:
+    from .encoding_utils import IndexerType
     from .pipeline_types import Budget, BudgetPoint, JobResult, MultiProfileResult
     from .vmaf_types import VmafModelChoice
 
@@ -55,6 +57,7 @@ class PipelineArgsProtocol(Protocol):
     ssim2_region_frames: int
     vmaf_model: str | None
     tonemap: str
+    indexer: IndexerType
     guard_start_percent: float
     guard_end_percent: float
     guard_seconds: float
@@ -165,6 +168,11 @@ def display_settings_summary(
     console.print(f"  Assessments: {', '.join(assessments)}")
 
     console.print(f"  CropDetect: {'Enabled' if args.crop_detect else 'Disabled'}")
+
+    # Every frame the run reads comes through the indexer, so an archived run
+    # folder that does not name it cannot be told apart from a default one.
+    if args.indexer != get_default("indexer"):
+        console.print(f"  Indexer: {indexer_spec(args.indexer).display_name}")
 
     # Log non-default sampling parameters
     if args.vmaf_interval_frames != get_default("vmaf_interval_frames"):

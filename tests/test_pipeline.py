@@ -7,6 +7,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from videotuner.encoding_utils import IndexerType
 from videotuner.pipeline_cli import (
     DEFAULT_CRF_INTERVAL,
     DEFAULT_CRF_START_VALUE,
@@ -713,3 +714,23 @@ class TestSettingsSummaryReporting:
         )
 
         assert "vmaf_v1.0.16_5d0h" in strip_ansi(buffer.getvalue())
+
+    def test_names_a_non_default_indexer(self) -> None:
+        """Every frame in the run is read through it, so an archived run folder
+        has to say which one, and by the name a user sees rather than the CLI
+        token."""
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"), indexer=IndexerType.LSMASH)
+
+        display_settings_summary(console, args)
+
+        assert "Indexer: LSMASHSource" in strip_ansi(buffer.getvalue())
+
+    def test_omits_the_indexer_when_it_is_the_default(self) -> None:
+        """The header reports what differs from the defaults, nothing else."""
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(console, args)
+
+        assert "Indexer" not in strip_ansi(buffer.getvalue())

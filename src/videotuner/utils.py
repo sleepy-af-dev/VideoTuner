@@ -583,6 +583,29 @@ def parse_master_display_metadata(primaries_str: str, luminance_str: str) -> str
         return None
 
 
+def master_display_arg(
+    primaries_str: str | None, luminance_str: str | None
+) -> str | None:
+    """Build x265's ``--master-display`` argument, or nothing.
+
+    The single gate on whether mastering display metadata survives into an
+    encode: both probed fields must be present and the pair must parse.
+    A caller that needs to know whether the properties will reach a decoded
+    frame asks this rather than repeating the test.
+
+    Args:
+        primaries_str: Mastering display colour primaries from the probe.
+        luminance_str: Mastering display luminance from the probe.
+
+    Returns:
+        The formatted argument, or None when either field is absent or the
+        pair cannot be parsed.
+    """
+    if not primaries_str or not luminance_str:
+        return None
+    return parse_master_display_metadata(primaries_str, luminance_str)
+
+
 def use_utf8_output(*streams: TextIO) -> None:
     """Make the given text streams able to encode anything the UI prints.
 

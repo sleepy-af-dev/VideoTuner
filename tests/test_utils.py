@@ -15,6 +15,7 @@ from videotuner.utils import (
     ensure_dir,
     fit_path_segment,
     job_folder_budget,
+    master_display_arg,
     parse_master_display_metadata,
     resolve_run_folder,
     use_utf8_output,
@@ -326,3 +327,24 @@ class TestUseUtf8Output:
         Console(file=stream, width=80).print(
             "VMAF Mean \u2265 95.0 \u2713 \u2717 \u26a0"
         )
+
+
+def test_master_display_arg_formats_a_declared_display() -> None:
+    got = master_display_arg("BT.2020", "min: 0.0001 cd/m2, max: 1000 cd/m2")
+    assert got is not None
+    assert got.startswith("G(")
+    assert got.endswith("L(10000000,1)")
+
+
+def test_master_display_arg_is_none_without_primaries() -> None:
+    # x265 writes --master-display only when both fields parse, so a
+    # half-declared display reaches a decoded frame as no properties at all.
+    assert master_display_arg(None, "min: 0.0001 cd/m2, max: 1000 cd/m2") is None
+
+
+def test_master_display_arg_is_none_without_luminance() -> None:
+    assert master_display_arg("BT.2020", None) is None
+
+
+def test_master_display_arg_is_none_when_the_pair_cannot_be_parsed() -> None:
+    assert master_display_arg("BT.2020", "not a luminance string") is None

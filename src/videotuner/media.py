@@ -36,6 +36,11 @@ class VideoInfo:
     chroma_location: int | None = None  # x265 chromaloc value (0-5)
     video_bitrate_kbps: float | None = None  # Video stream bitrate in kbps
     frame_count: int | None = None  # Total frame count from container metadata
+    # True when no track reported a count and `frame_count` is the estimate
+    # below rather than a fact. The estimate is a rate times a duration, which
+    # no single rate describes for a variable frame rate file, so a caller that
+    # can obtain the real count cheaply should prefer it.
+    frame_count_estimated: bool = False
     # HDR metadata
     mastering_display_color_primaries: str | None = None
     mastering_display_luminance: str | None = None
@@ -86,6 +91,9 @@ def combine_video_info(infos: Sequence[VideoInfo]) -> VideoInfo:
         first,
         duration=total_duration,
         frame_count=total_frames,
+        # `replace` would otherwise copy the first file's flag, so a later
+        # file's estimate would vanish and the total be trusted as exact.
+        frame_count_estimated=any(i.frame_count_estimated for i in infos),
         video_bitrate_kbps=bitrate,
     )
 
@@ -405,10 +413,12 @@ def parse_video_info(
         )
 
     # Fallback: estimate from the frame rate when no track reported a count
+    frame_count_estimated = False
     if frame_count is None:
         frame_count = estimate_frame_count(
             fps, track_duration=track_duration, container_duration=duration
         )
+        frame_count_estimated = frame_count is not None
 
     return VideoInfo(
         fps=fps,
@@ -423,6 +433,7 @@ def parse_video_info(
         chroma_location=chroma_loc,
         video_bitrate_kbps=video_bitrate_kbps,
         frame_count=frame_count,
+        frame_count_estimated=frame_count_estimated,
         mastering_display_color_primaries=mastering_display_primaries,
         mastering_display_luminance=mastering_display_luminance,
         maximum_content_light_level=max_cll,

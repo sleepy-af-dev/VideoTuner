@@ -383,3 +383,29 @@ class TestCombineVideoInfo:
             [_info(100.0, frame_count=2400), _info(50.0, frame_count=None)]
         )
         assert combined.frame_count is None
+
+
+class TestEstimatedCountFlag:
+    """An estimated frame count must be distinguishable from a reported one."""
+
+    def test_a_reported_count_is_not_marked_estimated(self):
+        info = VideoInfo(fps=24.0, duration=10.0, frame_count=240)
+        assert info.frame_count_estimated is False
+
+    def test_a_combined_count_is_estimated_if_any_part_was(self):
+        # replace() copies the first info's flag, so a later file's estimate
+        # would otherwise be lost and the combined count trusted wrongly.
+        exact = VideoInfo(fps=24.0, duration=10.0, frame_count=240)
+        guessed = VideoInfo(
+            fps=24.0,
+            duration=10.0,
+            frame_count=240,
+            frame_count_estimated=True,
+        )
+        assert combine_video_info([exact, guessed]).frame_count_estimated is True
+        assert combine_video_info([guessed, exact]).frame_count_estimated is True
+
+    def test_a_combined_count_is_exact_when_every_part_was(self):
+        exact = VideoInfo(fps=24.0, duration=10.0, frame_count=240)
+        combined = combine_video_info([exact, exact])
+        assert combined.frame_count_estimated is False

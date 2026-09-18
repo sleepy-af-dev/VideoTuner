@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from datetime import datetime
 from itertools import count
 from pathlib import Path
@@ -20,15 +21,18 @@ from .crf_search import (
 )
 from .encoding_utils import (
     CropValues,
+    IndexerType,
     SampledSource,
     UsableRange,
     build_source_index,
     combine_crop_values,
     indexer_spec,
     is_hdr_video,
+    read_indexed_frame_count,
 )
 from .media import (
     InvalidVideoFileError,
+    VideoInfo,
     combine_video_info,
     get_frame_count,
     parse_video_info,
@@ -188,6 +192,45 @@ def _report_within_budget(
         name_profile=len({p.profile_name for p in pooled}) > 1,
         searched=searched,
     )
+
+
+def _with_counted_frames(
+    source: Path,
+    cache_file: Path,
+    indexer: IndexerType,
+    info: VideoInfo,
+    log: logging.Logger,
+) -> VideoInfo:
+    """Replace an estimated frame count with the one the index reports.
+
+    Args:
+        source: Video whose count was estimated.
+        cache_file: Its index, already built.
+        indexer: Source filter to open it with.
+        info: Probe carrying the estimate.
+        log: Logger for the difference, when there is one.
+
+    Returns:
+        ``info`` with the true count, or unchanged if it could not be read.
+    """
+    counted = read_indexed_frame_count(
+        source, cache_file, indexer=indexer, cwd=Path.cwd()
+    )
+    if counted is None or counted == info.frame_count:
+        return info
+
+    # Worth saying out loud: the estimate decides how many samples are planned,
+    # and an overshoot silently costs coverage when the trim clamps. A user who
+    # sees this knows why their sample count moved.
+    warn_user(
+        log,
+        "%s reports no frame count. Estimated %s frames from its rate and "
+        "duration; the index holds %d. Using the index.",
+        source.name,
+        info.frame_count,
+        counted,
+    )
+    return replace(info, frame_count=counted, frame_count_estimated=False)
 
 
 def run_pipeline(
@@ -501,6 +544,18 @@ def _run_pipeline_body(
                     f"[cyan]Using Existing {spec.display_name} Index[/cyan] "
                     f"({source.name})"
                 )
+
+        # A source that reported no frame count was estimated as a rate times
+        # a duration, which no single rate describes for a variable frame rate
+        # file. The index is on disk now, so the real count is a cheap read
+        # away, and it is the number every sampling script will see.
+        infos = [
+            _with_counted_frames(source, cache_files[source], args.indexer, info, log)
+            if info.frame_count_estimated
+            else info
+            for source, info in zip(source_paths, infos, strict=True)
+        ]
+        info = combine_video_info(infos)
 
     log_section(log, "Analysis")
 

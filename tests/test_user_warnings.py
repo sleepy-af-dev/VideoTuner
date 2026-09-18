@@ -15,28 +15,37 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "videotuner"
 
 # Every warning that reports an assumption, a fallback, or a reduction in what
 # gets measured. A site added to this list without being converted fails here.
+# Each row is a module, a fragment of the message, and the number of
+# warn_user calls in that module whose message contains it. The count is what
+# makes this a guard: membership alone cannot tell "both converted" from "one
+# reverted" when two sites share their text, which profiles.py's pair does.
+# A count is also what catches a fragment that stops matching because the
+# message was reworded.
+#
+# Counts above 1 are each a real pair, not an accident:
+#   profiles.py            the HDR/SDR dict check and its x264 twin
+#   tonemapping.py         "ffmpeg not found" also ends "...no Vulkan support"
+#   vmaf_assessment.py     the same, for "...no VMAF v1 support"
 USER_FACING_WARNINGS = {
-    ("create_encodes.py", "No sample frames to analyse"),
-    ("create_encodes.py", "cropdetect produced no output"),
-    ("encoding_utils.py", "the index will be built automatically"),
-    ("media.py", "Unknown chroma_location"),
-    ("pipeline.py", "VMAF v1 models not found"),
-    ("pipeline_iteration.py", "VMAF reference path is None"),
-    ("pipeline_iteration.py", "SSIM2 reference path is None"),
-    ("pipeline_iteration.py", "No bitrate data available from shared"),
-    ("pipeline_iteration.py", "No bitrate data available from concatenated"),
-    ("pipeline_validation.py", "Usable frames"),
-    ("pipeline_validation.py", "No %s samples possible"),
-    # Same fragment covers both sites: profiles.py:339 (HDR/SDR dict) and
-    # profiles.py:471 (its x264 twin) warn with identical text.
-    ("profiles.py", "Skipping parameter"),
-    ("tonemapping.py", "assuming no Vulkan support"),
-    ("tonemapping.py", "ffmpeg not found"),
-    ("utils.py", "Could not parse luminance string"),
-    ("utils.py", "Could not read mastering display primaries"),
-    ("vmaf_assessment.py", "assuming no VMAF v1 support"),
-    ("vmaf_assessment.py", "ffmpeg not found"),
-    ("x264_params.py", "does not support %d-bit encoding"),
+    ("create_encodes.py", "No sample frames to analyse", 1),
+    ("create_encodes.py", "cropdetect produced no output", 1),
+    ("encoding_utils.py", "the index will be built automatically", 1),
+    ("media.py", "Unknown chroma_location", 1),
+    ("pipeline.py", "VMAF v1 models not found", 1),
+    ("pipeline_iteration.py", "VMAF reference path is None", 1),
+    ("pipeline_iteration.py", "SSIM2 reference path is None", 1),
+    ("pipeline_iteration.py", "No bitrate data available from shared", 1),
+    ("pipeline_iteration.py", "No bitrate data available from concatenated", 1),
+    ("pipeline_validation.py", "Usable frames", 1),
+    ("pipeline_validation.py", "No %s samples possible", 1),
+    ("profiles.py", "Skipping parameter", 2),
+    ("tonemapping.py", "assuming no Vulkan support", 2),
+    ("tonemapping.py", "ffmpeg not found", 1),
+    ("utils.py", "Could not parse luminance string", 1),
+    ("utils.py", "Could not read mastering display primaries", 1),
+    ("vmaf_assessment.py", "assuming no VMAF v1 support", 2),
+    ("vmaf_assessment.py", "ffmpeg not found", 1),
+    ("x264_params.py", "does not support %d-bit encoding", 1),
 }
 
 # vmaf_assessment.py's "Low confidence resolution classification" is
@@ -48,33 +57,49 @@ USER_FACING_WARNINGS = {
 # a healthy run. Leave it as a plain log.warning.
 
 
-def _warn_user_texts(path: Path) -> list[str]:
-    """Every string literal passed to a warn_user call in one module."""
+def _warn_user_messages(path: Path) -> list[str]:
+    """The message of every warn_user call in one module.
+
+    Each call contributes exactly one string: its literal fragments joined.
+    A message built from implicitly concatenated literals, or carrying an
+    f-string, therefore still counts once rather than once per fragment.
+
+    Args:
+        path: Module to read.
+
+    Returns:
+        One joined message per warn_user call, in source order.
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    found: list[str] = []
+    messages: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
         if not (isinstance(func, ast.Name) and func.id == "warn_user"):
             continue
-        for arg in node.args:
-            found.extend(
+        messages.append(
+            "".join(
                 piece.value
+                for arg in node.args
                 for piece in ast.walk(arg)
                 if isinstance(piece, ast.Constant) and isinstance(piece.value, str)
             )
-    return found
+        )
+    return messages
 
 
 def test_every_user_facing_warning_calls_warn_user() -> None:
-    missing: list[tuple[str, str]] = []
-    for filename, fragment in sorted(USER_FACING_WARNINGS):
-        texts = _warn_user_texts(SRC / filename)
-        if not any(fragment in text for text in texts):
-            missing.append((filename, fragment))
+    wrong: list[str] = []
+    for filename, fragment, expected in sorted(USER_FACING_WARNINGS):
+        messages = _warn_user_messages(SRC / filename)
+        found = sum(1 for message in messages if fragment in message)
+        if found != expected:
+            wrong.append(
+                f"{filename}: {fragment!r} in {found} calls, expected {expected}"
+            )
 
-    assert missing == []
+    assert wrong == []
 
 
 def _handler_and_sink() -> tuple[UserWarningHandler, io.StringIO]:

@@ -37,6 +37,7 @@ from .media import (
     get_bit_depth_from_pix_fmt,
     parse_video_info,
 )
+from .metric_colour import linearisation_mode
 from .tool_parsers import get_float
 from .utils import make_relative_path, warn_user
 from .vmaf_script import build_vmaf_vpy_script
@@ -677,6 +678,7 @@ def run_vmaf(
     # reads belong to the job and are built before any encoding.
     vpy_path = Path(tmp_log_dir) / "vmaf.vpy"
     dis_cache = temp_dir / f"vmaf_dis{indexer_spec(indexer).index_suffix}"
+    log.info("VMAF colour conversion: %s", linearisation_mode(ref_info.color_trc).value)
     write_vpy_script(
         vpy_path,
         build_vmaf_vpy_script(

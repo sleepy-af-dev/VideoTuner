@@ -267,6 +267,28 @@ def configure_logging(*, verbose: bool = False, quiet: bool = False) -> int:
     return level
 
 
+#: Marks a log record whose message the user needs to see, not only the job
+#: log. An assumption, a fallback, or a scope reduction that changes what a
+#: run measures qualifies. A failure the user cannot act on, and an outcome
+#: the results tables already report, does not.
+USER_FACING = "user_facing"
+
+
+def warn_user(log: logging.Logger, message: str, *args: object) -> None:
+    """Log a warning and show it on the terminal.
+
+    ``UserWarningHandler`` prints every record this marks, so a caller cannot
+    report a fallback to the job log and forget the terminal. Formatting is
+    left to logging, so the arguments are the same as ``log.warning``.
+
+    Args:
+        log: Logger of the calling module, so the record keeps its origin.
+        message: Warning message, with ``%``-style placeholders.
+        *args: Values for those placeholders.
+    """
+    log.warning(message, *args, extra={USER_FACING: True})
+
+
 def log_section(log: logging.Logger, title: str) -> None:
     """Log a visual section separator with a title."""
     separator = LOG_SEPARATOR_CHAR * LOG_SEPARATOR_WIDTH

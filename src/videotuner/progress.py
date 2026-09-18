@@ -37,6 +37,7 @@ from .tool_parsers import (
     X265_PROGRESS_RE,
     clean_ansi,
 )
+from .utils import USER_FACING
 from .version import __version__
 
 LineHandler = Callable[[str], bool]
@@ -522,3 +523,32 @@ class Stage:
             return True
 
         return handler
+
+
+class UserWarningHandler(logging.Handler):
+    """Prints the warnings ``warn_user`` marks, as they happen.
+
+    The job log takes every warning through its own handler. This one takes
+    the subset a user has to act on and prints it through the run's console,
+    so the transcript keeps those warnings in the order they happened.
+    """
+
+    def __init__(self, console: Console) -> None:
+        """Build the handler.
+
+        Args:
+            console: The run's console, normally the ``TeeConsole`` the
+                display owns, which also writes the transcript.
+        """
+        super().__init__(level=logging.WARNING)
+        self._console: Console = console
+
+    @override
+    def emit(self, record: logging.LogRecord) -> None:
+        """Print the record when it is marked user-facing.
+
+        Args:
+            record: Record offered by the logging framework.
+        """
+        if getattr(record, USER_FACING, False):
+            self._console.print(f"[yellow]{record.getMessage()}[/yellow]")

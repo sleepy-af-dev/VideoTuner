@@ -73,7 +73,7 @@ from .pipeline_validation import (
     validate_sampling_parameters,
 )
 from .profiles import Profile
-from .progress import PipelineDisplay, TranscriptFormatter
+from .progress import PipelineDisplay, TranscriptFormatter, UserWarningHandler
 from .ssim2_colour import SSIM2_TONEMAP_BACKEND
 from .ssimulacra2_assessment import SSIM2Result
 from .tonemapping import (
@@ -90,6 +90,7 @@ from .utils import (
     resolve_run_folder,
     sanitize_filename,
     use_utf8_output,
+    warn_user,
 )
 from .vmaf_assessment import (
     VMAFResult,
@@ -360,6 +361,11 @@ def _run_pipeline_body(
     except Exception as e:
         log.warning("Could not attach file logger at %s: %s", log_file, e)
 
+    # Warnings a user has to act on go to the terminal as well as the log.
+    # Attached here rather than at import so it uses the run's own console,
+    # which is also what writes the transcript.
+    logging.getLogger().addHandler(UserWarningHandler(display.console))
+
     log_section(log, "Initialization")
 
     try:
@@ -403,13 +409,12 @@ def _run_pipeline_body(
         if vmaf_choice.fell_back:
             # v1 scores are calibrated to the v0 scale, so an unnoticed fallback
             # produces numbers that pass for v1 against a v1 target.
-            message = (
+            warn_user(
+                log,
                 "VMAF v1 models not found; scoring with the legacy v0 models. "
                 "Scores are not comparable with v1. This needs libvmaf 3.2.0 or "
-                "newer, which is not the same thing as a newer FFmpeg."
+                "newer, which is not the same thing as a newer FFmpeg.",
             )
-            log.warning(message)
-            display.console.print(f"[yellow]{message}[/yellow]")
 
     # Display active settings summary. The console tees this into the log, so
     # there is no second hand-written copy of it here.

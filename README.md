@@ -205,7 +205,7 @@ Download the latest release from the [Releases page](https://github.com/sleepy-a
 | [ffms2](https://github.com/FFMS/ffms2)                                       | 5.1.2 (3af2ef2) | Frame-accurate video indexing (`ffms2.dll`, `ffmsindex.exe`), built from source |
 | [LSMASHSource](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works) | 1310.0.0.0     | Alternative video indexing (`LSMASHSource.dll`, `LSMASHSource_indexing.exe`), selected with `--indexer lsmash` |
 | [vszip](https://github.com/dnjulek/vapoursynth-zip)                          | 22.1.0         | SSIMULACRA2 quality metric calculation                       |
-| [vs-tonemap](https://github.com/sleepy-af-dev/vs-tonemap)                    | 0.2.0          | Tonemapping for SSIMULACRA2 (BT.2390 tone curve, BT.2407 gamut mapping) |
+| [vs-tonemap](https://github.com/sleepy-af-dev/vs-tonemap)                    | 0.2.0          | Tonemapping for VMAF and SSIMULACRA2 (BT.2390 tone curve, BT.2407 gamut mapping) |
 
 ### From Source
 
@@ -264,9 +264,9 @@ Create `vapoursynth-portable/vs-plugins/` and place the following plugins in it.
 > licences ask a redistributor to carry their attribution, and the `NOTICE` is
 > that attribution.
 >
-> Skip it and HDR SSIMULACRA2 stops working. The metric is only defined on SDR,
-> so an HDR input is tonemapped before it is scored, and without the plugin that
-> step fails. SDR inputs are unaffected.
+> Skip it and HDR assessment stops working. Neither metric is defined on HDR,
+> so an HDR input is tonemapped before VMAF or SSIMULACRA2 scores it, and
+> without the plugin that step fails. SDR inputs are unaffected.
 
 #### 4. Install Encoders
 
@@ -666,16 +666,15 @@ Run `videotuner --help` for complete options. Key options include:
 | `--no-ssim2`   | -       | Disable SSIMULACRA2 assessment                             |
 | `--vmaf-model` | `auto`  | VMAF model name or path (auto-selects by display and viewing distance) |
 | `--v0-vmaf`    | `off`   | Score with the legacy v0 models, for comparison with earlier releases |
-| `--tonemap`    | `auto`  | HDR tonemapping for VMAF: auto\|force\|off                 |
 | `--indexer`    | `ffms2` | Source filter that reads and indexes video: ffms2\|lsmash  |
 
-`--tonemap` governs VMAF's tonemapping only. SSIMULACRA2 always converts an HDR
-input to SDR, because the metric is only defined on SDR, so `--tonemap off`
-leaves that conversion in place.
+Both metrics always convert an HDR input to SDR before scoring it, because
+neither VMAF nor SSIMULACRA2 is defined on HDR. They use the same tonemapping
+operator, so an HDR score from one is comparable with the other's.
 
 `--indexer` applies to every operation that builds an index: sample extraction
-for encoding, and SSIMULACRA2. One run therefore reads video one way throughout.
-Cropdetect and VMAF read through FFmpeg and build no index, so they are
+for encoding, VMAF and SSIMULACRA2. One run therefore reads video one way
+throughout. Cropdetect reads through FFmpeg and builds no index, so it is
 unaffected.
 
 ### Guard Bands

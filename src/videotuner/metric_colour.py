@@ -267,7 +267,7 @@ def colour_preamble(
 
 
 def colour_assumption_notes(info: VideoInfo) -> list[str]:
-    """Describe what SSIMULACRA2's colour chain has to assume for an input.
+    """Describe what the shared colour chain has to assume for an input.
 
     Both assumptions follow from the probe alone and hold for a whole run,
     so a caller reports them once rather than once per assessment.
@@ -290,8 +290,8 @@ def colour_assumption_notes(info: VideoInfo) -> list[str]:
         assumed = "BT.709" if mode is LinearisationMode.SDR else "BT.2020"
         notes.append(
             f"Input declares no {', '.join(absent)}; assuming {assumed} for "
-            "SSIMULACRA2. Scores stay comparable between encodes of this "
-            "input, but not against a differently tagged one."
+            "VMAF and SSIMULACRA2. Scores stay comparable between encodes "
+            "of this input, but not against a differently tagged one."
         )
 
     # HLG needs no equivalent: tonemap.HLG defaults its own peak and writes
@@ -299,9 +299,9 @@ def colour_assumption_notes(info: VideoInfo) -> list[str]:
     if mode is LinearisationMode.PQ and missing_mastering_display(info):
         notes.append(
             "Input declares no mastering display; assuming a "
-            f"{SSIM2_ASSUMED_MASTERING_PEAK} cd/m2 peak for SSIMULACRA2. "
-            "Scores stay comparable between encodes of this input, but not "
-            "against one that declares its own peak."
+            f"{SSIM2_ASSUMED_MASTERING_PEAK} cd/m2 peak for VMAF and "
+            "SSIMULACRA2. Scores stay comparable between encodes of this "
+            "input, but not against one that declares its own peak."
         )
 
     return notes

@@ -377,7 +377,9 @@ def _run_pipeline_body(
 
     # Once per run rather than once per CRF iteration: both assumptions
     # follow from this probe and hold for every assessment that follows.
-    if args.ssim2:
+    # Both metrics share the same colour chain, so either one enabled is
+    # enough for an assumed tag or mastering peak to shape its score.
+    if args.vmaf or args.ssim2:
         for note in colour_assumption_notes(info):
             warn_user(log, note)
 

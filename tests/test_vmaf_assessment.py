@@ -1,4 +1,8 @@
-"""Tests for vmaf_assessment build_vmaf_filter with GPU/CPU branching."""
+"""Tests for vmaf_assessment: model selection, options, and run_vmaf plumbing.
+
+build_vmaf_filter's own tests moved to test_vmaf_pipe.py, since it no longer
+does any tonemapping or GPU/CPU branching.
+"""
 
 from __future__ import annotations
 
@@ -12,10 +16,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from videotuner import vmaf_assessment
+from videotuner.encoding_utils import IndexerType, VapourSynthEnv
 from videotuner.media import VideoInfo
 from videotuner.vmaf_assessment import (
     build_libvmaf_model_option,
-    build_vmaf_filter,
     needs_tonemap,
     resolve_vmaf_choice,
     run_vmaf,
@@ -238,9 +242,10 @@ class TestResolveVmafChoice:
 class TestVmafModelLoadError:
     """A named model that does not exist fails inside the filtergraph.
 
-    run() streams output rather than capturing it, so the RuntimeError it raises
-    carries only an exit status. Without reading the line as it goes past, the
-    user is told a command failed with code 127 and never which model was wrong.
+    run_vspipe_encode() streams output rather than capturing it, so the
+    RuntimeError it raises carries only an exit status. Without reading the
+    line as it goes past, the user is told a command failed with code 127 and
+    never which model was wrong.
     """
 
     def test_detects_the_model_load_failure(self) -> None:
@@ -309,123 +314,6 @@ class TestNeedsTonemap:
         assert needs_tonemap(info) is False
 
 
-class TestBuildVmafFilter:
-    """Tests for build_vmaf_filter GPU/CPU branching."""
-
-    def test_tonemap_gpu_uses_libplacebo(self) -> None:
-        result = build_vmaf_filter(
-            ref_needs_tonemap=True,
-            _dis_needs_tonemap=True,
-            use_gpu=True,
-        )
-        assert "libplacebo=" in result
-
-    def test_tonemap_cpu_uses_zscale(self) -> None:
-        result = build_vmaf_filter(
-            ref_needs_tonemap=True,
-            _dis_needs_tonemap=True,
-            use_gpu=False,
-        )
-        assert "zscale=" in result
-        assert "tonemap=hable" in result
-
-    def test_tonemap_cpu_no_libplacebo(self) -> None:
-        result = build_vmaf_filter(
-            ref_needs_tonemap=True,
-            _dis_needs_tonemap=True,
-            use_gpu=False,
-        )
-        assert "libplacebo" not in result
-
-    def test_tonemap_off_ignores_gpu(self) -> None:
-        result = build_vmaf_filter(
-            ref_needs_tonemap=True,
-            _dis_needs_tonemap=True,
-            tonemap_policy="off",
-            use_gpu=True,
-        )
-        assert "libplacebo" not in result
-        assert "scale=" in result
-
-    def test_no_tonemap_uses_scale(self) -> None:
-        result = build_vmaf_filter(
-            ref_needs_tonemap=False,
-            _dis_needs_tonemap=False,
-            use_gpu=True,
-        )
-        assert "scale=" in result
-        assert "libplacebo" not in result
-
-    def test_default_use_gpu_true(self) -> None:
-        result = build_vmaf_filter(
-            ref_needs_tonemap=True,
-            _dis_needs_tonemap=True,
-        )
-        # Default use_gpu=True should produce libplacebo
-        assert "libplacebo=" in result
-
-    def test_filter_graph_structure(self) -> None:
-        result = build_vmaf_filter(
-            ref_needs_tonemap=True,
-            _dis_needs_tonemap=True,
-            use_gpu=True,
-        )
-        assert "[0:v]" in result
-        assert "[1:v]" in result
-        assert "[ref]" in result
-        assert "[dis]" in result
-        assert "[dis][ref]" in result
-
-    def test_tonemap_force_policy(self) -> None:
-        result = build_vmaf_filter(
-            ref_needs_tonemap=False,
-            _dis_needs_tonemap=False,
-            tonemap_policy="force",
-            use_gpu=True,
-        )
-        assert "libplacebo=" in result
-
-    def test_tonemap_force_cpu(self) -> None:
-        result = build_vmaf_filter(
-            ref_needs_tonemap=False,
-            _dis_needs_tonemap=False,
-            tonemap_policy="force",
-            use_gpu=False,
-        )
-        assert "tonemap=hable" in result
-        assert "libplacebo" not in result
-
-    def test_measures_an_8bit_encode_at_10bit(self) -> None:
-        """v1 is measured at 10-bit whatever the encode depth, so banding is
-        represented in the signal CAMBI sees."""
-        result = build_vmaf_filter(
-            ref_needs_tonemap=False,
-            _dis_needs_tonemap=False,
-            dis_bit_depth=8,
-        )
-        assert "format=yuv420p10le," in result
-
-    def test_pixel_format_10bit(self) -> None:
-        result = build_vmaf_filter(
-            ref_needs_tonemap=False,
-            _dis_needs_tonemap=False,
-            dis_bit_depth=10,
-        )
-        assert "format=yuv420p10le," in result
-
-    def test_v0_restores_the_depth_matched_pixel_format(self) -> None:
-        """--v0-vmaf has to reproduce pre-change behaviour to be useful for an
-        A/B, so it reverts the measurement depth as well as the model."""
-        result = build_vmaf_filter(
-            ref_needs_tonemap=False,
-            _dis_needs_tonemap=False,
-            dis_bit_depth=8,
-            use_v0=True,
-        )
-        assert "format=yuv420p," in result
-        assert "yuv420p10le" not in result
-
-
 class TestVmafLogPathLength:
     """libvmaf writes its JSON with fopen, which is capped at MAX_PATH on Windows.
 
@@ -444,8 +332,8 @@ class TestVmafLogPathLength:
         """Invoke run_vmaf with a stubbed ffmpeg; return the log_path it asked for."""
         captured: dict[str, str] = {}
 
-        def fake_run(cmd: list[str], **_kwargs: object) -> None:
-            graph = cmd[cmd.index("-filter_complex") + 1]
+        def fake_run_vspipe_encode(encoder_args: list[str], **_kwargs: object) -> str:
+            graph = encoder_args[encoder_args.index("-filter_complex") + 1]
             match = re.search(r"log_path=([^:]+)", graph)
             assert match is not None
             captured["log_path"] = match.group(1)
@@ -456,8 +344,11 @@ class TestVmafLogPathLength:
                 json.dumps({"pooled_metrics": {"vmaf": {"mean": 95.0}}}),
                 encoding="utf-8",
             )
+            return ""
 
-        monkeypatch.setattr(vmaf_assessment, "run", fake_run)
+        monkeypatch.setattr(
+            vmaf_assessment, "run_vspipe_encode", fake_run_vspipe_encode
+        )
         destination.parent.mkdir(parents=True, exist_ok=True)
         _ = run_vmaf(
             ffmpeg_bin="ffmpeg",
@@ -467,6 +358,8 @@ class TestVmafLogPathLength:
             dis_info=self._info(),
             log_path=destination,
             cwd=tmp_path,
+            indexer=IndexerType.FFMS2,
+            vs_env=VapourSynthEnv.from_cwd(tmp_path),
         )
         return captured["log_path"]
 

@@ -23,16 +23,24 @@ from .constants import (
     VMAF_MAX_THREADS,
     VMAF_THREAD_CPU_FRACTION,
 )
-from .encoding_utils import is_hdr_video
+from .encoding_utils import (
+    IndexerType,
+    VapourSynthEnv,
+    indexer_spec,
+    is_hdr_video,
+    resolve_absolute_path,
+    run_vspipe_encode,
+    write_vpy_script,
+)
 from .media import (
     VideoInfo,
     get_assessment_frame_count,
     get_bit_depth_from_pix_fmt,
     parse_video_info,
 )
-from .tonemapping import build_tonemap_chain, has_vulkan_support, tonemap_will_apply
 from .tool_parsers import get_float
-from .utils import make_relative_path, run, warn_user
+from .utils import make_relative_path, warn_user
+from .vmaf_script import build_vmaf_vpy_script
 from .vmaf_types import VmafFamily, VmafModelChoice
 
 if TYPE_CHECKING:
@@ -508,21 +516,29 @@ def build_libvmaf_model_option(
 
 
 def build_vmaf_filter(
-    ref_needs_tonemap: bool,
-    _dis_needs_tonemap: bool,
+    *,
+    width: int,
+    height: int,
     dis_bit_depth: int = 8,
-    width: int = 3840,
-    height: int = 2160,
-    tonemap_policy: str = "auto",  # auto|force|off
-    use_gpu: bool = True,
     use_v0: bool = False,
 ) -> str:
-    # Only tonemap if the reference is BT.2020 under `auto`; validation ensures
-    # the distorted cannot be BT.2020 when the reference is BT.709.
-    apply_tonemap = tonemap_will_apply(
-        tonemap_policy, source_needs_tonemap=ref_needs_tonemap
-    )
+    """Build the filter graph ffmpeg applies to the piped tracks.
 
+    Both tracks arrive down one pipe, already tonemapped and already in
+    BT.709 SDR, so this does no colour work. It scales a downscaled encode
+    back to reference resolution, which deliberately stays here: measured,
+    changing only the resampler moved VMAF by 1.78 points, so doing it in
+    VapourSynth would tangle a resampling change into a tonemapping one.
+
+    Args:
+        width: Reference width, which the distorted track is scaled to.
+        height: Reference height.
+        dis_bit_depth: Bit depth of the distorted encode, read only by v0.
+        use_v0: Measure at the encode's depth rather than at 10-bit.
+
+    Returns:
+        The filter graph up to and including the libvmaf input pads.
+    """
     # v1 is measured at 10-bit whatever the encode depth, so that banding is
     # present in the signal CAMBI reads. v0 kept the measurement depth matched
     # to the encode, and --v0-vmaf reverts to that so an A/B compares like with
@@ -533,16 +549,9 @@ def build_vmaf_filter(
         pix_fmt = "yuv420p10le"
     final = f"format={pix_fmt},setpts=PTS-STARTPTS,settb=AVTB"
 
-    if apply_tonemap:
-        tonemap = build_tonemap_chain(width, height, use_gpu=use_gpu)
-        ref_chain = f"[0:v]{tonemap},{final}[ref]"
-        dis_chain = f"[1:v]{tonemap},{final}[dis]"
-    else:
-        pre = f"scale={width}:{height}:flags=bicubic"
-        ref_chain = f"[0:v]{pre},{final}[ref]"
-        dis_chain = f"[1:v]{pre},{final}[dis]"
-
-    return f"{ref_chain};{dis_chain};[dis][ref]"
+    dis_chain = f"[0:v:1]scale={width}:{height}:flags=bicubic,{final}[dis]"
+    ref_chain = f"[0:v:0]{final}[ref]"
+    return f"{dis_chain};{ref_chain};[dis][ref]"
 
 
 def run_vmaf(
@@ -557,6 +566,9 @@ def run_vmaf(
     cwd: Path | None = None,
     line_handler: Callable[[str], bool] | None = None,
     family: VmafFamily = VmafFamily.V1,
+    *,
+    indexer: IndexerType,
+    vs_env: VapourSynthEnv,
 ) -> VMAFResult:
     log = logging.getLogger(__name__)
 
@@ -617,15 +629,10 @@ def run_vmaf(
     target_width = dis_info.width or 3840
     target_height = dis_info.height or 2160
 
-    use_gpu = has_vulkan_support(ffmpeg_bin)
     filter_prefix = build_vmaf_filter(
-        ref_needs_tonemap=needs_tonemap(ref_info),
-        _dis_needs_tonemap=needs_tonemap(dis_info),
-        dis_bit_depth=dis_bit_depth,
         width=target_width,
         height=target_height,
-        tonemap_policy=tonemap_policy,
-        use_gpu=use_gpu,
+        dis_bit_depth=dis_bit_depth,
         use_v0=use_v0,
     )
     # libvmaf writes its JSON with a plain fopen, which is still capped at
@@ -652,6 +659,31 @@ def run_vmaf(
     )
     filter_graph = f"{filter_prefix}{vmaf_opts}"
 
+    # Both clips are loaded by the selected indexer, tonemapped by vs-tonemap,
+    # and piped down one vspipe process as two tracks in a matroska stream;
+    # ffmpeg reads them back off pipe:0 as [0:v:0] and [0:v:1].
+    vpy_path = Path(tmp_log_dir) / "vmaf.vpy"
+    ref_cache = Path(tmp_log_dir) / f"vmaf_ref{indexer_spec(indexer).index_suffix}"
+    dis_cache = Path(tmp_log_dir) / f"vmaf_dis{indexer_spec(indexer).index_suffix}"
+    write_vpy_script(
+        vpy_path,
+        build_vmaf_vpy_script(
+            ref_path=ref_path,
+            dis_path=dis_path,
+            ref_cache=ref_cache,
+            dis_cache=dis_cache,
+            indexer=indexer,
+            info=ref_info,
+        ),
+    )
+    vspipe_args = [
+        str(vs_env.vspipe_bin),
+        "-c",
+        "mkv",
+        str(resolve_absolute_path(vpy_path, cwd)),
+        "-",
+    ]
+
     cmd = [
         ffmpeg_bin,
         "-hide_banner",
@@ -661,9 +693,7 @@ def run_vmaf(
         "-sn",  # No subtitles
         "-dn",  # No data streams
         "-i",
-        make_relative_path(ref_path, cwd),
-        "-i",
-        make_relative_path(dis_path, cwd),
+        "pipe:0",
         "-filter_complex",
         filter_graph,
         "-f",
@@ -672,8 +702,9 @@ def run_vmaf(
     ]
     log.info("VMAF: %s", " ".join(shlex.quote(c) for c in cmd))
 
-    # run() streams rather than captures, so the model-load failure has to be
-    # caught as it goes past or the error is reduced to an exit status.
+    # run_vspipe_encode() streams rather than captures, so the model-load
+    # failure has to be caught as it goes past or the error is reduced to an
+    # exit status.
     # A list rather than a rebound local: the write happens inside the callback,
     # which a type checker cannot follow, so a plain str | None reads as never
     # reassigned and the failure branch looks unreachable.
@@ -687,7 +718,13 @@ def run_vmaf(
 
     try:
         try:
-            run(cmd, live=True, cwd=cwd, line_callback=watch)
+            _ = run_vspipe_encode(
+                vspipe_args=vspipe_args,
+                encoder_args=cmd,
+                vs_env=vs_env.build_env(),
+                cwd=cwd,
+                line_handler=watch,
+            )
         except RuntimeError as e:
             if failed_models:
                 raise RuntimeError(
@@ -818,6 +855,8 @@ def assess_with_vmaf(
     cwd: Path | None = None,
     line_handler: Callable[[str], bool] | None = None,
     family: VmafFamily = VmafFamily.V1,
+    indexer: IndexerType,
+    vs_env: VapourSynthEnv,
 ) -> VMAFResult:
     """High-level helper that probes both inputs and runs VMAF with optional tonemapping.
 
@@ -843,6 +882,8 @@ def assess_with_vmaf(
         cwd=cwd,
         line_handler=line_handler,
         family=family,
+        indexer=indexer,
+        vs_env=vs_env,
     )
 
 
@@ -859,6 +900,8 @@ def assess_vmaf_concatenated(
     display: PipelineDisplay,
     log: logging.Logger,
     iteration: int,
+    indexer: IndexerType,
+    vs_env: VapourSynthEnv,
     family: VmafFamily = VmafFamily.V1,
 ) -> list[VMAFResult]:
     """Run VMAF assessment on concatenated reference and distorted files.
@@ -876,6 +919,8 @@ def assess_vmaf_concatenated(
         display: Progress display manager
         log: Logger instance
         iteration: Current iteration number
+        indexer: Source filter to load both clips with.
+        vs_env: VapourSynth environment configuration.
 
     Returns:
         List containing single VMAFResult for the concatenated comparison
@@ -907,6 +952,8 @@ def assess_vmaf_concatenated(
             cwd=repo_root,
             line_handler=stage.make_ffmpeg_handler(total_frames=total_frames),
             family=family,
+            indexer=indexer,
+            vs_env=vs_env,
         )
 
     log.info(

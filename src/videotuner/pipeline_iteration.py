@@ -92,6 +92,7 @@ def run_vmaf_assessment(
     Returns:
         List of VMAFResult (typically single element for concatenated file)
     """
+    from .encoding_utils import VapourSynthEnv
     from .vmaf_assessment import assess_vmaf_concatenated
 
     if ctx.vmaf_ref_path is None:
@@ -99,6 +100,10 @@ def run_vmaf_assessment(
         return []
 
     try:
+        vs_env = VapourSynthEnv.from_args(
+            ctx.args.vs_dir, ctx.args.vs_plugin_dir, ctx.repo_root
+        )
+
         return assess_vmaf_concatenated(
             reference_path=ctx.vmaf_ref_path,
             distorted_path=distorted_path,
@@ -112,6 +117,8 @@ def run_vmaf_assessment(
             display=ctx.display,
             log=ctx.log,
             iteration=iteration,
+            indexer=ctx.args.indexer,
+            vs_env=vs_env,
             family=ctx.vmaf_family,
         )
     except Exception as e:

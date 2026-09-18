@@ -230,3 +230,44 @@ def colour_preamble(
     else:
         lines.append(_CHAINS[mode])
     return "\n".join(lines) + "\n"
+
+
+def colour_assumption_notes(info: VideoInfo) -> list[str]:
+    """Describe what SSIMULACRA2's colour chain has to assume for an input.
+
+    Both assumptions follow from the probe alone and hold for a whole run,
+    so a caller reports them once rather than once per assessment.
+
+    Args:
+        info: Probed metadata for the input.
+
+    Returns:
+        One message per assumption, in the order the chain makes them. Empty
+        when the input declares everything the chain needs.
+    """
+    mode = linearisation_mode(info.color_trc)
+    notes: list[str] = []
+
+    absent = missing_colour_tags(info)
+    if absent:
+        # Naming what was assumed, not only what was missing, is what a prior
+        # defect here lacked: it silently reset an HDR input's correct
+        # transfer to BT.709 and the warning gave no way to notice.
+        assumed = "BT.709" if mode is LinearisationMode.SDR else "BT.2020"
+        notes.append(
+            f"Input declares no {', '.join(absent)}; assuming {assumed} for "
+            "SSIMULACRA2. Scores stay comparable between encodes of this "
+            "input, but not against a differently tagged one."
+        )
+
+    # HLG needs no equivalent: tonemap.HLG defaults its own peak and writes
+    # the properties BT2390 then reads.
+    if mode is LinearisationMode.PQ and missing_mastering_display(info):
+        notes.append(
+            "Input declares no mastering display; assuming a "
+            f"{SSIM2_ASSUMED_MASTERING_PEAK} cd/m2 peak for SSIMULACRA2. "
+            "Scores stay comparable between encodes of this input, but not "
+            "against one that declares its own peak."
+        )
+
+    return notes

@@ -74,7 +74,7 @@ from .pipeline_validation import (
 )
 from .profiles import Profile
 from .progress import PipelineDisplay, TranscriptFormatter, UserWarningHandler
-from .ssim2_colour import SSIM2_TONEMAP_BACKEND
+from .ssim2_colour import SSIM2_TONEMAP_BACKEND, colour_assumption_notes
 from .ssimulacra2_assessment import SSIM2Result
 from .tonemapping import (
     format_tonemap_backend,
@@ -392,6 +392,12 @@ def _run_pipeline_body(
     ssim2_tonemap: str | None = None
     if args.ssim2 and is_hdr_video(info.color_trc):
         ssim2_tonemap = SSIM2_TONEMAP_BACKEND
+
+    # Once per run rather than once per CRF iteration: both assumptions
+    # follow from this probe and hold for every assessment that follows.
+    if args.ssim2:
+        for note in colour_assumption_notes(info):
+            warn_user(log, note)
 
     # Settle the model generation once. The probe costs about 0.07s and must not
     # run per CRF iteration; it is skipped entirely when its answer cannot

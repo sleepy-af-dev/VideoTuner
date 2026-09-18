@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 import subprocess
 from collections.abc import Sequence
@@ -13,6 +12,7 @@ from videotuner.encoding_utils import IndexerType, VapourSynthEnv
 from videotuner.media import VideoInfo
 from videotuner.ssim2_colour import (
     LinearisationMode,
+    colour_assumption_notes,
     colour_preamble,
     linearisation_mode,
     missing_colour_tags,
@@ -524,7 +524,7 @@ def _write_pq_pair(tmp_path: Path) -> tuple[Path, Path]:
 @requires_vapoursynth
 @requires_libx265
 def test_a_pq_input_with_no_mastering_display_is_still_scored(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path,
 ) -> None:
     # Before the assumption this took the VapourSynth process down: BT2390
     # raises for want of a peak, and vszip does not survive an error from the
@@ -538,16 +538,80 @@ def test_a_pq_input_with_no_mastering_display_is_still_scored(
         color_space="bt2020nc",
     )
 
-    with caplog.at_level(logging.WARNING):
-        result = _run_vszip_assessment(
-            ref_path=ref,
-            dis_path=dis,
-            vs_env=VapourSynthEnv.from_cwd(REPO_ROOT),
-            temp_dir=tmp_path,
-            info=info,
-            indexer=IndexerType.FFMS2,
-        )
+    result = _run_vszip_assessment(
+        ref_path=ref,
+        dis_path=dis,
+        vs_env=VapourSynthEnv.from_cwd(REPO_ROOT),
+        temp_dir=tmp_path,
+        info=info,
+        indexer=IndexerType.FFMS2,
+    )
 
     assert result.count == 24
-    assert "no mastering display" in caplog.text
-    assert "1000 cd/m2" in caplog.text
+
+
+def test_a_fully_declared_input_assumes_nothing() -> None:
+    info = VideoInfo(
+        fps=24.0,
+        duration=1.0,
+        color_trc="smpte2084",
+        color_primaries="bt2020",
+        color_space="bt2020nc",
+        mastering_display_color_primaries="BT.2020",
+        mastering_display_luminance="min: 0.0001 cd/m2, max: 1000 cd/m2",
+    )
+    assert colour_assumption_notes(info) == []
+
+
+def test_an_untagged_sdr_input_reports_the_bt709_assumption() -> None:
+    notes = colour_assumption_notes(VideoInfo(fps=24.0, duration=1.0))
+    assert len(notes) == 1
+    assert "transfer, primaries, matrix" in notes[0]
+    assert "BT.709" in notes[0]
+
+
+def test_an_untagged_pq_input_reports_bt2020_not_bt709() -> None:
+    # A PQ input that omits its primaries is overwhelmingly BT.2020. The
+    # note has to name what was assumed, not only what was missing.
+    info = VideoInfo(fps=24.0, duration=1.0, color_trc="smpte2084")
+    notes = colour_assumption_notes(info)
+    assert any("BT.2020" in note for note in notes)
+    assert not any("BT.709" in note for note in notes)
+
+
+def test_a_pq_input_with_no_mastering_display_reports_the_peak() -> None:
+    info = VideoInfo(
+        fps=24.0,
+        duration=1.0,
+        color_trc="smpte2084",
+        color_primaries="bt2020",
+        color_space="bt2020nc",
+    )
+    notes = colour_assumption_notes(info)
+    assert len(notes) == 1
+    assert "no mastering display" in notes[0]
+    assert "1000 cd/m2" in notes[0]
+
+
+def test_an_hlg_input_reports_no_peak_assumption() -> None:
+    # tonemap.HLG defaults its own peak and writes the properties BT2390
+    # then reads, so there is nothing for the chain to assume.
+    info = VideoInfo(
+        fps=24.0,
+        duration=1.0,
+        color_trc="arib-std-b67",
+        color_primaries="bt2020",
+        color_space="bt2020nc",
+    )
+    assert colour_assumption_notes(info) == []
+
+
+def test_an_sdr_input_reports_no_peak_assumption() -> None:
+    info = VideoInfo(
+        fps=24.0,
+        duration=1.0,
+        color_trc="bt709",
+        color_primaries="bt709",
+        color_space="bt709",
+    )
+    assert colour_assumption_notes(info) == []

@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .constants import SSIM2_ASSUMED_MASTERING_PEAK
 from .encoding_utils import (
     IndexerType,
     VapourSynthEnv,
@@ -284,37 +283,19 @@ def _run_vszip_assessment(
     # too. An encoder that stopped carrying the tags across would break the
     # assumption silently, since the script would then retag against the wrong
     # probe.
-    mode = linearisation_mode(info.color_trc)
-    absent = missing_colour_tags(info)
-    if absent:
-        # BT.709 is the right guess for an untagged SDR input; an HDR one
-        # that omits primaries or matrix is overwhelmingly BT.2020, not
-        # BT.709 - see colour_preamble's fallback table. Naming what was
-        # assumed, not just what was missing, is what a prior defect here
-        # lacked: it silently reset an HDR input's correct transfer to
-        # BT.709 and the warning gave no way to notice.
-        assumed = "BT.709" if mode is LinearisationMode.SDR else "BT.2020"
-        log.warning(
-            "Input declares no %s; assuming %s for SSIMULACRA2. "
-            "Scores stay comparable between encodes of this input, but not "
-            "against a differently tagged one.",
-            ", ".join(absent),
-            assumed,
-        )
+    # What these assume is reported once at startup by
+    # colour_assumption_notes, since both follow from the probe alone and
+    # this function runs once per CRF iteration.
+    #
     # A PQ input that declares no mastering display gives BT2390 no peak
     # luminance, and it raises rather than guessing. Assume the BT.2100
     # reference display instead, so the metric is scored rather than dropped.
     # One decision reaches both clips, since prepare() is one function applied
     # to each. HLG needs no equivalent: tonemap.HLG defaults its own peak.
+    mode = linearisation_mode(info.color_trc)
+    absent = missing_colour_tags(info)
     is_pq = mode is LinearisationMode.PQ
     mastering_missing = is_pq and missing_mastering_display(info)
-    if mastering_missing:
-        log.warning(
-            "Input declares no mastering display; assuming a %d cd/m2 peak "
-            "for SSIMULACRA2. Scores stay comparable between encodes of this "
-            "input, but not against one that declares its own peak.",
-            SSIM2_ASSUMED_MASTERING_PEAK,
-        )
     preamble = colour_preamble(
         mode, missing=absent, mastering_missing=mastering_missing
     )

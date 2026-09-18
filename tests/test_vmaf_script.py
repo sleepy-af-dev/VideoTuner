@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from videotuner.encoding_utils import IndexerType
 from videotuner.media import VideoInfo
 from videotuner.vmaf_script import build_vmaf_vpy_script
@@ -12,6 +14,34 @@ _SDR = VideoInfo(
     color_trc="bt709",
     color_primaries="bt709",
     color_space="bt709",
+)
+
+_PQ = VideoInfo(
+    fps=24.0,
+    duration=1.0,
+    color_trc="smpte2084",
+    color_primaries="bt2020",
+    color_space="bt2020nc",
+    mastering_display_color_primaries="BT.2020",
+    mastering_display_luminance="min: 0.0001 cd/m2, max: 1000 cd/m2",
+)
+
+# Same as _PQ but with no mastering display, the branch where colour_preamble
+# assumes src_max/src_min rather than reading them from the properties.
+_PQ_NO_MASTERING = VideoInfo(
+    fps=24.0,
+    duration=1.0,
+    color_trc="smpte2084",
+    color_primaries="bt2020",
+    color_space="bt2020nc",
+)
+
+_HLG = VideoInfo(
+    fps=24.0,
+    duration=1.0,
+    color_trc="arib-std-b67",
+    color_primaries="bt2020",
+    color_space="bt2020nc",
 )
 
 
@@ -26,10 +56,17 @@ def _script(info: VideoInfo, indexer: IndexerType = IndexerType.FFMS2) -> str:
     )
 
 
-def test_the_script_is_valid_python() -> None:
+@pytest.mark.parametrize(
+    "info",
+    [_SDR, _PQ, _HLG, _PQ_NO_MASTERING],
+    ids=["sdr", "pq", "hlg", "pq_no_mastering"],
+)
+def test_the_script_is_valid_python(info: VideoInfo) -> None:
     # The script is a formatted string, so a syntax error in it would pass
-    # every other test and fail only at runtime.
-    compile(_script(_SDR), "vmaf.vpy", "exec")
+    # every other test and fail only at runtime. SDR, PQ, HLG and the
+    # assumed-peak PQ variant each take a different path through
+    # colour_preamble, so every one needs compiling.
+    compile(_script(info), "vmaf.vpy", "exec")
 
 
 def test_the_reference_is_output_zero_and_distorted_is_output_one() -> None:
@@ -57,16 +94,7 @@ def test_an_sdr_input_does_not_tonemap() -> None:
 
 
 def test_a_pq_input_tonemaps() -> None:
-    info = VideoInfo(
-        fps=24.0,
-        duration=1.0,
-        color_trc="smpte2084",
-        color_primaries="bt2020",
-        color_space="bt2020nc",
-        mastering_display_color_primaries="BT.2020",
-        mastering_display_luminance="min: 0.0001 cd/m2, max: 1000 cd/m2",
-    )
-    src = _script(info)
+    src = _script(_PQ)
     assert "core.tonemap.BT2390(" in src
     assert "core.tonemap.BT2407(" in src
 

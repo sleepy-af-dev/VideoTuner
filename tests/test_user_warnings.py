@@ -131,6 +131,35 @@ def test_the_handler_ignores_records_below_warning() -> None:
     assert sink.getvalue() == ""
 
 
+def test_a_bracketed_fragment_reaches_the_console_intact() -> None:
+    # A message is arbitrary text, not markup: a filename fragment that looks
+    # like a style tag must survive, not be parsed and eaten.
+    handler, sink = _handler_and_sink()
+    log = logging.getLogger("videotuner.test.bracketed")
+    log.addHandler(handler)
+    try:
+        warn_user(log, "Unknown chroma_location 'xx' from sample [batch2].mkv")
+    finally:
+        log.removeHandler(handler)
+
+    assert "sample [batch2].mkv" in sink.getvalue()
+
+
+def test_invalid_markup_does_not_raise_and_still_reaches_the_console() -> None:
+    # A message can interpolate an exception string containing something
+    # rich's markup parser would reject as a malformed closing tag. That must
+    # not raise out of emit and must not silently drop the warning either.
+    handler, sink = _handler_and_sink()
+    log = logging.getLogger("videotuner.test.invalid_markup")
+    log.addHandler(handler)
+    try:
+        warn_user(log, "failed: %s", "[/opt/x]")
+    finally:
+        log.removeHandler(handler)
+
+    assert "failed: [/opt/x]" in sink.getvalue()
+
+
 def test_a_warning_printed_inside_a_live_progress_bar_is_not_corrupted() -> None:
     """Reproduces the case a full run can miss: ``warn_user`` firing while a
     ``Stage``'s Rich ``Live`` context is open, as at the indexer-subprocess-

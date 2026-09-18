@@ -20,6 +20,7 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
+from rich.text import Text
 
 from .constants import PROGRESS_BAR_WIDTH
 from .encoder_type import EncoderType
@@ -547,8 +548,21 @@ class UserWarningHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         """Print the record when it is marked user-facing.
 
+        The message is arbitrary text - it can interpolate a filename or an
+        exception string - so it is rendered as literal text via ``Text``
+        rather than as an f-string rich would parse for markup. That parse
+        would eat a bracketed filename fragment or raise on invalid markup,
+        so this also follows the stdlib handler contract: a failure here is
+        reported through ``handleError`` rather than raised, since
+        ``Logger.callHandlers`` does not catch and a broken warning must
+        never take the run down with it.
+
         Args:
             record: Record offered by the logging framework.
         """
-        if getattr(record, USER_FACING, False):
-            self._console.print(f"[yellow]{record.getMessage()}[/yellow]")
+        if not getattr(record, USER_FACING, False):
+            return
+        try:
+            self._console.print(Text(record.getMessage(), style="yellow"))
+        except Exception:
+            self.handleError(record)

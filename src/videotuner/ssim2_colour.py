@@ -84,14 +84,17 @@ def missing_colour_tags(info: VideoInfo) -> list[str]:
 
 
 def missing_mastering_display(info: VideoInfo) -> bool:
-    """Say whether the scored clips will carry no mastering display.
+    """Say whether the probe declares no usable mastering display.
 
-    The reference and the distorted encode both take their metadata from
-    x265, which writes it from this same probe, unless a profile names
-    ``master-display`` in its own settings, in which case that encode
-    carries the profile's value instead. When the probe yields no
-    ``--master-display`` argument, neither file carries the properties, and
+    The lossless reference takes its metadata from x265, which writes it
+    from this probe. So when the probe yields no ``--master-display``
+    argument the reference carries no mastering display properties, and
     ``tonemap.BT2390`` has no peak luminance to build its curve from.
+
+    A profile that names ``master-display`` in its own settings supplies its
+    own value, so that profile's encodes carry one whether or not the probe
+    did. Assuming a peak still covers both clips, since ``BT2390`` takes an
+    explicit ``src_max`` over whatever the properties hold.
 
     Args:
         info: Probed metadata for the input.

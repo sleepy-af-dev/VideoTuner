@@ -317,8 +317,7 @@ def select_vmaf_model(
 
     # Warn on low confidence matches
     if result.confidence < RESOLUTION_CONFIDENCE_THRESHOLD:
-        warn_user(
-            log,
+        log.warning(
             f"Low confidence resolution classification for {width}x{height}: {result.notes}",  # noqa: E501  # TODO(E501): shorten line
         )
 

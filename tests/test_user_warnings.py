@@ -29,10 +29,17 @@ USER_FACING_WARNINGS = {
     ("tonemapping.py", "ffmpeg not found"),
     ("utils.py", "Could not parse luminance string"),
     ("utils.py", "Could not read mastering display primaries"),
-    ("vmaf_assessment.py", "Low confidence resolution classification"),
     ("vmaf_assessment.py", "assuming no VMAF v1 support"),
     ("vmaf_assessment.py", "ffmpeg not found"),
 }
+
+# vmaf_assessment.py's "Low confidence resolution classification" is
+# deliberately not here. It fires on ordinary widescreen shapes (measured:
+# 1920x800 and 3840x1600 both score 0.315 confidence, 1920x804 scores 0.319,
+# against a 0.5 threshold) and the classification is correct in each case -
+# only the UHD test is read from it. select_vmaf_model runs once per CRF
+# iteration, so making it user-facing would print several identical lines on
+# a healthy run. Leave it as a plain log.warning.
 
 
 def _warn_user_texts(path: Path) -> list[str]:

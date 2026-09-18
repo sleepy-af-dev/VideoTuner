@@ -9,7 +9,7 @@ import pytest
 from videotuner import pipeline
 from videotuner.media import InvalidVideoFileError
 from videotuner.pipeline import main
-from videotuner.pipeline_cli import parse_cli
+from videotuner.pipeline_cli import build_arg_parser, parse_cli
 
 
 def _argv(target: Path) -> list[str]:
@@ -198,3 +198,11 @@ class TestAsOneSourceRouting:
         _ = main(argv)
 
         assert called == ["batch"]
+
+
+def test_the_tonemap_flag_is_gone() -> None:
+    # Both metrics always tonemap an HDR input, because neither is defined
+    # on HDR. A flag that cannot change that is a lie in --help.
+    parser = build_arg_parser()
+    with pytest.raises(SystemExit):
+        _ = parser.parse_args(["input.mkv", "--tonemap", "off"])

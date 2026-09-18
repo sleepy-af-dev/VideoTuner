@@ -31,10 +31,9 @@ if TYPE_CHECKING:
     from .media import VideoInfo
 
 
-#: Label for the operator that takes an HDR input to SDR before scoring. VMAF
-#: tonemaps with a different one, so the settings header names both: on a
-#: machine without a usable GPU they disagree, and an HDR score is not
-#: interpretable without knowing which produced it.
+#: Label for the operator that takes an HDR input to SDR before scoring. Both
+#: VMAF and SSIMULACRA2 share it: neither metric is defined on HDR, so an HDR
+#: input always goes through it before either one scores it.
 SSIM2_TONEMAP_BACKEND = "vs-tonemap (BT.2390 + BT.2407)"
 
 

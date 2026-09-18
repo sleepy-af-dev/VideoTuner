@@ -10,7 +10,6 @@ from videotuner.tonemapping import (
     build_tonemap_chain,
     format_tonemap_backend,
     has_vulkan_support,
-    tonemap_will_apply,
     vulkan_device_is_hardware,
 )
 
@@ -153,21 +152,6 @@ class TestHasVulkanSupport:
             cmd = cast(list[str], mock_run.call_args[0][0])
             assert "verbose" in cmd
             assert "quiet" not in cmd
-
-
-class TestTonemapWillApply:
-    """One source of truth for the policy, so what the header reports cannot
-    drift from what the run actually does."""
-
-    def test_force_always_applies(self) -> None:
-        assert tonemap_will_apply("force", source_needs_tonemap=False) is True
-
-    def test_off_never_applies(self) -> None:
-        assert tonemap_will_apply("off", source_needs_tonemap=True) is False
-
-    def test_auto_follows_the_source(self) -> None:
-        assert tonemap_will_apply("auto", source_needs_tonemap=True) is True
-        assert tonemap_will_apply("auto", source_needs_tonemap=False) is False
 
 
 class TestFormatTonemapBackend:

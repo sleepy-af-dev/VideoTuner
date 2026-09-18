@@ -119,26 +119,6 @@ def has_vulkan_support(ffmpeg_bin: str = "ffmpeg") -> bool:
     return supported
 
 
-def tonemap_will_apply(policy: str, *, source_needs_tonemap: bool) -> bool:
-    """Decide whether a run will tonemap, from the policy and the source.
-
-    Kept here as the single source of truth so the backend named in the run
-    header cannot drift from the one the run actually uses.
-
-    Args:
-        policy: ``auto``, ``force`` or ``off``.
-        source_needs_tonemap: Whether the source carries an HDR transfer.
-
-    Returns:
-        True if the tonemap chain will be inserted.
-    """
-    if policy == "force":
-        return True
-    if policy == "auto":
-        return source_needs_tonemap
-    return False
-
-
 def format_tonemap_backend(*, use_gpu: bool) -> str:
     """Name the tonemapping backend for display.
 

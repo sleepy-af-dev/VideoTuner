@@ -69,7 +69,6 @@ class PipelineArgs:
     vmaf_model: str | None = None
     v0_vmaf: bool = False
     vmaf_log: Path | None = None
-    tonemap: str = "auto"
 
     guard_start_percent: float = 0.0
     guard_end_percent: float = 0.0
@@ -397,12 +396,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "Score with the legacy v0 models, measuring at the encode bit depth"
             " as earlier releases did, for comparison against them"
         ),
-    )
-    _ = analysis_group.add_argument(
-        "--tonemap",
-        choices=["auto", "force", "off"],
-        default=_get_default("tonemap"),
-        help="HDR tonemapping: auto|force|off (default: auto)",
     )
     _ = analysis_group.add_argument(
         "--indexer",

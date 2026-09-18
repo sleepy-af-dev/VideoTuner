@@ -76,11 +76,6 @@ from .pipeline_validation import (
 from .profiles import Profile
 from .progress import PipelineDisplay, TranscriptFormatter, UserWarningHandler
 from .ssimulacra2_assessment import SSIM2Result
-from .tonemapping import (
-    format_tonemap_backend,
-    has_vulkan_support,
-    tonemap_will_apply,
-)
 from .utils import (
     configure_logging,
     display_path,
@@ -94,7 +89,6 @@ from .utils import (
 )
 from .vmaf_assessment import (
     VMAFResult,
-    needs_tonemap,
     resolve_vmaf_choice,
     vmaf_v1_available,
 )
@@ -379,22 +373,12 @@ def _run_pipeline_body(
     except OSError as e:
         log.warning("Failed to log file/job folder paths due to OSError: %s", e)
 
-    # Name the tonemap backend only when this run will actually tonemap. The two
-    # backends are different operators and move HDR scores, so a result is not
-    # interpretable without knowing which one ran.
-    tonemap_backend: str | None = None
-    if tonemap_will_apply(args.tonemap, source_needs_tonemap=needs_tonemap(info)):
-        tonemap_backend = format_tonemap_backend(
-            use_gpu=has_vulkan_support(args.ffmpeg_bin)
-        )
-
-    # SSIMULACRA2 tonemaps with a different operator, and --tonemap does not
-    # govern it: the metric is only defined on SDR, so an HDR input is always
-    # converted. Reported separately: otherwise the header names one backend
-    # for a run in which two of them ran.
-    ssim2_tonemap: str | None = None
-    if args.ssim2 and is_hdr_video(info.color_trc):
-        ssim2_tonemap = SSIM2_TONEMAP_BACKEND
+    # Both VMAF and SSIMULACRA2 tonemap an HDR input with the same operator,
+    # since neither metric is defined on HDR. Named once: a single line covers
+    # whichever of them is enabled, or both.
+    tonemap_operator: str | None = None
+    if (args.vmaf or args.ssim2) and is_hdr_video(info.color_trc):
+        tonemap_operator = SSIM2_TONEMAP_BACKEND
 
     # Once per run rather than once per CRF iteration: both assumptions
     # follow from this probe and hold for every assessment that follows.
@@ -432,8 +416,7 @@ def _run_pipeline_body(
         args,
         multi_profile_display,
         input_path.name,
-        tonemap_backend=tonemap_backend,
-        ssim2_tonemap=ssim2_tonemap,
+        tonemap_operator=tonemap_operator,
         vmaf_choice=vmaf_choice,
     )
 

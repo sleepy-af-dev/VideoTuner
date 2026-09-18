@@ -56,7 +56,6 @@ class PipelineArgsProtocol(Protocol):
     ssim2_interval_frames: int
     ssim2_region_frames: int
     vmaf_model: str | None
-    tonemap: str
     indexer: IndexerType
     guard_start_percent: float
     guard_end_percent: float
@@ -123,8 +122,7 @@ def display_settings_summary(
     args: PipelineArgsProtocol,
     multi_profile_display: str = "",
     source_name: str = "",
-    tonemap_backend: str | None = None,
-    ssim2_tonemap: str | None = None,
+    tonemap_operator: str | None = None,
     vmaf_choice: VmafModelChoice | None = None,
 ) -> None:
     """Display active settings summary to console.
@@ -134,14 +132,11 @@ def display_settings_summary(
         args: Pipeline arguments
         multi_profile_display: Pre-formatted string showing profiles/groups for multi-profile mode
         source_name: Name of the source video file
-        tonemap_backend: Label for the tonemapping backend VMAF will use, or
-            None when VMAF will not tonemap. The two backends are different
-            operators and move HDR scores, so a result is not interpretable
-            without it.
-        ssim2_tonemap: Label for the operator SSIMULACRA2 will tonemap with, or
-            None when it will not. It is a different one from VMAF's and is not
-            governed by ``--tonemap``, so naming only VMAF's would mislabel
-            half the run.
+        tonemap_operator: Label for the operator that takes an HDR input to
+            SDR before scoring, or None when the source is SDR and nothing
+            tonemaps. Both VMAF and SSIMULACRA2 run every HDR input through
+            it, since neither metric is defined on HDR, so one line covers
+            whichever of them is enabled.
         vmaf_choice: Resolved VMAF model generation, or None when VMAF is off.
             The exact model varies per comparison, but the generation is settled
             before the run and decides whether a score compares with an old one.
@@ -196,14 +191,8 @@ def display_settings_summary(
             )
         else:
             console.print(f"  VMAF models: {vmaf_choice.family}")
-    if args.tonemap != get_default("tonemap"):
-        console.print(f"  Tonemap: {args.tonemap}")
-    # Named per metric: the two tonemap with different operators, and only
-    # VMAF's is under --tonemap.
-    if tonemap_backend is not None:
-        console.print(f"  Tonemapping (VMAF): {tonemap_backend}")
-    if ssim2_tonemap is not None:
-        console.print(f"  Tonemapping (SSIMULACRA2): {ssim2_tonemap}")
+    if tonemap_operator is not None:
+        console.print(f"  Tonemapping: {tonemap_operator}")
 
     # Log non-default guard bands
     if args.guard_start_percent > 0:

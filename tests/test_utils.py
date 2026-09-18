@@ -197,9 +197,14 @@ class TestJobFolderBudget:
     def test_a_slug_shorter_than_the_fixed_dirs_does_not_win(
         self, tmp_path: Path
     ) -> None:
-        """Profile dirs sit beside reference/ and temp/, so the longest bounds it."""
+        """Profile dirs sit beside temp/, so the longest of them bounds it."""
+        # "abc" is shorter than temp/ and "abcde" is longer, so only the
+        # second one moves the budget.
         assert job_folder_budget(tmp_path, ["P"]) == job_folder_budget(
-            tmp_path, ["reference"]
+            tmp_path, ["abc"]
+        )
+        assert job_folder_budget(tmp_path, ["P"]) > job_folder_budget(
+            tmp_path, ["abcde"]
         )
 
     def test_longest_slug_wins(self, tmp_path: Path) -> None:

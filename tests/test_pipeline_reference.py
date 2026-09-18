@@ -1,17 +1,14 @@
-"""Tests for pipeline reference module."""
+"""Tests for pipeline_reference, and for the reference no longer being a file."""
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
-import pytest
-
-from videotuner.encoding_utils import SampledSource, UsableRange
+from videotuner import pipeline_reference
 from videotuner.pipeline_cli import PipelineArgs
-from videotuner.pipeline_reference import (
-    MetricSamplingParams,
-    are_sampling_params_equal,
-)
+from videotuner.pipeline_reference import are_sampling_params_equal
+from videotuner.pipeline_types import IterationContext
 
 
 class TestAreSamplingParamsEqual:
@@ -128,65 +125,18 @@ class TestAreSamplingParamsEqual:
         assert are_sampling_params_equal(args) is True
 
 
-class TestMetricSamplingParams:
-    """How a metric samples the source a job reads, across one file or several."""
+def test_no_lossless_reference_is_generated() -> None:
+    # Both metrics select their reference frames from the source with the
+    # same script the encoder is fed, proven frame-identical in
+    # tests/test_frame_accuracy.py, so encoding a reference copy is work
+    # with no product.
+    assert not hasattr(pipeline_reference, "generate_metric_reference")
 
-    @staticmethod
-    def _source(name: str, start: int, end: int) -> SampledSource:
-        return SampledSource(
-            path=Path(f"{name}.mkv"),
-            cache_file=Path(f"{name}.ffindex"),
-            usable_range=UsableRange(start=start, end=end, frame_count=end - start),
-        )
 
-    def test_is_frozen(self) -> None:
-        params = MetricSamplingParams(
-            interval_frames=1600,
-            region_frames=20,
-            sources=(self._source("one", 0, 10000),),
-        )
-        with pytest.raises(AttributeError):
-            setattr(params, "interval_frames", 1)
-
-    def test_num_samples_for_one_file(self) -> None:
-        params = MetricSamplingParams(
-            interval_frames=100,
-            region_frames=50,
-            sources=(self._source("one", 0, 1000),),
-        )
-        # (1000 + 100 - 50) // 100 = 10
-        assert params.num_samples == 10
-        assert params.total_sample_frames == 500
-
-    def test_samples_are_counted_per_file_then_summed(self) -> None:
-        """Each file is sampled on its own, so short files still contribute."""
-        params = MetricSamplingParams(
-            interval_frames=100,
-            region_frames=50,
-            sources=(
-                self._source("one", 0, 1000),
-                self._source("two", 0, 1000),
-            ),
-        )
-
-        assert params.num_samples == 20
-        assert params.total_sample_frames == 1000
-
-    def test_a_file_shorter_than_the_interval_still_contributes(self) -> None:
-        params = MetricSamplingParams(
-            interval_frames=1600,
-            region_frames=20,
-            sources=(
-                self._source("long", 0, 10000),
-                self._source("short", 0, 500),
-            ),
-        )
-
-        assert (
-            params.num_samples
-            > MetricSamplingParams(
-                interval_frames=1600,
-                region_frames=20,
-                sources=(self._source("long", 0, 10000),),
-            ).num_samples
-        )
+def test_no_iteration_can_be_pointed_at_a_reference_file() -> None:
+    # The stronger half of the claim above: with the fields gone there is
+    # nowhere for a reference path to be threaded through, so a metric
+    # cannot quietly go back to scoring against a copy.
+    fields = {f.name for f in dataclasses.fields(IterationContext)}
+    assert "vmaf_ref_path" not in fields
+    assert "ssim2_ref_path" not in fields

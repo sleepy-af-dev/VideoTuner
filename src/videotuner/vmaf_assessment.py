@@ -34,7 +34,6 @@ from .encoding_utils import (
 )
 from .media import (
     VideoInfo,
-    get_assessment_frame_count,
     get_bit_depth_from_pix_fmt,
     parse_video_info,
 )
@@ -556,7 +555,7 @@ def build_vmaf_filter(
 
 def run_vmaf(
     ffmpeg_bin: str,
-    ref_path: Path,
+    ref_script: str,
     dis_path: Path,
     ref_info: VideoInfo,
     dis_info: VideoInfo,
@@ -665,27 +664,24 @@ def run_vmaf(
     )
     filter_graph = f"{filter_prefix}{vmaf_opts}"
 
-    # Both clips are loaded by the selected indexer, tonemapped by vs-tonemap,
-    # and piped down one vspipe process as two tracks in a matroska stream;
-    # ffmpeg reads them back off pipe:0 as [0:v:0] and [0:v:1].
+    # The reference frames are selected from the source by the sampling script
+    # and the distorted encode is loaded by the selected indexer. Both are
+    # tonemapped by vs-tonemap and piped down one vspipe process as two tracks
+    # in a matroska stream; ffmpeg reads them back off pipe:0 as [0:v:0] and
+    # [0:v:1].
     #
-    # The reference index lives in temp_dir, which survives across CRF
-    # iterations, not in tmp_log_dir, which this function deletes on every
-    # call: the reference is one file for the whole search and the largest
-    # source in it, and ssimulacra2_assessment already learned that deleting
-    # its index here means rebuilding it every iteration. The distorted index
-    # names a different encode each iteration, so it is still removed once
-    # this call is done, the same way ssimulacra2_assessment treats its own.
+    # The distorted index lives in temp_dir rather than tmp_log_dir, which this
+    # function deletes on every call, but it still names a different encode each
+    # iteration, so it is removed once this call is done - the same way
+    # ssimulacra2_assessment treats its own. The source indexes the reference
+    # reads belong to the job and are built before any encoding.
     vpy_path = Path(tmp_log_dir) / "vmaf.vpy"
-    index_suffix = indexer_spec(indexer).index_suffix
-    ref_cache = temp_dir / f"vmaf_ref{index_suffix}"
-    dis_cache = temp_dir / f"vmaf_dis{index_suffix}"
+    dis_cache = temp_dir / f"vmaf_dis{indexer_spec(indexer).index_suffix}"
     write_vpy_script(
         vpy_path,
         build_vmaf_vpy_script(
-            ref_path=ref_path,
+            ref_script=ref_script,
             dis_path=dis_path,
-            ref_cache=ref_cache,
             dis_cache=dis_cache,
             indexer=indexer,
             info=ref_info,
@@ -755,8 +751,8 @@ def run_vmaf(
             log.error("libvmaf produced no JSON log at %s", tmp_log)
     finally:
         shutil.rmtree(tmp_log_dir, ignore_errors=True)
-        # Only the distorted index. The reference is kept in temp_dir for the
-        # next iteration; see the comment where these paths are built.
+        # See the comment where this path is built: it names an encode that is
+        # replaced on the next iteration.
         if dis_cache.exists():
             dis_cache.unlink()
 
@@ -866,7 +862,8 @@ def assess_with_vmaf(
     *,
     ffmpeg_bin: str,
     ffprobe_bin: str,
-    ref_path: Path,
+    ref_script: str,
+    ref_info: VideoInfo,
     dis_path: Path,
     model_spec: str | None = None,
     log_path: Path,
@@ -877,21 +874,19 @@ def assess_with_vmaf(
     vs_env: VapourSynthEnv,
     temp_dir: Path,
 ) -> VMAFResult:
-    """High-level helper that probes both inputs and runs VMAF.
+    """High-level helper that probes the encode and runs VMAF.
 
     Centralizes all VMAF-related orchestration here (probing, filtering, parsing).
     If model_spec is None, automatically selects the appropriate model based on
-    the distorted video's resolution.
+    the distorted video's resolution. The reference is described by ``ref_info``
+    rather than probed, since it is the sampled source and never a file.
     """  # noqa: E501  # TODO(E501): shorten line
-    ref_info = parse_video_info(
-        ref_path, ffprobe_bin=ffprobe_bin, log_hdr_metadata=False
-    )
     dis_info = parse_video_info(
         dis_path, ffprobe_bin=ffprobe_bin, log_hdr_metadata=False
     )
     return run_vmaf(
         ffmpeg_bin=ffmpeg_bin,
-        ref_path=ref_path,
+        ref_script=ref_script,
         dis_path=dis_path,
         ref_info=ref_info,
         dis_info=dis_info,
@@ -907,7 +902,9 @@ def assess_with_vmaf(
 
 
 def assess_vmaf_concatenated(
-    reference_path: Path,
+    reference_script: str,
+    reference_info: VideoInfo,
+    reference_frames: int,
     distorted_path: Path,
     workdir: Path,
     repo_root: Path,
@@ -923,10 +920,14 @@ def assess_vmaf_concatenated(
     temp_dir: Path,
     family: VmafFamily = VmafFamily.V1,
 ) -> list[VMAFResult]:
-    """Run VMAF assessment on concatenated reference and distorted files.
+    """Run VMAF assessment on the sampled source and a distorted encode.
 
     Args:
-        reference_path: Path to concatenated lossless reference
+        reference_script: Sampling script that selects the reference frames
+            from the source, the same one the encoder is fed.
+        reference_info: What that script's output looks like, after any crop.
+            The distorted track is scaled to its dimensions.
+        reference_frames: How many frames that script yields, for progress.
         distorted_path: Path to concatenated distorted encode
         workdir: Working directory for output files
         repo_root: Repository root directory
@@ -937,10 +938,10 @@ def assess_vmaf_concatenated(
         display: Progress display manager
         log: Logger instance
         iteration: Current iteration number
-        indexer: Source filter to load both clips with.
+        indexer: Source filter to load the distorted encode with.
         vs_env: VapourSynth environment configuration.
-        temp_dir: Directory for intermediate files, where the reference's
-            index is kept across iterations.
+        temp_dir: Directory for intermediate files, where the distorted
+            encode's index is written.
 
     Returns:
         List containing single VMAFResult for the concatenated comparison
@@ -951,12 +952,9 @@ def assess_vmaf_concatenated(
         get_profile_dir(workdir, profile) / f"vmaf_concatenated_iter{iteration}.json"
     )
 
-    # Get frame count for progress tracking
-    total_frames = get_assessment_frame_count(reference_path, ffprobe_bin=ffprobe_bin)
-
     with display.stage(
         "Running VMAF assessment",
-        total=total_frames,
+        total=reference_frames,
         show_eta=True,
         transient=True,
         show_done=True,
@@ -964,12 +962,13 @@ def assess_vmaf_concatenated(
         result = assess_with_vmaf(
             ffmpeg_bin=ffmpeg_bin,
             ffprobe_bin=ffprobe_bin,
-            ref_path=reference_path,
+            ref_script=reference_script,
+            ref_info=reference_info,
             dis_path=distorted_path,
             model_spec=vmaf_model,
             log_path=vmaf_log_path,
             cwd=repo_root,
-            line_handler=stage.make_ffmpeg_handler(total_frames=total_frames),
+            line_handler=stage.make_ffmpeg_handler(total_frames=reference_frames),
             family=family,
             indexer=indexer,
             vs_env=vs_env,

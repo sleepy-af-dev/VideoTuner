@@ -55,17 +55,12 @@ from .pipeline_multi_profile import (
     rank_profile_results,
     run_multi_profile_search,
 )
-from .pipeline_reference import (
-    MetricSamplingParams,
-    are_sampling_params_equal,
-    generate_metric_reference,
-)
+from .pipeline_reference import are_sampling_params_equal
 from .pipeline_types import (
     Budget,
     BudgetPoint,
     IterationContext,
     JobResult,
-    get_reference_dir,
 )
 from .pipeline_validation import (
     build_targets,
@@ -654,116 +649,15 @@ def _run_pipeline_body(
         log.error("No metrics have valid samples - cannot proceed")
         return JobResult.failure(input_path, "no valid samples")
 
-    log_section(log, "Reference Generation")
-
-    # Always use x265 for lossless reference: both x264 (--qp 0) and x265
-    # (--lossless) produce visually identical output, but x265 handles HDR
-    # content which x264 cannot.
-    from .encoder_type import EncoderType
-
-    lossless_encoder = EncoderType.X265
-
-    # Create concatenated reference files for each metric
-    lossless_profile = Profile(
-        name="lossless",
-        description="Lossless reference extraction",
-        settings={"preset": "ultrafast"},
-        encoder=lossless_encoder,
-    )
-
-    vmaf_ref_path: Path | None = None
-    ssim2_ref_path: Path | None = None
-    reference_dir = get_reference_dir(workdir)
-
-    # Check if we can share samples between metrics (identical sampling parameters)
+    # Both metrics take their reference frames from the sampling script, the
+    # same one the encoder is fed, so the only question left here is whether
+    # they select the same frames and can therefore share one encode.
     sharing_samples = are_sampling_params_equal(args)
-
     if sharing_samples:
-        # Generate ONE shared reference file for both metrics
         log.info(
             "Using shared samples for VMAF and SSIM2 (identical sampling parameters)"
         )
         display.console.print("[cyan]Using shared samples for VMAF and SSIM2[/cyan]")
-
-        shared_sampling = MetricSamplingParams(
-            interval_frames=args.vmaf_interval_frames,  # Same as ssim2
-            region_frames=args.vmaf_region_frames,  # Same as ssim2
-            sources=tuple(sampled_sources),
-        )
-        shared_ref_path = generate_metric_reference(
-            metric_type="shared",
-            output_dir=reference_dir,
-            sampling_params=shared_sampling,
-            fps=info.fps,
-            lossless_profile=lossless_profile,
-            video_info=info,
-            mkvmerge_bin=args.mkvmerge_bin,
-            repo_root=repo_root,
-            temp_dir=temp_dir,
-            display=display,
-            log=log,
-            indexer=args.indexer,
-            crop_detect=crop_detect,
-            crop_values=crop_values,
-        )
-        if shared_ref_path is None:
-            args.vmaf = False
-            args.ssim2 = False
-        else:
-            # Point both metrics to the same reference file
-            vmaf_ref_path = shared_ref_path
-            ssim2_ref_path = shared_ref_path
-    else:
-        # Generate separate references for each metric (different sampling parameters)
-        if args.vmaf:
-            vmaf_sampling = MetricSamplingParams(
-                interval_frames=args.vmaf_interval_frames,
-                region_frames=args.vmaf_region_frames,
-                sources=tuple(sampled_sources),
-            )
-            vmaf_ref_path = generate_metric_reference(
-                metric_type="vmaf",
-                output_dir=reference_dir,
-                sampling_params=vmaf_sampling,
-                fps=info.fps,
-                lossless_profile=lossless_profile,
-                video_info=info,
-                mkvmerge_bin=args.mkvmerge_bin,
-                repo_root=repo_root,
-                temp_dir=temp_dir,
-                display=display,
-                log=log,
-                indexer=args.indexer,
-                crop_detect=crop_detect,
-                crop_values=crop_values,
-            )
-            if vmaf_ref_path is None:
-                args.vmaf = False
-
-        if args.ssim2:
-            ssim2_sampling = MetricSamplingParams(
-                interval_frames=args.ssim2_interval_frames,
-                region_frames=args.ssim2_region_frames,
-                sources=tuple(sampled_sources),
-            )
-            ssim2_ref_path = generate_metric_reference(
-                metric_type="ssim2",
-                output_dir=reference_dir,
-                sampling_params=ssim2_sampling,
-                fps=info.fps,
-                lossless_profile=lossless_profile,
-                video_info=info,
-                mkvmerge_bin=args.mkvmerge_bin,
-                repo_root=repo_root,
-                temp_dir=temp_dir,
-                display=display,
-                log=log,
-                indexer=args.indexer,
-                crop_detect=crop_detect,
-                crop_values=crop_values,
-            )
-            if ssim2_ref_path is None:
-                args.ssim2 = False
 
     # Build targets (needed for any search module)
     has_quality_targets = has_targets(args)
@@ -816,8 +710,6 @@ def _run_pipeline_body(
             total_frames=total_frames,
             guard_start_frames=guard_start_frames,
             guard_end_frames=guard_end_frames,
-            vmaf_ref_path=vmaf_ref_path,
-            ssim2_ref_path=ssim2_ref_path,
             args=args,
             display=display,
             log=log,
@@ -890,8 +782,6 @@ def _run_pipeline_body(
             total_frames=total_frames,
             guard_start_frames=guard_start_frames,
             guard_end_frames=guard_end_frames,
-            vmaf_ref_path=vmaf_ref_path,
-            ssim2_ref_path=ssim2_ref_path,
             args=args,
             display=display,
             log=log,
@@ -1109,8 +999,6 @@ def _run_pipeline_body(
                 total_frames=total_frames,
                 guard_start_frames=guard_start_frames,
                 guard_end_frames=guard_end_frames,
-                vmaf_ref_path=vmaf_ref_path,
-                ssim2_ref_path=ssim2_ref_path,
                 args=args,
                 display=display,
                 log=log,

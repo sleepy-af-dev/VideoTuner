@@ -165,7 +165,7 @@ PATH_FILENAME_MARGIN: int = 60
 # Directories a job creates for its own use. Profile directories sit beside
 # them, so whichever name is longer bounds how deep a job folder can be, and
 # a profile named after one of these is renamed to keep them apart.
-RESERVED_JOB_SUBDIRS: frozenset[str] = frozenset({"reference", "temp"})
+RESERVED_JOB_SUBDIRS: frozenset[str] = frozenset({"temp"})
 
 # A job folder shortened below this stops being recognisable, so the batch
 # folder gives up characters instead.

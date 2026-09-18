@@ -8,7 +8,14 @@ from typing import Any
 
 import pytest
 
-from videotuner.encoding_utils import IndexerType, VapourSynthEnv
+from videotuner.encoding_utils import (
+    IndexerType,
+    SampledSource,
+    UsableRange,
+    VapourSynthEnv,
+    build_sampling_vpy_script,
+    indexer_spec,
+)
 from videotuner.media import VideoInfo
 from videotuner.metric_colour import (
     _FALLBACK_VALUES,
@@ -385,15 +392,46 @@ def test_pq_without_a_mastering_display_fails_without_the_assumption(
     assert "MasteringDisplayMaxLuminance" in proc.stderr
 
 
+_DEFAULT_SOURCE = Path("source.mkv")
+
+
+def _sampling(
+    indexer: IndexerType, source: Path = _DEFAULT_SOURCE, frames: int = 24
+) -> str:
+    """Build the reference half the way the pipeline does, by composing it."""
+    return build_sampling_vpy_script(
+        sources=[
+            SampledSource(
+                path=source,
+                cache_file=source.with_suffix(indexer_spec(indexer).index_suffix),
+                usable_range=UsableRange(start=0, end=frames, frame_count=frames),
+            )
+        ],
+        # SelectEvery refuses a cycle of one, so the smallest selection that
+        # keeps every frame is two out of every two.
+        interval_frames=2,
+        region_frames=2,
+        fps=24.0,
+        indexer=indexer,
+    )
+
+
 def _script(mode: LinearisationMode, *, missing: Sequence[str] = ()) -> str:
     return _build_ssim2_script(
-        ref_path=Path("ref.mkv"),
+        ref_script=_sampling(IndexerType.LSMASH),
         dis_path=Path("dis.mkv"),
-        ref_cache=Path("ref.lwi"),
         dis_cache=Path("dis.lwi"),
         preamble=colour_preamble(mode, missing=missing),
         indexer=IndexerType.LSMASH,
     )
+
+
+@pytest.mark.parametrize("mode", list(LinearisationMode))
+def test_the_ssim2_script_is_valid_python(mode: LinearisationMode) -> None:
+    # A formatted string with the sampling script pasted into it, so a syntax
+    # error in either half would pass every other test here and fail only
+    # once VapourSynth ran it.
+    compile(_script(mode), "ssim2.vpy", "exec")
 
 
 def test_both_clips_go_through_the_chain() -> None:
@@ -451,9 +489,8 @@ def test_an_sdr_script_does_not_demand_the_tonemap_plugin() -> None:
 
 def test_ssim2_script_loads_through_the_selected_indexer() -> None:
     src = _build_ssim2_script(
-        ref_path=Path("ref.mkv"),
+        ref_script=_sampling(IndexerType.FFMS2),
         dis_path=Path("dis.mkv"),
-        ref_cache=Path("ref.ffindex"),
         dis_cache=Path("dis.ffindex"),
         preamble=colour_preamble(LinearisationMode.SDR, missing=[]),
         indexer=IndexerType.FFMS2,
@@ -475,9 +512,8 @@ def test_the_indexer_hint_only_answers_a_failed_load() -> None:
 
 def test_ssim2_script_can_still_load_through_lsmash() -> None:
     src = _build_ssim2_script(
-        ref_path=Path("ref.mkv"),
+        ref_script=_sampling(IndexerType.LSMASH),
         dis_path=Path("dis.mkv"),
-        ref_cache=Path("ref.lwi"),
         dis_cache=Path("dis.lwi"),
         preamble=colour_preamble(LinearisationMode.SDR, missing=[]),
         indexer=IndexerType.LSMASH,
@@ -541,7 +577,7 @@ def test_a_pq_input_with_no_mastering_display_is_still_scored(
     )
 
     result = _run_vszip_assessment(
-        ref_path=ref,
+        ref_script=_sampling(IndexerType.FFMS2, ref),
         dis_path=dis,
         vs_env=VapourSynthEnv.from_cwd(REPO_ROOT),
         temp_dir=tmp_path,

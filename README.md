@@ -89,12 +89,11 @@ VideoTuner uses periodic sampling to efficiently assess video quality without en
 2. **Automatic Crop Detection** (enabled by default): Analyzes the video to detect and remove letterboxing/pillarboxing before sampling
 
 3. **Sample Encoding**: Creates concatenated sample files using VapourSynth's `SelectEvery` filter for efficient frame extraction
-   - **Reference samples** are encoded losslessly to ensure 100% accuracy to the original source
    - **Distorted samples** are encoded with the test CRF/bitrate settings for quality comparison
-   - Lossless encoding avoids frame-accuracy issues that would occur with direct cutting (GOP boundaries, keyframe restrictions)
-   - **Note:** Lossless reference files can be large depending on sample count and source resolution
+   - **Reference samples** are not encoded at all: both metrics read the source through the same `SelectEvery` script the encoder is fed
+   - Selecting in VapourSynth avoids the frame-accuracy problems direct cutting brings (GOP boundaries, keyframe restrictions)
 
-4. **Quality Assessment**: Runs VMAF and/or SSIMULACRA2 comparing distorted samples against lossless references
+4. **Quality Assessment**: Runs VMAF and/or SSIMULACRA2 comparing distorted samples against the source frames they were encoded from
 
 ### CRF Search Algorithm
 
@@ -116,7 +115,7 @@ The CRF search uses interpolated binary search to efficiently find the optimal C
 1. **Early Pipeline Stage**: Runs immediately after building the source index, before any encoding
 2. **Smart sampling**: Samples one frame every 30 seconds across the middle 80% of the video
 3. **Conservative cropping**: Uses the minimum (safest) crop values across all sampled frames to avoid accidentally cropping content
-4. **Consistent application**: The same crop values are applied to ALL encodes - reference clips, distorted clips, and across all phases
+4. **Consistent application**: The same crop values are applied to ALL encodes and to the frames both metrics read, across all phases
 
 **Detection method:**
 
@@ -739,9 +738,6 @@ One job is one source video processed end to end. Its output all lands in one fo
 
 ```text
 jobs/<input_name>_<timestamp>/
-├── reference/                                # Lossless reference samples
-│   ├── vmaf_reference_concatenated.mkv
-│   └── ssim2_reference_concatenated.mkv
 ├── <ProfileName>/                            # Everything produced for one profile
 │   ├── vmaf_crf_*.mkv                        # VMAF distorted at each CRF iteration
 │   ├── ssim2_crf_*.mkv                       # SSIM2 distorted at each CRF iteration
@@ -755,7 +751,7 @@ jobs/<input_name>_<timestamp>/
 
 - All encoded samples and assessment results are preserved across iterations for inspection
 - Each profile gets one folder holding its encodes and both metrics' results, so a multi-profile comparison is one folder per candidate rather than three
-- A profile named `reference` or `temp` would clash with the folders above, so it gets a `_profile` suffix
+- A profile named `temp` would clash with the folder above, so it gets a `_profile` suffix
 
 ### Batch folder
 
@@ -861,7 +857,7 @@ The pipeline is organized into modules:
 - `pipeline_validation.py` - Assessment validation, target checking, and sampling validation
 - `pipeline_types.py` - Shared dataclasses and path management utilities
 - `pipeline_display.py` - Rich console display functions for settings and results
-- `pipeline_reference.py` - Lossless reference generation for quality metrics
+- `pipeline_reference.py` - Whether both metrics sample identically, and can therefore share one encode
 - `crf_search.py` - Interpolated binary search algorithm for CRF optimization
 
 ### Encoding & Profiles

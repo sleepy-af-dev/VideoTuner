@@ -32,8 +32,6 @@ USER_FACING_WARNINGS = {
     ("encoding_utils.py", "the index will be built automatically", 1),
     ("media.py", "Unknown chroma_location", 1),
     ("pipeline.py", "VMAF v1 models not found", 1),
-    ("pipeline_iteration.py", "VMAF reference path is None", 1),
-    ("pipeline_iteration.py", "SSIM2 reference path is None", 1),
     ("pipeline_iteration.py", "No bitrate data available from shared", 1),
     ("pipeline_iteration.py", "No bitrate data available from concatenated", 1),
     ("pipeline_validation.py", "Usable frames", 1),

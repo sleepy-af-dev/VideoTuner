@@ -16,7 +16,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from videotuner import vmaf_assessment
-from videotuner.encoding_utils import IndexerType, VapourSynthEnv, indexer_spec
+from videotuner.encoding_utils import (
+    IndexerType,
+    SampledSource,
+    UsableRange,
+    VapourSynthEnv,
+    build_sampling_vpy_script,
+    indexer_spec,
+)
 from videotuner.media import VideoInfo
 from videotuner.vmaf_assessment import (
     build_libvmaf_model_option,
@@ -28,6 +35,24 @@ from videotuner.vmaf_assessment import (
     vmaf_v1_available,
 )
 from videotuner.vmaf_types import VmafFamily
+
+# The reference half of every script run_vmaf builds below, composed the way
+# the pipeline composes it. These tests stub out the subprocess, so it is
+# never executed; building it properly keeps the call sites honest about what
+# run_vmaf is handed.
+_SAMPLING = build_sampling_vpy_script(
+    sources=[
+        SampledSource(
+            path=Path("source.mkv"),
+            cache_file=Path("source.ffindex"),
+            usable_range=UsableRange(start=0, end=240, frame_count=240),
+        )
+    ],
+    interval_frames=24,
+    region_frames=2,
+    fps=24.0,
+    indexer=IndexerType.FFMS2,
+)
 
 
 class TestSelectVmafModel:
@@ -352,7 +377,7 @@ class TestVmafLogPathLength:
         destination.parent.mkdir(parents=True, exist_ok=True)
         _ = run_vmaf(
             ffmpeg_bin="ffmpeg",
-            ref_path=tmp_path / "ref.mkv",
+            ref_script=_SAMPLING,
             dis_path=tmp_path / "dis.mkv",
             ref_info=self._info(),
             dis_info=self._info(),
@@ -421,7 +446,7 @@ class TestRunVmafScalesToTheReference:
 
         _ = run_vmaf(
             ffmpeg_bin="ffmpeg",
-            ref_path=tmp_path / "ref.mkv",
+            ref_script=_SAMPLING,
             dis_path=tmp_path / "dis.mkv",
             ref_info=VideoInfo(fps=24.0, duration=1.0, width=3840, height=2160),
             dis_info=VideoInfo(fps=24.0, duration=1.0, width=1920, height=1080),
@@ -435,27 +460,25 @@ class TestRunVmafScalesToTheReference:
         assert "scale=3840:2160:flags=bicubic" in captured["graph"]
 
 
-class TestRunVmafKeepsTheReferenceIndex:
-    """ssimulacra2_assessment learned this the hard way: rebuilding a
-    multi-GB reference's index every CRF iteration is expensive enough to
-    matter. VMAF's reference index has to survive the same way.
+class TestRunVmafClearsTheDistortedIndex:
+    """The distorted encode changes every CRF iteration, so its index has to
+    go with it. The reference has no index of its own any more: it is the
+    sampling script, which reads the source through the job's own indexes.
     """
 
-    def test_reference_index_is_not_deleted(
+    def test_distorted_index_is_deleted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _ = _fake_captured_graph(monkeypatch)
         temp_dir = tmp_path / "temp"
         temp_dir.mkdir()
-        ref_cache = temp_dir / f"vmaf_ref{indexer_spec(IndexerType.FFMS2).index_suffix}"
         dis_cache = temp_dir / f"vmaf_dis{indexer_spec(IndexerType.FFMS2).index_suffix}"
         # Stand in for an index already built by a previous iteration.
-        _ = ref_cache.write_text("existing reference index", encoding="utf-8")
         _ = dis_cache.write_text("stale distorted index", encoding="utf-8")
 
         _ = run_vmaf(
             ffmpeg_bin="ffmpeg",
-            ref_path=tmp_path / "ref.mkv",
+            ref_script=_SAMPLING,
             dis_path=tmp_path / "dis.mkv",
             ref_info=VideoInfo(fps=24.0, duration=1.0, width=1920, height=1080),
             dis_info=VideoInfo(fps=24.0, duration=1.0, width=1920, height=1080),
@@ -466,7 +489,6 @@ class TestRunVmafKeepsTheReferenceIndex:
             temp_dir=temp_dir,
         )
 
-        assert ref_cache.exists(), "the reference index must survive the call"
         assert not dis_cache.exists(), (
             "the distorted index names a different encode next iteration"
         )

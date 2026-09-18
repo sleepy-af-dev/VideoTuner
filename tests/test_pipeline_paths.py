@@ -9,47 +9,8 @@ from unittest.mock import MagicMock
 
 from videotuner.encoder_type import EncoderType
 from videotuner.pipeline_cli import PipelineArgs
-from videotuner.pipeline_types import (
-    IterationContext,
-    get_profile_dir,
-    get_reference_dir,
-)
+from videotuner.pipeline_types import IterationContext, get_profile_dir
 from videotuner.profiles import Profile
-
-
-class TestGetReferenceDir:
-    """Tests for reference directory path management."""
-
-    def test_creates_reference_directory(self):
-        """Test creates reference directory if it doesn't exist."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            workdir = Path(tmpdir)
-            ref_dir = get_reference_dir(workdir)
-
-            assert ref_dir.exists()
-            assert ref_dir.is_dir()
-            assert ref_dir == workdir / "reference"
-
-    def test_returns_existing_reference_directory(self):
-        """Test returns existing reference directory."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            workdir = Path(tmpdir)
-            expected_dir = workdir / "reference"
-            expected_dir.mkdir(parents=True, exist_ok=True)
-
-            ref_dir = get_reference_dir(workdir)
-
-            assert ref_dir == expected_dir
-            assert ref_dir.exists()
-
-    def test_creates_parent_directories(self):
-        """Test creates parent directories if needed."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            workdir = Path(tmpdir) / "nested" / "path"
-            ref_dir = get_reference_dir(workdir)
-
-            assert ref_dir.exists()
-            assert workdir.exists()
 
 
 class TestGetDistortedDir:
@@ -325,12 +286,10 @@ class TestPathConsistency:
                 name="Test", description="Test", settings={}, encoder=EncoderType.X265
             )
 
-            ref_dir = get_reference_dir(workdir)
             dist_dir = get_profile_dir(workdir, profile)
             vmaf_dir = get_profile_dir(workdir, profile)
             ssim2_dir = get_profile_dir(workdir, profile)
 
-            assert ref_dir.exists()
             assert dist_dir.exists()
             assert vmaf_dir.exists()
             assert ssim2_dir.exists()
@@ -374,8 +333,6 @@ class TestIterationContext:
             total_frames=10000,
             guard_start_frames=100,
             guard_end_frames=100,
-            vmaf_ref_path=None,
-            ssim2_ref_path=None,
             args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),
@@ -397,8 +354,6 @@ class TestIterationContext:
             total_frames=10000,
             guard_start_frames=100,
             guard_end_frames=100,
-            vmaf_ref_path=None,
-            ssim2_ref_path=None,
             args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),
@@ -421,8 +376,6 @@ class TestIterationContext:
             total_frames=10000,
             guard_start_frames=100,
             guard_end_frames=200,
-            vmaf_ref_path=None,
-            ssim2_ref_path=None,
             args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),
@@ -445,8 +398,6 @@ class TestIterationContext:
             total_frames=10000,
             guard_start_frames=0,
             guard_end_frames=0,
-            vmaf_ref_path=None,
-            ssim2_ref_path=None,
             args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),
@@ -468,8 +419,6 @@ class TestIterationContext:
             total_frames=10000,
             guard_start_frames=100,
             guard_end_frames=100,
-            vmaf_ref_path=None,
-            ssim2_ref_path=None,
             args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),
@@ -478,22 +427,13 @@ class TestIterationContext:
 
 
 class TestReservedProfileNames:
-    """A profile directory sits beside reference/ and temp/, so names must differ."""
+    """A profile directory sits beside temp/, so the names must differ."""
 
     @staticmethod
     def _profile(name: str) -> Profile:
         return Profile(
             name=name, description="Test", settings={}, encoder=EncoderType.X265
         )
-
-    def test_profile_named_reference_does_not_collide(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            workdir = Path(tmpdir)
-            ref_dir = get_reference_dir(workdir)
-            prof_dir = get_profile_dir(workdir, self._profile("reference"))
-
-            assert prof_dir != ref_dir
-            assert prof_dir.exists()
 
     def test_profile_named_temp_does_not_collide(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -503,12 +443,12 @@ class TestReservedProfileNames:
             assert prof_dir.name != "temp"
 
     def test_guard_is_case_insensitive(self):
-        """Windows treats Reference and reference as one directory."""
+        """Windows treats Temp and temp as one directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
             workdir = Path(tmpdir)
-            prof_dir = get_profile_dir(workdir, self._profile("Reference"))
+            prof_dir = get_profile_dir(workdir, self._profile("Temp"))
 
-            assert prof_dir != get_reference_dir(workdir)
+            assert prof_dir.name != "Temp"
 
     def test_ordinary_names_are_untouched(self):
         with tempfile.TemporaryDirectory() as tmpdir:

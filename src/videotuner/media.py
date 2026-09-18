@@ -448,27 +448,6 @@ def get_frame_count(path: Path, info: VideoInfo | None = None) -> int:
     return 1
 
 
-def get_assessment_frame_count(
-    video_path: Path,
-    ffprobe_bin: str = "ffprobe",
-) -> int:
-    """Get frame count for assessment progress tracking.
-
-    Convenience wrapper for assessment modules that need frame counts for
-    progress bars. Suppresses HDR metadata logging since assessments
-    typically process already-encoded files, not source videos.
-
-    Args:
-        video_path: Path to video file
-        ffprobe_bin: Path to ffprobe binary
-
-    Returns:
-        Frame count (minimum 1)
-    """
-    info = parse_video_info(video_path, ffprobe_bin=ffprobe_bin, log_hdr_metadata=False)
-    return get_frame_count(video_path, info)
-
-
 SUPPORTED_BIT_DEPTHS: frozenset[int] = frozenset({8, 10, 12, 14, 16})
 
 # Semi-planar formats put the chroma layout first and the depth second, so

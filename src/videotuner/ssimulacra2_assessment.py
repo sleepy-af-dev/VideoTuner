@@ -16,7 +16,6 @@ from .encoding_utils import (
     indexer_spec,
     write_vpy_script,
 )
-from .media import get_assessment_frame_count
 from .metric_colour import (
     LinearisationMode,
     colour_preamble,
@@ -93,9 +92,8 @@ _TONEMAP_GUARD = """
 
 def _build_ssim2_script(
     *,
-    ref_path: Path,
+    ref_script: str,
     dis_path: Path,
-    ref_cache: Path,
     dis_cache: Path,
     preamble: str,
     indexer: IndexerType,
@@ -103,14 +101,14 @@ def _build_ssim2_script(
     """Build the VapourSynth script that scores SSIMULACRA2.
 
     Args:
-        ref_path: Reference video path.
+        ref_script: Output of ``build_sampling_vpy_script``, which imports
+            VapourSynth and binds the selected frames to ``sampled``.
         dis_path: Distorted video path.
-        ref_cache: Index file for the reference.
         dis_cache: Index file for the distorted encode.
         preamble: Source defining ``prepare(clip)``, from ``colour_preamble``.
             Whether it calls vs-tonemap also decides whether the script
             guards on that plugin being loaded.
-        indexer: Source filter to load both clips with.
+        indexer: Source filter to load the distorted encode with.
 
     Returns:
         The .vpy contents.
@@ -125,10 +123,9 @@ def _build_ssim2_script(
     other = next(member for member in IndexerType if member is not indexer)
     display_name = indexer_spec(indexer).display_name
 
-    return f"""import vapoursynth as vs
-import sys
+    return f"""{ref_script}
 
-core = vs.core
+import sys
 
 {preamble}
 
@@ -136,15 +133,16 @@ core = vs.core
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
+# The reference is the sampling script above, so the source has already been
+# opened by the time this runs - and opened once already this iteration, by
+# the encode that produced the distorted clip below.
+ref = sampled
+print(f"[vszip] Reference: {{ref.width}}x{{ref.height}}, {{ref.format.name}}, {{len(ref)}} frames", file=sys.stderr, flush=True)
+
 # Only a failure to open a file can be answered by switching indexers, so the
-# hint is scoped to the loads. Everything after them - the colour chain, the
+# hint is scoped to the load. Everything after it - the colour chain, the
 # tone curve, the metric - fails for reasons no indexer change can fix.
 try:
-    print("[vszip] Loading reference video...", file=sys.stderr, flush=True)
-    # Load reference and distorted videos
-    ref = {indexer_spec(indexer).source_expr(str(ref_path.resolve()), str(ref_cache))}
-    print(f"[vszip] Reference: {{ref.width}}x{{ref.height}}, {{ref.format.name}}, {{len(ref)}} frames", file=sys.stderr, flush=True)
-
     print("[vszip] Loading distorted video...", file=sys.stderr, flush=True)
     dis = {indexer_spec(indexer).source_expr(str(dis_path.resolve()), str(dis_cache))}
     print(f"[vszip] Distorted: {{dis.width}}x{{dis.height}}, {{dis.format.name}}, {{len(dis)}} frames", file=sys.stderr, flush=True)
@@ -215,27 +213,27 @@ except Exception as e:
 """  # noqa: E501  # TODO(E501): shorten line
 
 
-def _vszip_cache_paths(temp_dir: Path, indexer: IndexerType) -> tuple[Path, Path]:
-    """Cache paths for the two vszip inputs, named by the indexer's suffix.
+def _vszip_dis_cache(temp_dir: Path, indexer: IndexerType) -> Path:
+    """Cache path for the distorted clip, named by the indexer's suffix.
 
     Shared by ``_run_vszip_assessment`` and ``assess_ssim2_concatenated`` so
     the index built ahead of time and the one the assessment script opens
-    are always the same file.
+    are always the same file. The reference needs no entry here: it is the
+    sampling script, which carries each source's own index.
 
     Args:
-        temp_dir: Directory the caches live in.
+        temp_dir: Directory the cache lives in.
         indexer: Selected source filter.
 
     Returns:
-        The reference and distorted cache paths.
+        The distorted cache path.
     """
-    suffix = indexer_spec(indexer).index_suffix
-    return temp_dir / f"vszip_ref{suffix}", temp_dir / f"vszip_dis{suffix}"
+    return temp_dir / f"vszip_dis{indexer_spec(indexer).index_suffix}"
 
 
 def _run_vszip_assessment(
     *,
-    ref_path: Path,
+    ref_script: str,
     dis_path: Path,
     vs_env: VapourSynthEnv,
     temp_dir: Path,
@@ -249,13 +247,13 @@ def _run_vszip_assessment(
     per-frame scores, then calculates summary statistics.
 
     Args:
-        ref_path: Reference video path
+        ref_script: Sampling script whose ``sampled`` clip is the reference.
         dis_path: Distorted video path
         vs_env: VapourSynth environment configuration
         temp_dir: Directory for temporary files
         info: Probed metadata for the input, used to pick the colour
             conversion the reference and distorted clips are scored through.
-        indexer: Source filter to load both clips with.
+        indexer: Source filter to load the distorted encode with.
         line_handler: Optional callback for progress updates
 
     Returns:
@@ -274,15 +272,14 @@ def _run_vszip_assessment(
     vpy_path = temp_dir / "vszip_ssim2.vpy"
 
     # Build VapourSynth script that calculates SSIMULACRA2 and prints scores
-    ref_cache, dis_cache = _vszip_cache_paths(temp_dir, indexer)
+    dis_cache = _vszip_dis_cache(temp_dir, indexer)
 
-    # Both of these read the input's probe, while prepare() runs on the
-    # reference and distorted encodes. Those agree with the input because the
+    # Both of these read the input's probe. The reference is the input, so it
+    # matches by construction; the distorted encode agrees with it because the
     # encoder parameter builders write --colorprim/--transfer/--colormatrix
-    # from this same VideoInfo, and the lossless reference is built by them
-    # too. An encoder that stopped carrying the tags across would break the
-    # assumption silently, since the script would then retag against the wrong
-    # probe.
+    # from this same VideoInfo. An encoder that stopped carrying the tags
+    # across would break the assumption silently, since the script would then
+    # retag the encode against the wrong probe.
     # What these assume is reported once at startup by
     # colour_assumption_notes, since both follow from the probe alone and
     # this function runs once per CRF iteration.
@@ -302,9 +299,8 @@ def _run_vszip_assessment(
     log.info("SSIMULACRA2 colour conversion: %s", mode.value)
 
     vpy_content = _build_ssim2_script(
-        ref_path=ref_path,
+        ref_script=ref_script,
         dis_path=dis_path,
-        ref_cache=ref_cache,
         dis_cache=dis_cache,
         preamble=preamble,
         indexer=indexer,
@@ -344,16 +340,17 @@ def _run_vszip_assessment(
         # Clean up temporary files
         if vpy_path.exists():
             vpy_path.unlink()
-        # Only the distorted index. The reference is one file for the whole CRF
-        # search and the largest in the run, so deleting its index here meant
-        # rebuilding it on every iteration. What is left behind is one index in
-        # the job's own temp folder, which no later job reads.
+        # The distorted index describes an encode that is replaced next
+        # iteration, so it goes with it. The source indexes the reference
+        # reads are the job's own, built once before any encoding, and are
+        # not this function's to remove.
         if dis_cache.exists():
             dis_cache.unlink()
 
 
 def assess_ssim2_concatenated(
-    reference_path: Path,
+    reference_script: str,
+    reference_frames: int,
     distorted_path: Path,
     workdir: Path,
     temp_dir: Path,
@@ -366,12 +363,14 @@ def assess_ssim2_concatenated(
     indexer: IndexerType,
     repo_root: Path,
 ) -> list[SSIM2Result]:
-    """Run SSIMULACRA2 assessment on concatenated reference and distorted files.
+    """Run SSIMULACRA2 assessment on the sampled source and a distorted encode.
 
     Uses vszip VapourSynth plugin for CPU-based SSIMULACRA2 calculation.
 
     Args:
-        reference_path: Path to concatenated lossless reference
+        reference_script: Sampling script that selects the reference frames
+            from the source, the same one the encoder is fed.
+        reference_frames: How many frames that script yields, for progress.
         distorted_path: Path to concatenated distorted encode
         workdir: Working directory for output files
         temp_dir: Temporary directory for intermediate files
@@ -382,7 +381,7 @@ def assess_ssim2_concatenated(
         iteration: Current iteration number
         info: Probed metadata for the input, used to pick the colour
             conversion the reference and distorted clips are scored through.
-        indexer: Source filter to load both clips with.
+        indexer: Source filter to load the distorted encode with.
         repo_root: Repository root, used to locate the indexer executable
             for the pre-build step. ``workdir`` is a per-job folder under it,
             not the directory ``vapoursynth-portable`` lives in.
@@ -396,59 +395,50 @@ def assess_ssim2_concatenated(
         get_profile_dir(workdir, profile) / f"ssim2_concatenated_iter{iteration}.json"
     )
 
-    # Get frame count for progress tracking
-    total_frames = get_assessment_frame_count(reference_path)
-
-    # Build both indexes up front so they get a progress display, rather than
-    # letting the source filter build them silently on first decode. The cache
-    # names must match what _run_vszip_assessment derives, since a mismatch
-    # would build the index twice; _vszip_cache_paths is the one place both
-    # sides compute them.
-    spec = indexer_spec(indexer)
-    ref_cache, dis_cache = _vszip_cache_paths(temp_dir, indexer)
+    # Build the distorted index up front so it gets a progress display, rather
+    # than letting the source filter build it silently on first decode. The
+    # cache name must match what _run_vszip_assessment derives, since a
+    # mismatch would build the index twice; _vszip_dis_cache is the one place
+    # both sides compute it. The reference needs nothing here: the sampling
+    # script reads the source through indexes the job built before encoding.
+    #
     # The distorted path holds a different encode every iteration, so anything
     # left at its index path describes a file that is gone. ffms2 rejects a
     # mismatched index outright ("The index does not match the source file")
     # rather than rebuilding it, and that failure is swallowed into a dropped
-    # metric. The reference index is kept instead: it is built from a file that
-    # does not change for the life of the job.
+    # metric.
+    dis_cache = _vszip_dis_cache(temp_dir, indexer)
     dis_cache.unlink(missing_ok=True)
-    for label, path, cache in (
-        ("reference", reference_path, ref_cache),
-        ("distorted", distorted_path, dis_cache),
-    ):
-        if cache.exists():
-            continue
-        with display.stage(
-            f"Indexing {label} ({spec.display_name})",
-            total=1,
-            show_eta=True,
-            transient=True,
-            show_done=True,
-        ) as index_stage:
-            _ = build_source_index(
-                source_path=path,
-                cache_file=cache,
-                indexer=indexer,
-                cwd=repo_root,
-                line_handler=index_stage.make_index_handler(),
-            )
+    with display.stage(
+        f"Indexing distorted ({indexer_spec(indexer).display_name})",
+        total=1,
+        show_eta=True,
+        transient=True,
+        show_done=True,
+    ) as index_stage:
+        _ = build_source_index(
+            source_path=distorted_path,
+            cache_file=dis_cache,
+            indexer=indexer,
+            cwd=repo_root,
+            line_handler=index_stage.make_index_handler(),
+        )
 
     with display.stage(
         "Running SSIMULACRA2 assessment",
-        total=total_frames,
+        total=reference_frames,
         show_eta=True,
         transient=True,
         show_done=True,
     ) as stage:
         result = _run_vszip_assessment(
-            ref_path=reference_path,
+            ref_script=reference_script,
             dis_path=distorted_path,
             vs_env=vs_env,
             temp_dir=temp_dir,
             info=info,
             indexer=indexer,
-            line_handler=stage.make_vszip_handler(total_frames=total_frames),
+            line_handler=stage.make_vszip_handler(total_frames=reference_frames),
         )
 
     # Write JSON log

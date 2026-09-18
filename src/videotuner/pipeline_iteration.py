@@ -8,7 +8,7 @@ between CRF and bitrate modes to eliminate duplication.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -16,6 +16,7 @@ from .media import get_encode_stats, parse_video_info
 from .utils import warn_user
 
 if TYPE_CHECKING:
+    from .media import VideoInfo
     from .pipeline_types import IterationContext
     from .profiles import Profile
     from .ssimulacra2_assessment import SSIM2Result
@@ -77,6 +78,62 @@ def calculate_metric_params(
     )
 
 
+def build_reference_script(
+    ctx: IterationContext,
+    metric_params: MetricSampleParams,
+) -> str:
+    """Build the script that selects a metric's reference frames.
+
+    The metrics and the encoder both read their frames from this, so it is
+    the generator the encoder is fed rather than a second implementation of
+    the same selection. Crop is gated exactly as ``encode_concatenated_*``
+    gates it, or the two sides would frame differently.
+
+    Args:
+        ctx: Pipeline iteration context
+        metric_params: Sampling parameters for the metric being scored
+
+    Returns:
+        VapourSynth source binding the selected frames to ``sampled``.
+    """
+    from .encoding_utils import build_sampling_vpy_script
+
+    return build_sampling_vpy_script(
+        sources=ctx.sources,
+        interval_frames=metric_params.interval_frames,
+        region_frames=metric_params.region_frames,
+        fps=ctx.info.fps,
+        cwd=ctx.repo_root,
+        crop_values=ctx.crop_values if ctx.args.crop_detect else None,
+        indexer=ctx.args.indexer,
+    )
+
+
+def reference_video_info(ctx: IterationContext) -> VideoInfo:
+    """Describe the reference clip the sampling script produces.
+
+    Every format fact comes from the source, since the frames are the
+    source's own. Only the dimensions move, and only when cropping is on:
+    VMAF scales the distorted track to these, and a scale to the uncropped
+    size would leave libvmaf two differently sized tracks.
+
+    Args:
+        ctx: Pipeline iteration context
+
+    Returns:
+        The source's metadata, with any crop taken off the dimensions.
+    """
+    crop = ctx.crop_values if ctx.args.crop_detect else None
+    if crop is None:
+        return ctx.info
+    width, height = ctx.info.width, ctx.info.height
+    return replace(
+        ctx.info,
+        width=width - crop.left - crop.right if width else width,
+        height=height - crop.top - crop.bottom if height else height,
+    )
+
+
 def run_vmaf_assessment(
     ctx: IterationContext,
     distorted_path: Path,
@@ -95,17 +152,16 @@ def run_vmaf_assessment(
     from .encoding_utils import VapourSynthEnv
     from .vmaf_assessment import assess_vmaf_concatenated
 
-    if ctx.vmaf_ref_path is None:
-        warn_user(ctx.log, "VMAF reference path is None, skipping VMAF assessment")
-        return []
-
     try:
         vs_env = VapourSynthEnv.from_args(
             ctx.args.vs_dir, ctx.args.vs_plugin_dir, ctx.repo_root
         )
+        metric_params = calculate_metric_params(ctx, "vmaf")
 
         return assess_vmaf_concatenated(
-            reference_path=ctx.vmaf_ref_path,
+            reference_script=build_reference_script(ctx, metric_params),
+            reference_info=reference_video_info(ctx),
+            reference_frames=metric_params.total_frames,
             distorted_path=distorted_path,
             workdir=ctx.workdir,
             repo_root=ctx.repo_root,
@@ -146,17 +202,15 @@ def run_ssim2_assessment(
     from .encoding_utils import VapourSynthEnv
     from .ssimulacra2_assessment import assess_ssim2_concatenated
 
-    if ctx.ssim2_ref_path is None:
-        warn_user(ctx.log, "SSIM2 reference path is None, skipping SSIM2 assessment")
-        return []
-
     try:
         vs_env = VapourSynthEnv.from_args(
             ctx.args.vs_dir, ctx.args.vs_plugin_dir, ctx.repo_root
         )
+        metric_params = calculate_metric_params(ctx, "ssim2")
 
         return assess_ssim2_concatenated(
-            reference_path=ctx.ssim2_ref_path,
+            reference_script=build_reference_script(ctx, metric_params),
+            reference_frames=metric_params.total_frames,
             distorted_path=distorted_path,
             workdir=ctx.workdir,
             temp_dir=ctx.temp_dir,
@@ -415,9 +469,7 @@ def run_single_crf_iteration(
 
     if ctx.sharing_samples:
         # SHARED MODE: Encode once, use for both VMAF and SSIM2
-        if (ctx.args.vmaf or ctx.args.ssim2) and (
-            ctx.vmaf_ref_path or ctx.ssim2_ref_path
-        ):
+        if ctx.args.vmaf or ctx.args.ssim2:
             shared_params = calculate_metric_params(ctx, "vmaf")  # Same as ssim2
             shared_output_path = (
                 get_profile_dir(ctx.workdir, ctx.selected_profile)
@@ -441,7 +493,7 @@ def run_single_crf_iteration(
                 ctx.args.ssim2 = False
     else:
         # SEPARATE MODE: Encode separately for each metric
-        if ctx.args.vmaf and ctx.vmaf_ref_path:
+        if ctx.args.vmaf:
             vmaf_params = calculate_metric_params(ctx, "vmaf")
             vmaf_output_path = (
                 get_profile_dir(ctx.workdir, ctx.selected_profile)
@@ -459,7 +511,7 @@ def run_single_crf_iteration(
             if vmaf_distorted_path is None:
                 ctx.args.vmaf = False
 
-        if ctx.args.ssim2 and ctx.ssim2_ref_path:
+        if ctx.args.ssim2:
             ssim2_params = calculate_metric_params(ctx, "ssim2")
             ssim2_output_path = (
                 get_profile_dir(ctx.workdir, ctx.selected_profile)
@@ -578,9 +630,7 @@ def run_single_bitrate_iteration(
         if is_multipass and has_multipass_opt:
             shared_analysis_file = ctx.workdir / "bitrate_analysis_shared.dat"
 
-        if (ctx.args.vmaf or ctx.args.ssim2) and (
-            ctx.vmaf_ref_path or ctx.ssim2_ref_path
-        ):
+        if ctx.args.vmaf or ctx.args.ssim2:
             shared_params = calculate_metric_params(ctx, "vmaf")  # Same as ssim2
             shared_distorted_path = (
                 get_profile_dir(ctx.workdir, profile)
@@ -644,7 +694,7 @@ def run_single_bitrate_iteration(
             ssim2_analysis_file = ctx.workdir / "bitrate_analysis_ssim2.dat"
 
         # Encode VMAF concatenated distorted file
-        if ctx.args.vmaf and ctx.vmaf_ref_path:
+        if ctx.args.vmaf:
             vmaf_params = calculate_metric_params(ctx, "vmaf")
             vmaf_distorted_path = (
                 get_profile_dir(ctx.workdir, profile)
@@ -687,7 +737,7 @@ def run_single_bitrate_iteration(
                 vmaf_distorted_path = None
 
         # Encode SSIM2 concatenated distorted file
-        if ctx.args.ssim2 and ctx.ssim2_ref_path:
+        if ctx.args.ssim2:
             ssim2_params = calculate_metric_params(ctx, "ssim2")
             ssim2_distorted_path = (
                 get_profile_dir(ctx.workdir, profile)

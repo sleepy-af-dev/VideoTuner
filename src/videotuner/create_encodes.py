@@ -30,7 +30,7 @@ from .media import get_video_format
 from .profiles import Profile, create_multipass_profile
 from .tonemapping import build_tonemap_chain, has_vulkan_support
 from .tool_parsers import CROPDETECT_RE
-from .utils import log_separator, run_capture
+from .utils import log_separator, run_capture, warn_user
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ def calculate_cropdetect_values(
     # Generate sample frame positions and convert to timestamps
     sample_frames = list(range(safe_start, safe_end, step))
     if not sample_frames:
-        log.warning("No sample frames to analyse — returning zero crop")
+        warn_user(log, "No sample frames to analyse — returning zero crop")
         return CropValues(left=0, right=0, top=0, bottom=0)
 
     # Build filter chain (no select filter — one frame per seek)

@@ -14,6 +14,8 @@ import re
 import subprocess
 from functools import lru_cache
 
+from .utils import warn_user
+
 logger = logging.getLogger(__name__)
 
 
@@ -96,12 +98,12 @@ def has_vulkan_support(ffmpeg_bin: str = "ffmpeg") -> bool:
             supported = False
             software_device = True
     except FileNotFoundError:
-        logger.warning(
-            "ffmpeg not found at '%s'; assuming no Vulkan support", ffmpeg_bin
+        warn_user(
+            logger, "ffmpeg not found at '%s'; assuming no Vulkan support", ffmpeg_bin
         )
         supported = False
     except subprocess.TimeoutExpired:
-        logger.warning("Vulkan probe timed out; assuming no Vulkan support")
+        warn_user(logger, "Vulkan probe timed out; assuming no Vulkan support")
         supported = False
 
     if supported:

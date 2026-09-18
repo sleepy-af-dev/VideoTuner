@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from .media import get_encode_stats, parse_video_info
+from .utils import warn_user
 
 if TYPE_CHECKING:
     from .pipeline_types import IterationContext
@@ -94,7 +95,7 @@ def run_vmaf_assessment(
     from .vmaf_assessment import assess_vmaf_concatenated
 
     if ctx.vmaf_ref_path is None:
-        ctx.log.warning("VMAF reference path is None, skipping VMAF assessment")
+        warn_user(ctx.log, "VMAF reference path is None, skipping VMAF assessment")
         return []
 
     try:
@@ -139,7 +140,7 @@ def run_ssim2_assessment(
     from .ssimulacra2_assessment import assess_ssim2_concatenated
 
     if ctx.ssim2_ref_path is None:
-        ctx.log.warning("SSIM2 reference path is None, skipping SSIM2 assessment")
+        warn_user(ctx.log, "SSIM2 reference path is None, skipping SSIM2 assessment")
         return []
 
     try:
@@ -233,7 +234,7 @@ def calculate_predicted_bitrate(
             )
             log.info("Predicted bitrate: %.0f kbps", stats.bitrate_kbps)
             return stats.bitrate_kbps
-        log.warning("No bitrate data available from shared concatenated file")
+        warn_user(log, "No bitrate data available from shared concatenated file")
         return 0.0
 
     # Separate mode: process each metric's file
@@ -270,7 +271,7 @@ def calculate_predicted_bitrate(
                 )
 
     if not bitrates:
-        log.warning("No bitrate data available from concatenated files")
+        warn_user(log, "No bitrate data available from concatenated files")
         return 0.0
 
     # Duration-weighted average

@@ -32,7 +32,7 @@ from .media import (
 )
 from .tonemapping import build_tonemap_chain, has_vulkan_support, tonemap_will_apply
 from .tool_parsers import get_float
-from .utils import make_relative_path, run
+from .utils import make_relative_path, run, warn_user
 from .vmaf_types import VmafFamily, VmafModelChoice
 
 if TYPE_CHECKING:
@@ -317,8 +317,9 @@ def select_vmaf_model(
 
     # Warn on low confidence matches
     if result.confidence < RESOLUTION_CONFIDENCE_THRESHOLD:
-        log.warning(
-            f"Low confidence resolution classification for {width}x{height}: {result.notes}"  # noqa: E501  # TODO(E501): shorten line
+        warn_user(
+            log,
+            f"Low confidence resolution classification for {width}x{height}: {result.notes}",  # noqa: E501  # TODO(E501): shorten line
         )
 
     is_uhd = result.base_height >= 2160
@@ -456,10 +457,12 @@ def vmaf_v1_available(ffmpeg_bin: str = "ffmpeg") -> bool:
             timeout=VMAF_PROBE_TIMEOUT_SECONDS,
         )
     except FileNotFoundError:
-        log.warning("ffmpeg not found at '%s'; assuming no VMAF v1 support", ffmpeg_bin)
+        warn_user(
+            log, "ffmpeg not found at '%s'; assuming no VMAF v1 support", ffmpeg_bin
+        )
         return False
     except subprocess.TimeoutExpired:
-        log.warning("VMAF v1 probe timed out; assuming no VMAF v1 support")
+        warn_user(log, "VMAF v1 probe timed out; assuming no VMAF v1 support")
         return False
 
     # The exit code, not the message: a v1 name on an older libvmaf fails

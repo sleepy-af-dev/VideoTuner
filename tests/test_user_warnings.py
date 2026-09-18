@@ -1,12 +1,67 @@
 from __future__ import annotations
 
+import ast
 import io
 import logging
+from pathlib import Path
 
 from rich.console import Console
 
 from videotuner.progress import UserWarningHandler
 from videotuner.utils import USER_FACING, warn_user
+
+SRC = Path(__file__).resolve().parents[1] / "src" / "videotuner"
+
+# Every warning that reports an assumption, a fallback, or a reduction in what
+# gets measured. A site added to this list without being converted fails here.
+USER_FACING_WARNINGS = {
+    ("create_encodes.py", "No sample frames to analyse"),
+    ("encoding_utils.py", "the index will be built automatically"),
+    ("media.py", "Unknown chroma_location"),
+    ("pipeline.py", "VMAF v1 models not found"),
+    ("pipeline_iteration.py", "VMAF reference path is None"),
+    ("pipeline_iteration.py", "SSIM2 reference path is None"),
+    ("pipeline_iteration.py", "No bitrate data available from shared"),
+    ("pipeline_iteration.py", "No bitrate data available from concatenated"),
+    ("pipeline_validation.py", "Usable frames"),
+    ("pipeline_validation.py", "No %s samples possible"),
+    ("tonemapping.py", "assuming no Vulkan support"),
+    ("tonemapping.py", "ffmpeg not found"),
+    ("utils.py", "Could not parse luminance string"),
+    ("utils.py", "Could not read mastering display primaries"),
+    ("vmaf_assessment.py", "Low confidence resolution classification"),
+    ("vmaf_assessment.py", "assuming no VMAF v1 support"),
+    ("vmaf_assessment.py", "ffmpeg not found"),
+}
+
+
+def _warn_user_texts(path: Path) -> list[str]:
+    """Every string literal passed to a warn_user call in one module."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Name) and func.id == "warn_user"):
+            continue
+        for arg in node.args:
+            found.extend(
+                piece.value
+                for piece in ast.walk(arg)
+                if isinstance(piece, ast.Constant) and isinstance(piece.value, str)
+            )
+    return found
+
+
+def test_every_user_facing_warning_calls_warn_user() -> None:
+    missing: list[tuple[str, str]] = []
+    for filename, fragment in sorted(USER_FACING_WARNINGS):
+        texts = _warn_user_texts(SRC / filename)
+        if not any(fragment in text for text in texts):
+            missing.append((filename, fragment))
+
+    assert missing == []
 
 
 def _handler_and_sink() -> tuple[UserWarningHandler, io.StringIO]:

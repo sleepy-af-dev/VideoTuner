@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import IO
 
 from .encoder_type import EncoderType
-from .utils import ensure_dir, run_capture
+from .utils import ensure_dir, run_capture, warn_user
 
 # Directory name for bundled VapourSynth portable installation
 VAPOURSYNTH_PORTABLE_DIR = "vapoursynth-portable"
@@ -414,7 +414,8 @@ def build_source_index(
         return True
     except Exception as e:
         other = next(member for member in IndexerType if member is not indexer)
-        log.warning(
+        warn_user(
+            log,
             "%s failed, the index will be built automatically: %s. "
             "If this input cannot be read at all, try --indexer %s",
             spec.indexer_exe,

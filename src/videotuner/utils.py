@@ -558,7 +558,7 @@ def parse_master_display_metadata(primaries_str: str, luminance_str: str) -> str
         lum_match = re.search(luminance_pattern, luminance_str)
 
         if not lum_match:
-            logger.warning("Could not parse luminance string: %s", luminance_str)
+            warn_user(logger, "Could not parse luminance string: %s", luminance_str)
             return None
 
         min_lum_raw = float(lum_match.group(1))
@@ -586,7 +586,8 @@ def parse_master_display_metadata(primaries_str: str, luminance_str: str) -> str
             coords = _parse_explicit_primaries(primaries_str)
 
         if coords is None:
-            logger.warning(
+            warn_user(
+                logger,
                 "Could not read mastering display primaries from '%s'. Named "
                 + "spaces: %s",
                 primaries_str,

@@ -13,6 +13,7 @@ from typing import cast
 
 from .encoding_utils import is_hdr_video
 from .tool_parsers import get_float, get_int, get_str, parse_fraction
+from .utils import warn_user
 
 logger = logging.getLogger(__name__)
 
@@ -297,8 +298,11 @@ def parse_video_info(
                 chroma_loc,
             )
         else:
-            logger.warning(
-                "Unknown chroma_location '%s' from %s", chroma_loc_str, input_path.name
+            warn_user(
+                logger,
+                "Unknown chroma_location '%s' from %s",
+                chroma_loc_str,
+                input_path.name,
             )
 
     # Extract HDR metadata, bitrate, and frame count using pymediainfo

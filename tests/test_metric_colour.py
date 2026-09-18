@@ -617,6 +617,33 @@ def test_an_untagged_pq_input_reports_bt2020_not_bt709() -> None:
     assert not any("BT.709" in note for note in notes)
 
 
+@pytest.mark.parametrize(
+    "trc",
+    [
+        None,  # untagged SDR: assumes all three tags
+        "smpte2084",  # untagged PQ: assumes tags and a mastering peak
+        "arib-std-b67",  # untagged HLG: assumes tags, never a peak
+    ],
+)
+def test_every_assumption_note_names_both_metrics(trc: str | None) -> None:
+    # Both metrics read through one colour chain, so an assumed tag or an
+    # assumed peak shapes a VMAF score exactly as it shapes a SSIMULACRA2
+    # one. A note naming a single metric reads as though the other were
+    # exempt. That was a real defect: the warning was once gated on
+    # SSIMULACRA2 alone and worded for it alone, while VMAF ran the same
+    # chain and said nothing.
+    #
+    # Asserting the pairing rather than the exact sentence, so rewording
+    # stays free while dropping a metric does not.
+    notes = colour_assumption_notes(VideoInfo(fps=24.0, duration=1.0, color_trc=trc))
+
+    assert notes, "this input should assume something, or it pins nothing"
+    for note in notes:
+        assert ("VMAF" in note) == ("SSIMULACRA2" in note), (
+            f"note names one metric but not the other: {note!r}"
+        )
+
+
 # The note names a colour space in words. _FALLBACK_VALUES holds the numeric
 # code the chain actually writes into the frame properties. They are one
 # decision expressed twice, so a change to the table that did not reach the

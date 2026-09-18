@@ -240,6 +240,14 @@ def _run_pipeline_body(
 
     display = PipelineDisplay(show_title=show_title)
 
+    # Warnings a user has to act on go to the terminal as well as the log.
+    # Attached here, right after the console exists, so it covers probing
+    # below as well as everything after. The file logger below attaches
+    # later, once the workdir is resolved, so a warning raised before that
+    # point reaches the terminal but not the job log - a narrower gap than
+    # the one this closes, and not one this handler can close on its own.
+    logging.getLogger().addHandler(UserWarningHandler(display.console))
+
     # Configure logging (file-only; console output is driven by the Rich UI)
     level = configure_logging(verbose=bool(args.verbose), quiet=bool(args.quiet))
     log = logging.getLogger(__name__)
@@ -360,11 +368,6 @@ def _run_pipeline_body(
 
     except Exception as e:
         log.warning("Could not attach file logger at %s: %s", log_file, e)
-
-    # Warnings a user has to act on go to the terminal as well as the log.
-    # Attached here rather than at import so it uses the run's own console,
-    # which is also what writes the transcript.
-    logging.getLogger().addHandler(UserWarningHandler(display.console))
 
     log_section(log, "Initialization")
 

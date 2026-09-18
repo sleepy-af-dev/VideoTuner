@@ -790,7 +790,7 @@ The full source path is always recorded in the job log, so a shortened name neve
 
 ### Logs
 
-The job log is a transcript: everything printed to the terminal during that job is written to it, so the log reads the way the run looked. Section banners and anything at warning level or above carry a timestamp; transcript lines do not, which keeps tables and panels readable.
+The job log is a transcript: everything printed to the terminal during that job is written to it, so the log reads the way the run looked. Section banners and anything at warning level or above carry a timestamp; transcript lines do not, which keeps tables and panels readable. A warning a user has to act on appears twice as a result: once timestamped as the warning record itself, and once bare as the transcript line the terminal also printed.
 
 `batch.log` holds batch-level events and the summary table only. Each job's detail stays in that job's own log, so the file you open after an overnight run is the short one.
 

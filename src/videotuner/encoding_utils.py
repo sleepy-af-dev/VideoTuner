@@ -350,6 +350,30 @@ def indexer_spec(indexer: IndexerType) -> IndexerSpec:
     return _INDEXERS[indexer]
 
 
+def distorted_index_path(dis_path: Path, indexer: IndexerType) -> Path:
+    """Index path for one distorted encode, shared by both metrics.
+
+    In shared-sampling mode VMAF and SSIMULACRA2 score the same file, so two
+    names for its index would index it twice and a ten-iteration search would
+    pay that ten times over.
+
+    The index sits beside the encode rather than in a temp directory, which
+    keeps it unique for free: multi-profile mode writes one encode per profile
+    under the same stem, and a name derived only from that stem would point
+    two different files at one index. ffms2 rejects a mismatched index outright
+    rather than rebuilding it, and that failure is swallowed into a dropped
+    metric. Source indexes are named the same way, beside what they describe.
+
+    Args:
+        dis_path: The distorted encode.
+        indexer: Selected source filter, whose suffix names the file.
+
+    Returns:
+        The index path for that encode under that indexer.
+    """
+    return dis_path.with_suffix(indexer_spec(indexer).index_suffix)
+
+
 def read_indexed_frame_count(
     source_path: Path,
     cache_file: Path,

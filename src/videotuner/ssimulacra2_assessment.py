@@ -13,6 +13,7 @@ from .encoding_utils import (
     IndexerType,
     VapourSynthEnv,
     build_source_index,
+    distorted_index_path,
     indexer_spec,
     write_vpy_script,
 )
@@ -213,24 +214,6 @@ except Exception as e:
 """  # noqa: E501  # TODO(E501): shorten line
 
 
-def _vszip_dis_cache(temp_dir: Path, indexer: IndexerType) -> Path:
-    """Cache path for the distorted clip, named by the indexer's suffix.
-
-    Shared by ``_run_vszip_assessment`` and ``assess_ssim2_concatenated`` so
-    the index built ahead of time and the one the assessment script opens
-    are always the same file. The reference needs no entry here: it is the
-    sampling script, which carries each source's own index.
-
-    Args:
-        temp_dir: Directory the cache lives in.
-        indexer: Selected source filter.
-
-    Returns:
-        The distorted cache path.
-    """
-    return temp_dir / f"vszip_dis{indexer_spec(indexer).index_suffix}"
-
-
 def _run_vszip_assessment(
     *,
     ref_script: str,
@@ -272,7 +255,7 @@ def _run_vszip_assessment(
     vpy_path = temp_dir / "vszip_ssim2.vpy"
 
     # Build VapourSynth script that calculates SSIMULACRA2 and prints scores
-    dis_cache = _vszip_dis_cache(temp_dir, indexer)
+    dis_cache = distorted_index_path(dis_path, indexer)
 
     # Both of these read the input's probe. The reference is the input, so it
     # matches by construction; the distorted encode agrees with it because the
@@ -340,12 +323,6 @@ def _run_vszip_assessment(
         # Clean up temporary files
         if vpy_path.exists():
             vpy_path.unlink()
-        # The distorted index describes an encode that is replaced next
-        # iteration, so it goes with it. The source indexes the reference
-        # reads are the job's own, built once before any encoding, and are
-        # not this function's to remove.
-        if dis_cache.exists():
-            dis_cache.unlink()
 
 
 def assess_ssim2_concatenated(
@@ -397,18 +374,14 @@ def assess_ssim2_concatenated(
 
     # Build the distorted index up front so it gets a progress display, rather
     # than letting the source filter build it silently on first decode. The
-    # cache name must match what _run_vszip_assessment derives, since a
-    # mismatch would build the index twice; _vszip_dis_cache is the one place
-    # both sides compute it. The reference needs nothing here: the sampling
-    # script reads the source through indexes the job built before encoding.
+    # reference needs nothing here: the sampling script reads the source
+    # through indexes the job built before encoding.
     #
-    # The distorted path holds a different encode every iteration, so anything
-    # left at its index path describes a file that is gone. ffms2 rejects a
-    # mismatched index outright ("The index does not match the source file")
-    # rather than rebuilding it, and that failure is swallowed into a dropped
-    # metric.
-    dis_cache = _vszip_dis_cache(temp_dir, indexer)
-    dis_cache.unlink(missing_ok=True)
+    # `distorted_index_path` names it beside the encode, so VMAF reuses this
+    # one rather than building a second under a different name. Nothing is
+    # deleted first: the encode's own name carries its CRF and iteration, so
+    # an index at that path can only ever describe the file beside it.
+    dis_cache = distorted_index_path(distorted_path, indexer)
     with display.stage(
         f"Indexing distorted ({indexer_spec(indexer).display_name})",
         total=1,

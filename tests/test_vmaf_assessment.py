@@ -22,7 +22,7 @@ from videotuner.encoding_utils import (
     UsableRange,
     VapourSynthEnv,
     build_sampling_vpy_script,
-    indexer_spec,
+    distorted_index_path,
 )
 from videotuner.media import VideoInfo
 from videotuner.vmaf_assessment import (
@@ -34,6 +34,7 @@ from videotuner.vmaf_assessment import (
     vmaf_model_load_error,
     vmaf_v1_available,
 )
+from videotuner.vmaf_script import build_vmaf_vpy_script
 from videotuner.vmaf_types import VmafFamily
 
 # The reference half of every script run_vmaf builds below, composed the way
@@ -460,26 +461,33 @@ class TestRunVmafScalesToTheReference:
         assert "scale=3840:2160:flags=bicubic" in captured["graph"]
 
 
-class TestRunVmafClearsTheDistortedIndex:
-    """The distorted encode changes every CRF iteration, so its index has to
-    go with it. The reference has no index of its own any more: it is the
-    sampling script, which reads the source through the job's own indexes.
+class TestRunVmafKeepsTheSharedDistortedIndex:
+    """One index per distorted encode, shared with SSIMULACRA2 rather than
+    deleted after use.
+
+    In shared-sampling mode both metrics score the same file. Deleting the
+    index here would make the other metric rebuild it, and a ten-iteration
+    search would pay that ten times. Nothing goes stale: the encode's own
+    name carries its CRF and iteration, so an index beside it can only ever
+    describe that file. The reference has no index of its own — it is the
+    sampling script, reading the source through the job's own indexes.
     """
 
-    def test_distorted_index_is_deleted(
+    def test_the_index_is_left_for_the_other_metric(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _ = _fake_captured_graph(monkeypatch)
         temp_dir = tmp_path / "temp"
         temp_dir.mkdir()
-        dis_cache = temp_dir / f"vmaf_dis{indexer_spec(IndexerType.FFMS2).index_suffix}"
-        # Stand in for an index already built by a previous iteration.
-        _ = dis_cache.write_text("stale distorted index", encoding="utf-8")
+        dis_path = tmp_path / "shared_distorted_crf28.0_iter1.mkv"
+        dis_cache = distorted_index_path(dis_path, IndexerType.FFMS2)
+        # Stand in for an index this run's own indexing step just built.
+        _ = dis_cache.write_text("distorted index", encoding="utf-8")
 
         _ = run_vmaf(
             ffmpeg_bin="ffmpeg",
             ref_script=_SAMPLING,
-            dis_path=tmp_path / "dis.mkv",
+            dis_path=dis_path,
             ref_info=VideoInfo(fps=24.0, duration=1.0, width=1920, height=1080),
             dis_info=VideoInfo(fps=24.0, duration=1.0, width=1920, height=1080),
             log_path=tmp_path / "vmaf.json",
@@ -489,6 +497,39 @@ class TestRunVmafClearsTheDistortedIndex:
             temp_dir=temp_dir,
         )
 
-        assert not dis_cache.exists(), (
-            "the distorted index names a different encode next iteration"
+        assert dis_cache.exists(), (
+            "SSIMULACRA2 scores the same file and would have to rebuild it"
+        )
+
+    def test_the_script_reads_the_shared_index_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The path in the generated script must be the one SSIMULACRA2 also
+        # derives, or each metric builds its own under a different name and
+        # the sharing is nominal.
+        _ = _fake_captured_graph(monkeypatch)
+        temp_dir = tmp_path / "temp"
+        temp_dir.mkdir()
+        dis_path = tmp_path / "shared_distorted_crf28.0_iter1.mkv"
+
+        _ = run_vmaf(
+            ffmpeg_bin="ffmpeg",
+            ref_script=_SAMPLING,
+            dis_path=dis_path,
+            ref_info=VideoInfo(fps=24.0, duration=1.0, width=1920, height=1080),
+            dis_info=VideoInfo(fps=24.0, duration=1.0, width=1920, height=1080),
+            log_path=tmp_path / "vmaf.json",
+            cwd=tmp_path,
+            indexer=IndexerType.FFMS2,
+            vs_env=VapourSynthEnv.from_cwd(tmp_path),
+            temp_dir=temp_dir,
+        )
+
+        expected = distorted_index_path(dis_path, IndexerType.FFMS2)
+        assert expected.name in build_vmaf_vpy_script(
+            ref_script=_SAMPLING,
+            dis_path=dis_path,
+            dis_cache=expected,
+            indexer=IndexerType.FFMS2,
+            info=VideoInfo(fps=24.0, duration=1.0),
         )

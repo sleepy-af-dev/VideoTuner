@@ -25,6 +25,7 @@ from videotuner.encoding_utils import (
     build_x265_command,
     calculate_usable_frames,
     create_temp_encode_paths,
+    distorted_index_path,
     get_encoder_bin,
     get_vapoursynth_portable_dir,
     indexer_spec,
@@ -1067,3 +1068,42 @@ class TestReadIndexedFrameCount:
             cwd=REPO_ROOT,
         )
         assert count is None
+
+
+class TestDistortedIndexPath:
+    """One index per distorted encode, shared by whichever metrics read it."""
+
+    def test_both_metrics_derive_the_same_path_for_one_file(self) -> None:
+        # In shared-sampling mode VMAF and SSIMULACRA2 score the same encode.
+        # Two names for its index means indexing it twice, and a search of ten
+        # iterations pays that ten times over.
+        dis = Path("C:/job/profile_a/shared_distorted_crf28.0_iter1.mkv")
+        first = distorted_index_path(dis, IndexerType.FFMS2)
+        second = distorted_index_path(dis, IndexerType.FFMS2)
+        assert first == second
+
+    def test_the_same_name_in_two_profiles_does_not_collide(self) -> None:
+        # Multi-profile mode encodes one file per profile, and they share a
+        # stem. A shared index path would hand one profile's index to another
+        # profile's encode; ffms2 rejects a mismatched index outright rather
+        # than rebuilding, and that failure is swallowed into a dropped metric.
+        a = Path("C:/job/profile_a/shared_distorted_crf28.0_iter1.mkv")
+        b = Path("C:/job/profile_b/shared_distorted_crf28.0_iter1.mkv")
+        assert distorted_index_path(a, IndexerType.FFMS2) != distorted_index_path(
+            b, IndexerType.FFMS2
+        )
+
+    def test_the_index_sits_beside_the_encode_it_describes(self) -> None:
+        dis = Path("C:/job/profile_a/shared_distorted_crf28.0_iter1.mkv")
+        path = distorted_index_path(dis, IndexerType.FFMS2)
+        assert path.parent == dis.parent
+        assert path.name.startswith(dis.stem)
+
+    def test_each_indexer_names_its_own_suffix(self) -> None:
+        # Switching indexers must not hand one filter the other's index.
+        dis = Path("C:/job/dis.mkv")
+        ffms2 = distorted_index_path(dis, IndexerType.FFMS2)
+        lsmash = distorted_index_path(dis, IndexerType.LSMASH)
+        assert ffms2 != lsmash
+        assert ffms2.suffix == indexer_spec(IndexerType.FFMS2).index_suffix
+        assert lsmash.suffix == indexer_spec(IndexerType.LSMASH).index_suffix

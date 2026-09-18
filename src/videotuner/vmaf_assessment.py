@@ -26,7 +26,7 @@ from .constants import (
 from .encoding_utils import (
     IndexerType,
     VapourSynthEnv,
-    indexer_spec,
+    distorted_index_path,
     is_hdr_video,
     resolve_absolute_path,
     run_vspipe_encode,
@@ -671,13 +671,15 @@ def run_vmaf(
     # in a matroska stream; ffmpeg reads them back off pipe:0 as [0:v:0] and
     # [0:v:1].
     #
-    # The distorted index lives in temp_dir rather than tmp_log_dir, which this
-    # function deletes on every call, but it still names a different encode each
-    # iteration, so it is removed once this call is done - the same way
-    # ssimulacra2_assessment treats its own. The source indexes the reference
-    # reads belong to the job and are built before any encoding.
+    # The distorted index is named beside the encode it describes, so in
+    # shared-sampling mode SSIMULACRA2 reads the very same file rather than
+    # building a second under its own name. Nothing deletes it here: the
+    # encode's name carries its CRF and iteration, so an index at that path
+    # can only describe the file beside it, and deleting it would take the
+    # other metric's index with it. The source indexes the reference reads
+    # belong to the job and are built before any encoding.
     vpy_path = Path(tmp_log_dir) / "vmaf.vpy"
-    dis_cache = temp_dir / f"vmaf_dis{indexer_spec(indexer).index_suffix}"
+    dis_cache = distorted_index_path(dis_path, indexer)
     log.info("VMAF colour conversion: %s", linearisation_mode(ref_info.color_trc).value)
     write_vpy_script(
         vpy_path,
@@ -753,10 +755,6 @@ def run_vmaf(
             log.error("libvmaf produced no JSON log at %s", tmp_log)
     finally:
         shutil.rmtree(tmp_log_dir, ignore_errors=True)
-        # See the comment where this path is built: it names an encode that is
-        # replaced on the next iteration.
-        if dis_cache.exists():
-            dis_cache.unlink()
 
     try:
         with open(log_path, encoding="utf-8") as f:

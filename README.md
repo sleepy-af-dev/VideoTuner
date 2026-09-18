@@ -871,7 +871,9 @@ The pipeline is organized into modules:
 ### Quality Assessment
 
 - `vmaf_assessment.py` - VMAF quality metric assessment and result parsing
+- `vmaf_script.py` - Builds the VapourSynth script that pipes the reference and distorted clips into VMAF as one stream
 - `ssimulacra2_assessment.py` - SSIMULACRA2 quality metric assessment and result parsing
+- `metric_colour.py` - Shared HDR→SDR colour conversion chain VMAF and SSIMULACRA2 both score through
 
 ### Utilities
 

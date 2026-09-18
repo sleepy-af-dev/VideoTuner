@@ -1,7 +1,9 @@
 """Unified tonemapping helpers for HDR→SDR conversion.
 
 Provides GPU detection and FFmpeg filter chain construction for tonemapping.
-Used by both VMAF assessment and cropdetect to ensure consistent HDR handling.
+Used by cropdetect, which still reads its preview frame through FFmpeg. VMAF
+and SSIMULACRA2 both tonemap through the VapourSynth chain in
+``metric_colour.py`` instead.
 
 GPU path uses libplacebo with bt.2390 (Vulkan required).
 CPU path uses zscale + tonemap with hable (no GPU required).

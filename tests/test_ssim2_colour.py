@@ -11,6 +11,7 @@ import pytest
 from videotuner.encoding_utils import IndexerType, VapourSynthEnv
 from videotuner.media import VideoInfo
 from videotuner.ssim2_colour import (
+    _FALLBACK_VALUES,
     LinearisationMode,
     colour_assumption_notes,
     colour_preamble,
@@ -577,6 +578,39 @@ def test_an_untagged_pq_input_reports_bt2020_not_bt709() -> None:
     notes = colour_assumption_notes(info)
     assert any("BT.2020" in note for note in notes)
     assert not any("BT.709" in note for note in notes)
+
+
+# The note names a colour space in words. _FALLBACK_VALUES holds the numeric
+# code the chain actually writes into the frame properties. They are one
+# decision expressed twice, so a change to the table that did not reach the
+# note would tell a user the wrong thing about their scores, and the tests
+# above would not notice because they assert the words. CICP primaries: 1 is
+# BT.709, 9 is BT.2020.
+_PRIMARIES_NAMES = {1: "BT.709", 9: "BT.2020"}
+
+
+@pytest.mark.parametrize(
+    ("trc", "mode"),
+    [
+        (None, LinearisationMode.SDR),
+        ("smpte2084", LinearisationMode.PQ),
+        ("arib-std-b67", LinearisationMode.HLG),
+    ],
+)
+def test_the_note_names_the_primaries_the_chain_writes(
+    trc: str | None, mode: LinearisationMode
+) -> None:
+    notes = colour_assumption_notes(VideoInfo(fps=24.0, duration=1.0, color_trc=trc))
+
+    # The tag note comes first: colour_assumption_notes returns one message
+    # per assumption, in the order the chain makes them, and the tags are
+    # settled before the tone curve needs a peak.
+    tag_note = notes[0]
+    expected = _PRIMARIES_NAMES[_FALLBACK_VALUES[mode]["primaries"]]
+
+    assert expected in tag_note
+    for other in set(_PRIMARIES_NAMES.values()) - {expected}:
+        assert other not in tag_note
 
 
 def test_a_pq_input_with_no_mastering_display_reports_the_peak() -> None:

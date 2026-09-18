@@ -4,6 +4,7 @@ import ast
 import io
 import logging
 from pathlib import Path
+from typing import override
 
 from rich.console import Console
 
@@ -114,6 +115,7 @@ def test_the_marked_record_is_still_a_warning_in_the_log() -> None:
     records: list[logging.LogRecord] = []
 
     class _Capture(logging.Handler):
+        @override
         def emit(self, record: logging.LogRecord) -> None:
             records.append(record)
 
@@ -181,10 +183,11 @@ def test_a_warning_printed_inside_a_live_progress_bar_is_not_corrupted() -> None
     its ``Progress``/``Live`` machinery does the same in-place, escape-code
     driven redraw it would on a real screen rather than staying silent (Rich
     gates that rendering on ``Console.is_terminal``). Entering a stage
-    triggers an immediate first redraw (``Live.start(refresh=True)``), and
-    exiting one triggers an unconditional final redraw before the transient
-    bar clears (``Live.stop()``) - both deterministic, so the warning printed
-    in between is provably bracketed by live bar frames rather than printed
+    triggers an immediate first redraw (``Progress.add_task()``'s own
+    unconditional refresh, which runs after ``Live.start()``), and exiting
+    one triggers an unconditional final redraw before the transient bar
+    clears (``Live.stop()``) - both deterministic, so the warning printed in
+    between is provably bracketed by live bar frames rather than printed
     before the bar started or after it had already stopped.
     """
     sink = io.StringIO()

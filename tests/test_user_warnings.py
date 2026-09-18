@@ -16,6 +16,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "videotuner"
 # gets measured. A site added to this list without being converted fails here.
 USER_FACING_WARNINGS = {
     ("create_encodes.py", "No sample frames to analyse"),
+    ("create_encodes.py", "cropdetect produced no output"),
     ("encoding_utils.py", "the index will be built automatically"),
     ("media.py", "Unknown chroma_location"),
     ("pipeline.py", "VMAF v1 models not found"),
@@ -25,12 +26,16 @@ USER_FACING_WARNINGS = {
     ("pipeline_iteration.py", "No bitrate data available from concatenated"),
     ("pipeline_validation.py", "Usable frames"),
     ("pipeline_validation.py", "No %s samples possible"),
+    # Same fragment covers both sites: profiles.py:339 (HDR/SDR dict) and
+    # profiles.py:471 (its x264 twin) warn with identical text.
+    ("profiles.py", "Skipping parameter"),
     ("tonemapping.py", "assuming no Vulkan support"),
     ("tonemapping.py", "ffmpeg not found"),
     ("utils.py", "Could not parse luminance string"),
     ("utils.py", "Could not read mastering display primaries"),
     ("vmaf_assessment.py", "assuming no VMAF v1 support"),
     ("vmaf_assessment.py", "ffmpeg not found"),
+    ("x264_params.py", "does not support %d-bit encoding"),
 }
 
 # vmaf_assessment.py's "Low confidence resolution classification" is

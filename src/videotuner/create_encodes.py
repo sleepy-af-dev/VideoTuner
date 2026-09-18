@@ -217,7 +217,7 @@ def calculate_cropdetect_values(
             _ = line_handler(f"frame= {i + 1}")
 
     if not any_detected:
-        log.warning("cropdetect produced no output — returning zero crop")
+        warn_user(log, "cropdetect produced no output — returning zero crop")
         return CropValues(left=0, right=0, top=0, bottom=0)
 
     # Clamp negatives (can happen if cropdetect returns a larger area than source)

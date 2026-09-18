@@ -119,22 +119,6 @@ def has_vulkan_support(ffmpeg_bin: str = "ffmpeg") -> bool:
     return supported
 
 
-def format_tonemap_backend(*, use_gpu: bool) -> str:
-    """Name the tonemapping backend for display.
-
-    The two backends are different operators, not two implementations of one, and
-    they disagree enough to move HDR scores. A result is not interpretable
-    without knowing which one produced it.
-
-    Args:
-        use_gpu: Whether the libplacebo path is in use.
-
-    Returns:
-        A short label, e.g. ``"GPU (libplacebo)"``.
-    """
-    return "GPU (libplacebo)" if use_gpu else "CPU (zscale + hable)"
-
-
 def build_tonemap_chain(width: int, height: int, *, use_gpu: bool) -> str:
     """Build an FFmpeg filter chain string for HDR→SDR tonemapping.
 

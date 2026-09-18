@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 
 from videotuner.tonemapping import (
     build_tonemap_chain,
-    format_tonemap_backend,
     has_vulkan_support,
     vulkan_device_is_hardware,
 )
@@ -152,16 +151,6 @@ class TestHasVulkanSupport:
             cmd = cast(list[str], mock_run.call_args[0][0])
             assert "verbose" in cmd
             assert "quiet" not in cmd
-
-
-class TestFormatTonemapBackend:
-    """The backend moves HDR scores, so a result is not interpretable without it."""
-
-    def test_gpu_names_libplacebo(self) -> None:
-        assert format_tonemap_backend(use_gpu=True) == "GPU (libplacebo)"
-
-    def test_cpu_names_its_operator(self) -> None:
-        assert format_tonemap_backend(use_gpu=False) == "CPU (zscale + hable)"
 
 
 class TestBuildTonemapChain:

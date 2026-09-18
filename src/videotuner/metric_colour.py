@@ -1,4 +1,4 @@
-"""Colour handling for SSIMULACRA2 assessment.
+"""Colour handling shared by the SSIMULACRA2 and VMAF assessments.
 
 SSIMULACRA2 is an SDR metric: its weights were fitted on SDR still-image
 datasets and it has no concept of absolute luminance. The reference
@@ -9,10 +9,12 @@ vszip does neither. It overwrites ``_Transfer`` with sRGB before linearising
 and never reads ``_Primaries``, so an HDR input is linearised through the wrong
 curve and scored in a domain the metric was never fitted for.
 
-This module emits the VapourSynth source that hands vszip a clip already in
-linear RGBS. Both of vszip's conversion paths early-return on such a clip -
-RGBS skips its ``toRGBS``, and a linear transfer skips its sRGB step - so the
-pre-converted frames reach the metric untouched.
+This module emits the VapourSynth source that tonemaps a tagged clip and
+hands it to each metric the way it wants it: vszip gets linear RGBS, where
+both of its conversion paths early-return on such a clip - RGBS skips its
+``toRGBS``, and a linear transfer skips its sRGB step - so the pre-converted
+frames reach the metric untouched. VMAF gets the same chain's output encoded
+back to limited-range BT.709 YUV, which is what it was trained on.
 """
 
 from __future__ import annotations

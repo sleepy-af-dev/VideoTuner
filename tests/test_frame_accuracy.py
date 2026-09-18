@@ -1,16 +1,31 @@
-"""Does sampling a source give the frames the lossless reference holds?
+"""Does encoding the sampled frames losslessly change any of them?
 
-The reference is an x265 ``--lossless`` encode of the sampled frames, and it
-exists because streams went out of sync in the past. Whether it can be dropped
-is a question about frame selection rather than about compression, so these
-tests hash every plane of every sampled frame on both sides and demand an exact
+The lossless reference was an x265 ``--lossless`` encode of the sampled frames,
+muxed to matroska, and it existed because streams went out of sync in the past.
+These tests hash every plane of every frame on both sides and demand an exact
 match, across a constant frame rate, a variable one, a container that outlives
 its video track, and both indexers.
 
-Both arms go through the production code: the reference is built by
-``encode_concatenated_reference`` and the sampling script by
-``build_sampling_vpy_script``. A second, parallel implementation of either
-would compare this file against itself rather than against the pipeline.
+What that does and does not establish. Both arms select with
+``build_sampling_vpy_script``: ``encode_concatenated_reference`` calls it too,
+so changing the ``SelectEvery`` offsets moves both sides together and every
+test here still passes. They say nothing about whether the selection is right.
+What they do say is that the encode and the mux round-trip that selection's
+output exactly, on every case above.
+
+That distinction is why dropping the reference was safe rather than a risk it
+glosses over. The reference was an encode of frames the sampler had already
+produced, so it carried no selection of its own that could disagree with the
+sampler's - only a round trip. With the round trip shown to change nothing,
+scoring against the sampled source measures the same pixels a copy of it would
+have, and making the copy was work with no product.
+``test_the_comparison_can_still_fail`` keeps that from being vacuous: same
+sampling, same encoder, same container, CRF 30 instead of lossless, and the
+hashes diverge.
+
+``encode_concatenated_reference`` has had no production caller since the
+reference was dropped. It stays because it is the thing under test here, and
+this file is the recorded evidence for that deletion.
 """
 
 from __future__ import annotations
@@ -50,8 +65,9 @@ X265_BIN = REPO_ROOT / "tools" / "x265.exe"
 INTERVAL_FRAMES = 24
 REGION_FRAMES = 5
 
-# The profile the pipeline builds for reference extraction, copied from
-# pipeline.py. x265 for both codecs, because only it handles HDR.
+# The profile the pipeline used to extract the reference with. x265 whatever
+# the encode's own codec, because only it handles HDR. It is written out here
+# because pipeline.py no longer builds a reference to copy it from.
 LOSSLESS_PROFILE = Profile(
     name="lossless",
     description="Lossless reference extraction",

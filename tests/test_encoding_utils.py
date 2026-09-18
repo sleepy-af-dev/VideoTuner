@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from videotuner.encoding_utils import (
     get_vapoursynth_portable_dir,
     indexer_spec,
     is_hdr_video,
+    read_indexed_frame_count,
     resolve_absolute_path,
 )
 
@@ -960,3 +962,108 @@ def test_sampling_script_uses_the_selected_filter(tmp_path: Path) -> None:
     )
     assert "core.lsmas.LWLibavSource(" in script
     assert "core.ffms2.Source(" not in script
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+VS_PYTHON = REPO_ROOT / "vapoursynth-portable" / "python.exe"
+
+requires_vapoursynth = pytest.mark.skipif(
+    not VS_PYTHON.exists(),
+    reason="vapoursynth-portable is not provisioned; run tools/update_vs.py",
+)
+
+
+class TestReadIndexedFrameCount:
+    """The true count, read from the index the run already built.
+
+    `estimate_frame_count` multiplies a rate by a duration, which no single
+    rate describes for a variable frame rate file. The indexed clip's own
+    length is what the sampler will actually see, so it is the right answer
+    rather than a closer guess.
+    """
+
+    @requires_vapoursynth
+    def test_reads_the_count_the_sampler_will_see(self, tmp_path: Path) -> None:
+        source = tmp_path / "clip.mkv"
+        _ = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=64x64:rate=24:duration=2",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:v",
+                "libx265",
+                "-x265-params",
+                "lossless=1",
+                str(source),
+            ],
+            capture_output=True,
+            check=True,
+        )
+
+        count = read_indexed_frame_count(
+            source,
+            tmp_path / "clip.ffindex",
+            indexer=IndexerType.FFMS2,
+            cwd=REPO_ROOT,
+        )
+        assert count == 48  # 2 seconds at 24fps
+
+    @requires_vapoursynth
+    def test_a_variable_rate_clip_reports_its_real_length(self, tmp_path: Path) -> None:
+        # The case the estimate gets wrong: dropping two frames in three and
+        # stretching the timestamps leaves a clip whose nominal rate times its
+        # duration overshoots what it actually holds.
+        source = tmp_path / "vfr.mkv"
+        _ = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=64x64:rate=24:duration=6",
+                "-vf",
+                "select='not(mod(n,3))',setpts=N/(24*TB)*1.37",
+                "-fps_mode",
+                "vfr",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:v",
+                "libx265",
+                "-x265-params",
+                "lossless=1",
+                str(source),
+            ],
+            capture_output=True,
+            check=True,
+        )
+
+        count = read_indexed_frame_count(
+            source,
+            tmp_path / "vfr.ffindex",
+            indexer=IndexerType.FFMS2,
+            cwd=REPO_ROOT,
+        )
+        assert count == 48  # 144 source frames, every third kept
+
+    def test_an_unreadable_source_yields_nothing_rather_than_raising(
+        self, tmp_path: Path
+    ) -> None:
+        # A frame count must never be able to end a run: the caller keeps its
+        # estimate and warns.
+        count = read_indexed_frame_count(
+            tmp_path / "does-not-exist.mkv",
+            tmp_path / "does-not-exist.ffindex",
+            indexer=IndexerType.FFMS2,
+            cwd=REPO_ROOT,
+        )
+        assert count is None

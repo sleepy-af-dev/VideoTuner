@@ -350,6 +350,72 @@ def indexer_spec(indexer: IndexerType) -> IndexerSpec:
     return _INDEXERS[indexer]
 
 
+def read_indexed_frame_count(
+    source_path: Path,
+    cache_file: Path,
+    *,
+    indexer: IndexerType,
+    cwd: Path | None = None,
+) -> int | None:
+    """Count a source's frames by opening it through the indexer.
+
+    ``estimate_frame_count`` multiplies a frame rate by a duration, which no
+    single rate describes for a variable frame rate file, so its answer can
+    run past the end of the clip. Every script that samples the source loads
+    it through this same source filter, so the length reported here is the
+    one the sampler will actually see rather than a closer approximation of
+    it.
+
+    The index is normally already on disk by the time this is called, which
+    is what makes it cheap: the source filter reuses it instead of scanning
+    the file again.
+
+    Args:
+        source_path: Video to count.
+        cache_file: Index file for it, built or reused by the source filter.
+        indexer: Source filter to open it with.
+        cwd: Working directory, for locating ``vapoursynth-portable``.
+
+    Returns:
+        The frame count, or None if the clip could not be opened. A frame
+        count must never end a run, so every failure returns None and leaves
+        the caller to keep whatever it already had.
+    """
+    log = logging.getLogger(__name__)
+    vs_env = VapourSynthEnv.from_cwd(cwd)
+    spec = indexer_spec(indexer)
+
+    source_expr = spec.source_expr(
+        str(resolve_absolute_path(source_path, cwd)), str(cache_file)
+    )
+    script = (
+        "import vapoursynth as vs\n"
+        "core = vs.core\n"
+        f"clip = {source_expr}\n"
+        'print("FRAMES:%d" % len(clip))\n'
+    )
+
+    try:
+        with tempfile.TemporaryDirectory(prefix=".vt_count_") as temp_dir:
+            vpy_path = Path(temp_dir) / "count.vpy"
+            write_vpy_script(vpy_path, script)
+            output = run_capture(
+                [str(vs_env.vs_dir / "python.exe"), str(vpy_path)],
+                cwd=cwd,
+                env=vs_env.build_env(),
+            )
+    except Exception as e:
+        log.debug("Could not count frames through %s: %s", spec.display_name, e)
+        return None
+
+    for line in output.splitlines():
+        if line.startswith("FRAMES:"):
+            return int(line[7:])
+
+    log.debug("%s reported no frame count for %s", spec.display_name, source_path.name)
+    return None
+
+
 def build_source_index(
     source_path: Path,
     cache_file: Path,

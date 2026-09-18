@@ -44,6 +44,34 @@ class LinearisationMode(StrEnum):
     SDR = "sdr"
 
 
+class MetricTarget(StrEnum):
+    """Which metric the converted frames are for.
+
+    Both metrics share the tonemapping front and differ only in what they
+    want handed to them: SSIMULACRA2 scores in linear light, VMAF scores
+    ordinary SDR video.
+    """
+
+    SSIM2 = "ssim2"
+    VMAF = "vmaf"
+
+
+# SSIMULACRA2 takes the front's own output: vszip's two conversion paths both
+# early-return on a linear RGBS clip. VMAF is trained on BT.709 SDR video and
+# reads code values rather than light, so its frames are encoded the way an SDR
+# deliverable is. Range is load-bearing and silent when wrong: the front ends
+# full-range RGBS and this must land limited-range YUV, which is what libvmaf
+# is handed today.
+_TAILS = {
+    MetricTarget.SSIM2: "    return out",
+    MetricTarget.VMAF: (
+        "    return core.resize.Bicubic(out, format=vs.YUV420P10,\n"
+        '                               transfer_s="709", matrix_s="709",\n'
+        '                               range_s="limited")'
+    ),
+}
+
+
 def linearisation_mode(color_trc: str | None) -> LinearisationMode:
     """Pick the conversion for an input's declared transfer.
 
@@ -150,7 +178,7 @@ def _pq_chain(*, assumed_peak: int | None) -> str:
     lin = core.tonemap.BT2390(
         lin, {bounds}nominal_luminance={SSIM2_NOMINAL_LUMINANCE}
     )
-    return core.tonemap.BT2407(lin)"""
+    out = core.tonemap.BT2407(lin)"""
 
 
 # The signal must reach tonemap.HLG still HLG-encoded. The OOTF applies one
@@ -162,11 +190,11 @@ _HLG_CHAIN = f"""\
                               primaries_s="2020", range_s="full")
     lin = core.tonemap.HLG(sig, nominal_luminance={SSIM2_NOMINAL_LUMINANCE})
     lin = core.tonemap.BT2390(lin, nominal_luminance={SSIM2_NOMINAL_LUMINANCE})
-    return core.tonemap.BT2407(lin)"""
+    out = core.tonemap.BT2407(lin)"""
 
 _SDR_CHAIN = """\
-    return core.resize.Bicubic(clip, format=vs.RGBS, transfer_s="linear",
-                               primaries_s="709", range_s="full")"""
+    out = core.resize.Bicubic(clip, format=vs.RGBS, transfer_s="linear",
+                              primaries_s="709", range_s="full")"""
 
 # PQ is built by _pq_chain instead, since it varies with whether the mastering
 # display properties will be there for the tone curve to read.
@@ -181,6 +209,7 @@ def colour_preamble(
     *,
     missing: Sequence[str],
     mastering_missing: bool = False,
+    target: MetricTarget = MetricTarget.SSIM2,
 ) -> str:
     """Emit the VapourSynth source defining ``prepare(clip)``.
 
@@ -212,6 +241,9 @@ def colour_preamble(
             which it would otherwise raise for want of. Ignored for HLG,
             whose peak the plugin already defaults, and for SDR, which never
             tonemaps.
+        target: Which metric the frames are for. Both share the tonemapping
+            front; SSIMULACRA2 takes its linear RGBS output directly, while
+            VMAF has it encoded to limited-range BT.709 YUV.
 
     Returns:
         Python source defining ``prepare(clip)``, for embedding in a .vpy.
@@ -229,6 +261,7 @@ def colour_preamble(
         lines.append(_pq_chain(assumed_peak=peak))
     else:
         lines.append(_CHAINS[mode])
+    lines.append(_TAILS[target])
     return "\n".join(lines) + "\n"
 
 

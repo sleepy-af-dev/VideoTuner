@@ -17,7 +17,7 @@ from .encoding_utils import (
     write_vpy_script,
 )
 from .media import get_assessment_frame_count
-from .ssim2_colour import (
+from .metric_colour import (
     LinearisationMode,
     colour_preamble,
     linearisation_mode,

@@ -8,6 +8,7 @@ from pathlib import Path
 from rich.console import Console
 
 from videotuner.encoding_utils import IndexerType
+from videotuner.metric_colour import SSIM2_TONEMAP_BACKEND
 from videotuner.pipeline_cli import (
     DEFAULT_CRF_INTERVAL,
     DEFAULT_CRF_START_VALUE,
@@ -20,7 +21,6 @@ from videotuner.pipeline_display import (
     format_bitrate_percentage,
 )
 from videotuner.pipeline_types import MultiProfileResult
-from videotuner.ssim2_colour import SSIM2_TONEMAP_BACKEND
 from videotuner.vmaf_types import VmafFamily, VmafModelChoice
 
 

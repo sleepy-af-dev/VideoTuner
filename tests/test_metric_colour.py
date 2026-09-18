@@ -10,9 +10,10 @@ import pytest
 
 from videotuner.encoding_utils import IndexerType, VapourSynthEnv
 from videotuner.media import VideoInfo
-from videotuner.ssim2_colour import (
+from videotuner.metric_colour import (
     _FALLBACK_VALUES,
     LinearisationMode,
+    MetricTarget,
     colour_assumption_notes,
     colour_preamble,
     linearisation_mode,
@@ -237,7 +238,7 @@ _CASES: dict[str, tuple[LinearisationMode, str, tuple[float, float, float], bool
     # linearising each channel through zimg's std-b67, instead of letting
     # tonemap.HLG apply one OOTF scalar, measures (0.203753, 0.246870, 1.0)
     # here. That is 0.14 away on red and green, and 1.76x the BT.709 luminance,
-    # which is the "76% too bright" ssim2_colour.py's HLG comment names.
+    # which is the "76% too bright" metric_colour.py's HLG comment names.
     #
     # Tagged full range so peak blue is unambiguous rather than sitting past a
     # limited-range white point.
@@ -649,3 +650,94 @@ def test_an_sdr_input_reports_no_peak_assumption() -> None:
         color_space="bt709",
     )
     assert colour_assumption_notes(info) == []
+
+
+def test_the_ssim2_target_ends_in_linear_rgbs() -> None:
+    src = colour_preamble(LinearisationMode.SDR, missing=[], target=MetricTarget.SSIM2)
+    assert "vs.RGBS" in src
+    assert "vs.YUV420P10" not in src
+
+
+def test_the_vmaf_target_ends_in_limited_range_yuv() -> None:
+    src = colour_preamble(LinearisationMode.SDR, missing=[], target=MetricTarget.VMAF)
+    assert "vs.YUV420P10" in src
+    assert 'matrix_s="709"' in src
+    assert 'range_s="limited"' in src
+
+
+def test_the_default_target_is_ssim2() -> None:
+    # Every existing caller passes no target, and must keep the chain it had.
+    assert colour_preamble(LinearisationMode.PQ, missing=[]) == colour_preamble(
+        LinearisationMode.PQ, missing=[], target=MetricTarget.SSIM2
+    )
+
+
+@pytest.mark.parametrize("mode", list(LinearisationMode))
+def test_both_targets_share_one_tonemap_call(mode: LinearisationMode) -> None:
+    # The point of one module: the front cannot differ between metrics.
+    ssim2 = colour_preamble(mode, missing=[], target=MetricTarget.SSIM2)
+    vmaf = colour_preamble(mode, missing=[], target=MetricTarget.VMAF)
+    for call in ("core.tonemap.BT2390(", "core.tonemap.BT2407(", "core.tonemap.HLG("):
+        assert (call in ssim2) == (call in vmaf)
+
+
+# Measured against vs-tonemap 0.2.0 on 2026-09-18. _Range=0 is limited.
+_VMAF_CASES: dict[str, tuple[str, tuple[float, float, float]]] = {
+    "sdr": ("sdr", (0.500489, 0.500489, 0.500489)),
+    "pq": ("pq", (0.705767, 0.500489, 0.500489)),
+}
+
+
+@requires_vapoursynth
+@pytest.mark.parametrize("case", list(_VMAF_CASES))
+def test_the_vmaf_chain_emits_limited_range_bt709_yuv(
+    tmp_path: Path, case: str
+) -> None:
+    source_case, expected = _VMAF_CASES[case]
+    mode, construction, _, mastering_missing = _CASES[source_case]
+    script = tmp_path / "chain.vpy"
+    preamble = colour_preamble(
+        mode, missing=[], mastering_missing=mastering_missing, target=MetricTarget.VMAF
+    )
+    _ = script.write_text(
+        "import vapoursynth as vs\n"
+        "core = vs.core\n\n"
+        f"{preamble}\n"
+        f"{construction}\n"
+        "out = prepare(clip)\n"
+        "f = out.get_frame(0)\n"
+        'print("FORMAT:" + out.format.name)\n'
+        'for k in ("_Matrix", "_Transfer", "_Range"):\n'
+        '    print("PROP:" + k + "=" + str(int(f.props[k])))\n'
+        "for p in range(3):\n"
+        "    s = core.std.PlaneStats(out, plane=p).get_frame(0).props\n"
+        '    print("VALUE:%.6f" % float(s["PlaneStatsAverage"]))\n',
+        encoding="utf-8",
+    )
+
+    env = {**os.environ, "VAPOURSYNTH_EXTRA_PLUGIN_PATH": str(VS_PLUGINS)}
+    proc = subprocess.run(
+        [str(VS_PYTHON), str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert proc.returncode == 0, f"chain failed:\n{proc.stderr}"
+
+    out: dict[str, int | str] = {}
+    values: list[float] = []
+    for line in proc.stdout.splitlines():
+        if line.startswith("FORMAT:"):
+            out["format"] = line[7:]
+        elif line.startswith("PROP:"):
+            key, _, value = line[5:].partition("=")
+            out[key] = int(value)
+        elif line.startswith("VALUE:"):
+            values.append(float(line[6:]))
+
+    assert out["format"] == "YUV420P10"
+    assert out["_Matrix"] == 1  # BT.709
+    assert out["_Transfer"] == 1  # BT.709
+    assert out["_Range"] == 0  # limited
+    assert values == pytest.approx(expected, abs=1e-4)

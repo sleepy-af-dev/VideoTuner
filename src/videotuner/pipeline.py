@@ -33,6 +33,7 @@ from .media import (
     get_frame_count,
     parse_video_info,
 )
+from .metric_colour import SSIM2_TONEMAP_BACKEND, colour_assumption_notes
 from .pipeline_cli import (
     PipelineArgs,
     build_arg_parser,
@@ -74,7 +75,6 @@ from .pipeline_validation import (
 )
 from .profiles import Profile
 from .progress import PipelineDisplay, TranscriptFormatter, UserWarningHandler
-from .ssim2_colour import SSIM2_TONEMAP_BACKEND, colour_assumption_notes
 from .ssimulacra2_assessment import SSIM2Result
 from .tonemapping import (
     format_tonemap_backend,

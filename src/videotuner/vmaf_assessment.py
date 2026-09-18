@@ -562,13 +562,13 @@ def run_vmaf(
     dis_info: VideoInfo,
     model_spec: str | None = None,
     log_path: Path | None = None,
-    tonemap_policy: str = "auto",
     cwd: Path | None = None,
     line_handler: Callable[[str], bool] | None = None,
     family: VmafFamily = VmafFamily.V1,
     *,
     indexer: IndexerType,
     vs_env: VapourSynthEnv,
+    temp_dir: Path,
 ) -> VMAFResult:
     log = logging.getLogger(__name__)
 
@@ -598,7 +598,8 @@ def run_vmaf(
             # viewing assumptions rather than dropping a generation.
             model_spec = "vmaf_v0.6.1" if use_v0 else "vmaf_v1.0.16_3d0h"
 
-    # Use distorted file's properties for scaling and pixel format
+    # Use the distorted file's own bit depth for the pixel format libvmaf
+    # measures at; the scale target below is the reference's, not this.
     dis_bit_depth = get_bit_depth_from_pix_fmt(dis_info.pix_fmt)
 
     # The header names the generation, which is settled before the run. Which of
@@ -626,8 +627,13 @@ def run_vmaf(
             model_opt = build_libvmaf_model_option(
                 model_spec, enc_bitdepth=enc_bitdepth
             )
-    target_width = dis_info.width or 3840
-    target_height = dis_info.height or 2160
+    # The distorted track is what gets scaled (build_vmaf_filter scales
+    # [0:v:1] to this size), so the target is the reference's own dimensions,
+    # not the distorted encode's - which is usually smaller and would
+    # otherwise make the scale a no-op, leaving libvmaf two differently
+    # sized tracks when the encode was downscaled.
+    target_width = ref_info.width or 3840
+    target_height = ref_info.height or 2160
 
     filter_prefix = build_vmaf_filter(
         width=target_width,
@@ -662,9 +668,18 @@ def run_vmaf(
     # Both clips are loaded by the selected indexer, tonemapped by vs-tonemap,
     # and piped down one vspipe process as two tracks in a matroska stream;
     # ffmpeg reads them back off pipe:0 as [0:v:0] and [0:v:1].
+    #
+    # The reference index lives in temp_dir, which survives across CRF
+    # iterations, not in tmp_log_dir, which this function deletes on every
+    # call: the reference is one file for the whole search and the largest
+    # source in it, and ssimulacra2_assessment already learned that deleting
+    # its index here means rebuilding it every iteration. The distorted index
+    # names a different encode each iteration, so it is still removed once
+    # this call is done, the same way ssimulacra2_assessment treats its own.
     vpy_path = Path(tmp_log_dir) / "vmaf.vpy"
-    ref_cache = Path(tmp_log_dir) / f"vmaf_ref{indexer_spec(indexer).index_suffix}"
-    dis_cache = Path(tmp_log_dir) / f"vmaf_dis{indexer_spec(indexer).index_suffix}"
+    index_suffix = indexer_spec(indexer).index_suffix
+    ref_cache = temp_dir / f"vmaf_ref{index_suffix}"
+    dis_cache = temp_dir / f"vmaf_dis{index_suffix}"
     write_vpy_script(
         vpy_path,
         build_vmaf_vpy_script(
@@ -740,6 +755,10 @@ def run_vmaf(
             log.error("libvmaf produced no JSON log at %s", tmp_log)
     finally:
         shutil.rmtree(tmp_log_dir, ignore_errors=True)
+        # Only the distorted index. The reference is kept in temp_dir for the
+        # next iteration; see the comment where these paths are built.
+        if dis_cache.exists():
+            dis_cache.unlink()
 
     try:
         with open(log_path, encoding="utf-8") as f:
@@ -851,14 +870,14 @@ def assess_with_vmaf(
     dis_path: Path,
     model_spec: str | None = None,
     log_path: Path,
-    tonemap_policy: str = "auto",
     cwd: Path | None = None,
     line_handler: Callable[[str], bool] | None = None,
     family: VmafFamily = VmafFamily.V1,
     indexer: IndexerType,
     vs_env: VapourSynthEnv,
+    temp_dir: Path,
 ) -> VMAFResult:
-    """High-level helper that probes both inputs and runs VMAF with optional tonemapping.
+    """High-level helper that probes both inputs and runs VMAF.
 
     Centralizes all VMAF-related orchestration here (probing, filtering, parsing).
     If model_spec is None, automatically selects the appropriate model based on
@@ -878,12 +897,12 @@ def assess_with_vmaf(
         dis_info=dis_info,
         model_spec=model_spec,
         log_path=log_path,
-        tonemap_policy=tonemap_policy,
         cwd=cwd,
         line_handler=line_handler,
         family=family,
         indexer=indexer,
         vs_env=vs_env,
+        temp_dir=temp_dir,
     )
 
 
@@ -896,12 +915,12 @@ def assess_vmaf_concatenated(
     ffmpeg_bin: str,
     ffprobe_bin: str,
     vmaf_model: str | None,
-    tonemap_policy: str,
     display: PipelineDisplay,
     log: logging.Logger,
     iteration: int,
     indexer: IndexerType,
     vs_env: VapourSynthEnv,
+    temp_dir: Path,
     family: VmafFamily = VmafFamily.V1,
 ) -> list[VMAFResult]:
     """Run VMAF assessment on concatenated reference and distorted files.
@@ -915,12 +934,13 @@ def assess_vmaf_concatenated(
         ffmpeg_bin: Path to ffmpeg binary
         ffprobe_bin: Path to ffprobe binary
         vmaf_model: VMAF model to use (None for auto-selection)
-        tonemap_policy: HDR tonemapping policy
         display: Progress display manager
         log: Logger instance
         iteration: Current iteration number
         indexer: Source filter to load both clips with.
         vs_env: VapourSynth environment configuration.
+        temp_dir: Directory for intermediate files, where the reference's
+            index is kept across iterations.
 
     Returns:
         List containing single VMAFResult for the concatenated comparison
@@ -948,12 +968,12 @@ def assess_vmaf_concatenated(
             dis_path=distorted_path,
             model_spec=vmaf_model,
             log_path=vmaf_log_path,
-            tonemap_policy=tonemap_policy,
             cwd=repo_root,
             line_handler=stage.make_ffmpeg_handler(total_frames=total_frames),
             family=family,
             indexer=indexer,
             vs_env=vs_env,
+            temp_dir=temp_dir,
         )
 
     log.info(

@@ -35,3 +35,40 @@ def test_v0_matches_the_encode_depth() -> None:
     graph = build_vmaf_filter(width=1920, height=1080, dis_bit_depth=8, use_v0=True)
     assert "format=yuv420p," in graph
     assert "yuv420p10le" not in graph
+
+
+# Reversing which track index feeds which pad scores every comparison
+# backwards while still returning a plausible-looking number - no test above
+# this line would catch that, since each only checks a substring appears
+# somewhere in the whole graph. These match whole chains, split on ";", so a
+# reversal fails them even though every substring they look for is still
+# present, just on the wrong chain.
+
+
+def test_the_zero_track_feeds_the_reference_pad() -> None:
+    graph = build_vmaf_filter(width=1920, height=1080)
+    chains = graph.split(";")
+    ref_chain = next(c for c in chains if c.startswith("[0:v:0]"))
+    assert ref_chain.endswith("[ref]")
+
+
+def test_the_one_track_feeds_the_distorted_pad() -> None:
+    graph = build_vmaf_filter(width=1920, height=1080)
+    chains = graph.split(";")
+    dis_chain = next(c for c in chains if c.startswith("[0:v:1]"))
+    assert dis_chain.endswith("[dis]")
+
+
+def test_the_scale_sits_only_on_the_distorted_chain() -> None:
+    graph = build_vmaf_filter(width=1920, height=1080)
+    chains = graph.split(";")
+    dis_chain = next(c for c in chains if c.startswith("[0:v:1]"))
+    ref_chain = next(c for c in chains if c.startswith("[0:v:0]"))
+    assert "scale=" in dis_chain
+    assert "scale=" not in ref_chain
+
+
+def test_libvmaf_reads_the_distorted_track_first() -> None:
+    # libvmaf's own input order: [distorted][reference].
+    graph = build_vmaf_filter(width=1920, height=1080)
+    assert graph.endswith("[dis][ref]")

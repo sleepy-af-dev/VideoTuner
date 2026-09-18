@@ -113,12 +113,12 @@ def run_vmaf_assessment(
             ffmpeg_bin=ctx.args.ffmpeg_bin,
             ffprobe_bin=ctx.args.ffprobe_bin,
             vmaf_model=ctx.args.vmaf_model,
-            tonemap_policy=ctx.args.tonemap,
             display=ctx.display,
             log=ctx.log,
             iteration=iteration,
             indexer=ctx.args.indexer,
             vs_env=vs_env,
+            temp_dir=ctx.temp_dir,
             family=ctx.vmaf_family,
         )
     except Exception as e:

@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from videotuner import vmaf_assessment
-from videotuner.encoding_utils import IndexerType, VapourSynthEnv
+from videotuner.encoding_utils import IndexerType, VapourSynthEnv, indexer_spec
 from videotuner.media import VideoInfo
 from videotuner.vmaf_assessment import (
     build_libvmaf_model_option,
@@ -360,6 +360,7 @@ class TestVmafLogPathLength:
             cwd=tmp_path,
             indexer=IndexerType.FFMS2,
             vs_env=VapourSynthEnv.from_cwd(tmp_path),
+            temp_dir=tmp_path,
         )
         return captured["log_path"]
 
@@ -386,3 +387,86 @@ class TestVmafLogPathLength:
 
         assert destination.exists()
         assert not list(tmp_path.glob(".vt_vmaf_*"))
+
+
+def _fake_captured_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, str]:
+    """Stub run_vspipe_encode and capture the -filter_complex it was given.
+
+    Shared by the tests below, which only care about the emitted graph, not
+    about a real libvmaf log ever appearing.
+    """
+    captured: dict[str, str] = {}
+
+    def fake_run_vspipe_encode(encoder_args: list[str], **_kwargs: object) -> str:
+        captured["graph"] = encoder_args[encoder_args.index("-filter_complex") + 1]
+        return ""
+
+    monkeypatch.setattr(vmaf_assessment, "run_vspipe_encode", fake_run_vspipe_encode)
+    return captured
+
+
+class TestRunVmafScalesToTheReference:
+    """build_vmaf_filter only scales the distorted track, so run_vmaf has to
+    hand it the *reference's* dimensions. Handing it the distorted encode's
+    own (usually smaller) size makes the scale a no-op and leaves libvmaf two
+    differently sized tracks whenever the encode was downscaled.
+    """
+
+    def test_scale_targets_the_reference_not_the_distorted_encode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured = _fake_captured_graph(monkeypatch)
+
+        _ = run_vmaf(
+            ffmpeg_bin="ffmpeg",
+            ref_path=tmp_path / "ref.mkv",
+            dis_path=tmp_path / "dis.mkv",
+            ref_info=VideoInfo(fps=24.0, duration=1.0, width=3840, height=2160),
+            dis_info=VideoInfo(fps=24.0, duration=1.0, width=1920, height=1080),
+            log_path=tmp_path / "vmaf.json",
+            cwd=tmp_path,
+            indexer=IndexerType.FFMS2,
+            vs_env=VapourSynthEnv.from_cwd(tmp_path),
+            temp_dir=tmp_path,
+        )
+
+        assert "scale=3840:2160:flags=bicubic" in captured["graph"]
+
+
+class TestRunVmafKeepsTheReferenceIndex:
+    """ssimulacra2_assessment learned this the hard way: rebuilding a
+    multi-GB reference's index every CRF iteration is expensive enough to
+    matter. VMAF's reference index has to survive the same way.
+    """
+
+    def test_reference_index_is_not_deleted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _ = _fake_captured_graph(monkeypatch)
+        temp_dir = tmp_path / "temp"
+        temp_dir.mkdir()
+        ref_cache = temp_dir / f"vmaf_ref{indexer_spec(IndexerType.FFMS2).index_suffix}"
+        dis_cache = temp_dir / f"vmaf_dis{indexer_spec(IndexerType.FFMS2).index_suffix}"
+        # Stand in for an index already built by a previous iteration.
+        _ = ref_cache.write_text("existing reference index", encoding="utf-8")
+        _ = dis_cache.write_text("stale distorted index", encoding="utf-8")
+
+        _ = run_vmaf(
+            ffmpeg_bin="ffmpeg",
+            ref_path=tmp_path / "ref.mkv",
+            dis_path=tmp_path / "dis.mkv",
+            ref_info=VideoInfo(fps=24.0, duration=1.0, width=1920, height=1080),
+            dis_info=VideoInfo(fps=24.0, duration=1.0, width=1920, height=1080),
+            log_path=tmp_path / "vmaf.json",
+            cwd=tmp_path,
+            indexer=IndexerType.FFMS2,
+            vs_env=VapourSynthEnv.from_cwd(tmp_path),
+            temp_dir=temp_dir,
+        )
+
+        assert ref_cache.exists(), "the reference index must survive the call"
+        assert not dis_cache.exists(), (
+            "the distorted index names a different encode next iteration"
+        )

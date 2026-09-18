@@ -168,8 +168,16 @@ def test_a_pq_input_tonemaps() -> None:
 
 
 def test_the_script_targets_vmaf_not_ssim2() -> None:
-    assert "vs.YUV420P10" in _script(_SDR)
-    assert "vszip" not in _script(_SDR)
+    # An SDR clip bound for VMAF converts nothing, so the tell is the absence
+    # of SSIMULACRA2's linear-light conversion rather than the presence of a
+    # VMAF-specific one.
+    sdr = _script(_SDR)
+    assert "vs.RGBS" not in sdr
+    assert "vszip" not in sdr
+
+    # HDR still carries VMAF's own encode back to SDR, which SSIMULACRA2
+    # never emits.
+    assert "vs.YUV420P10" in _script(_PQ)
 
 
 requires_vapoursynth = pytest.mark.skipif(
@@ -212,6 +220,11 @@ def test_the_pair_vspipe_writes_is_the_converted_one(tmp_path: Path) -> None:
     # output 0 replaces the sampling script's raw clip rather than being
     # ignored. An 8-bit source settles it, because prepare() emits 10-bit and
     # the untouched clip would not.
+    #
+    # PQ rather than SDR, because an SDR clip bound for VMAF is returned
+    # unconverted and would leave nothing to tell the two apart. Tonemapping
+    # is what makes the depth change observable here; it is the output
+    # replacement being tested, not the colour.
     source = tmp_path / "source.mkv"
     _ = subprocess.run(
         [
@@ -225,6 +238,12 @@ def test_the_pair_vspipe_writes_is_the_converted_one(tmp_path: Path) -> None:
             f"testsrc2=size=64x64:rate=24:duration={_SOURCE_FRAMES / 24}",
             "-pix_fmt",
             "yuv420p",
+            "-color_trc",
+            "smpte2084",
+            "-color_primaries",
+            "bt2020",
+            "-colorspace",
+            "bt2020nc",
             str(source),
         ],
         capture_output=True,
@@ -239,7 +258,9 @@ def test_the_pair_vspipe_writes_is_the_converted_one(tmp_path: Path) -> None:
             dis_path=source,
             dis_cache=tmp_path / "dis.ffindex",
             indexer=IndexerType.FFMS2,
-            info=_SDR,
+            # No mastering display, so the tone curve takes the assumed bounds
+            # rather than reading properties this generated clip lacks.
+            info=_PQ_NO_MASTERING,
         ),
     )
 

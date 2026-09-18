@@ -722,7 +722,10 @@ def test_the_ssim2_target_ends_in_linear_rgbs() -> None:
 
 
 def test_the_vmaf_target_ends_in_limited_range_yuv() -> None:
-    src = colour_preamble(LinearisationMode.SDR, missing=[], target=MetricTarget.VMAF)
+    # PQ rather than SDR: an SDR clip bound for VMAF is already in the form
+    # VMAF wants and is returned unconverted, so this tail is only reached
+    # once a tone curve has run and the frames have to be encoded back.
+    src = colour_preamble(LinearisationMode.PQ, missing=[], target=MetricTarget.VMAF)
     assert "vs.YUV420P10" in src
     assert 'matrix_s="709"' in src
     assert 'range_s="limited"' in src
@@ -745,8 +748,9 @@ def test_both_targets_share_one_tonemap_call(mode: LinearisationMode) -> None:
 
 
 # Measured against vs-tonemap 0.2.0 on 2026-09-18. _Range=0 is limited.
+# SDR is absent on purpose: it tonemaps nothing, so its VMAF chain converts
+# nothing either and is covered by the passthrough tests below instead.
 _VMAF_CASES: dict[str, tuple[str, tuple[float, float, float]]] = {
-    "sdr": ("sdr", (0.500489, 0.500489, 0.500489)),
     "pq": ("pq", (0.705767, 0.500489, 0.500489)),
 }
 
@@ -804,3 +808,47 @@ def test_the_vmaf_chain_emits_limited_range_bt709_yuv(
     assert out["_Transfer"] == 1  # BT.709
     assert out["_Range"] == 0  # limited
     assert values == pytest.approx(expected, abs=1e-4)
+
+
+def test_an_sdr_clip_bound_for_vmaf_is_not_converted_at_all() -> None:
+    # VMAF reads code values, and its models were fitted on SDR video in its
+    # native encoded form, so the frames it wants are the ones already on
+    # disk. Routing them through linear RGB and back resamples chroma
+    # 420-444-420, applies a 709 EOTF/OETF pair, converts range twice and
+    # requantises — lossy, pointless when nothing tonemaps, and it smooths
+    # both clips alike so every SDR score comes out flattered.
+    src = colour_preamble(LinearisationMode.SDR, missing=[], target=MetricTarget.VMAF)
+    assert "core.resize." not in src
+    assert "core.tonemap." not in src
+    assert "vs.RGBS" not in src
+    assert "return clip" in src
+
+
+def test_an_sdr_clip_bound_for_ssimulacra2_is_still_converted() -> None:
+    # SSIMULACRA2 scores in linear light by definition, so its SDR chain is
+    # not the one being removed.
+    src = colour_preamble(LinearisationMode.SDR, missing=[], target=MetricTarget.SSIM2)
+    assert "vs.RGBS" in src
+    assert 'transfer_s="linear"' in src
+
+
+@pytest.mark.parametrize("mode", [LinearisationMode.PQ, LinearisationMode.HLG])
+def test_an_hdr_clip_bound_for_vmaf_still_tonemaps(mode: LinearisationMode) -> None:
+    # Only SDR skips the conversion. HDR genuinely needs it: VMAF is not
+    # defined on HDR, so the tonemap and the encode back to SDR both stay.
+    src = colour_preamble(mode, missing=[], target=MetricTarget.VMAF)
+    assert "core.tonemap.BT2390(" in src
+    assert "vs.YUV420P10" in src
+
+
+def test_an_untagged_sdr_clip_bound_for_vmaf_still_gets_its_tags() -> None:
+    # The passthrough skips the conversion, not the tagging: vspipe -c mkv
+    # writes these properties into the stream it hands ffmpeg.
+    src = colour_preamble(
+        LinearisationMode.SDR,
+        missing=["transfer", "primaries", "matrix"],
+        target=MetricTarget.VMAF,
+    )
+    assert "SetFrameProps" in src
+    assert "_Transfer=1" in src
+    assert "return clip" in src

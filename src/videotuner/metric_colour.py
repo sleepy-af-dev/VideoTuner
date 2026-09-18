@@ -59,10 +59,14 @@ class MetricTarget(StrEnum):
 
 # SSIMULACRA2 takes the front's own output: vszip's two conversion paths both
 # early-return on a linear RGBS clip. VMAF is trained on BT.709 SDR video and
-# reads code values rather than light, so its frames are encoded the way an SDR
-# deliverable is. Range is load-bearing and silent when wrong: the front ends
-# full-range RGBS and this must land limited-range YUV, which is what libvmaf
-# is handed today.
+# reads code values rather than light, so an HDR clip is encoded back the way
+# an SDR deliverable is once the tone curve has run. Range is load-bearing and
+# silent when wrong: the front ends full-range RGBS and this must land
+# limited-range YUV, which is what libvmaf is handed.
+#
+# Only reached for HDR. An SDR clip bound for VMAF is already in the form VMAF
+# wants and returns unconverted, which `colour_preamble` handles before it gets
+# this far.
 _TAILS = {
     MetricTarget.SSIM2: "    return out",
     MetricTarget.VMAF: (
@@ -249,14 +253,41 @@ def colour_preamble(
     Returns:
         Python source defining ``prepare(clip)``, for embedding in a .vpy.
     """
+    # The emitted docstring describes what this particular chain does, since a
+    # reader meets it in a generated .vpy with no other context.
+    if mode is LinearisationMode.SDR and target is MetricTarget.VMAF:
+        summary = "Tag a clip VMAF can score as it stands."
+    elif target is MetricTarget.VMAF:
+        summary = "Tonemap an HDR clip to SDR and encode it back for VMAF."
+    else:
+        summary = "Convert a tagged clip to linear RGBS, tonemapping HDR first."
     lines = [
         "def prepare(clip):",
-        '    """Convert a tagged clip to linear RGBS, tonemapping HDR first."""',
+        f'    """{summary}"""',
     ]
     if missing:
         values = _FALLBACK_VALUES[mode]
         assigns = ", ".join(f"{_TAG_PROPS[tag]}={values[tag]}" for tag in missing)
         lines.append(f"    clip = core.std.SetFrameProps(clip, {assigns})")
+    if mode is LinearisationMode.SDR and target is MetricTarget.VMAF:
+        # Nothing to do. VMAF reads code values, and its models were fitted on
+        # SDR video in its native encoded form, so the frames it wants are the
+        # ones already on disk. Converting to linear RGB and back would
+        # resample chroma 420-444-420, apply a 709 EOTF/OETF pair, convert
+        # range twice and requantise - every step lossy, and none of it buying
+        # anything when nothing is being tonemapped. It also smooths both
+        # clips alike, which makes them more similar to each other, which
+        # flatters the score: measured at 0.04 to 0.07 VMAF points upward.
+        #
+        # Depth is still handled downstream: build_vmaf_filter emits
+        # format=yuv420p10le in ffmpeg either way.
+        #
+        # A tag written above still applies - the passthrough skips the
+        # conversion, not the tagging, and vspipe -c mkv carries those
+        # properties into the stream ffmpeg reads.
+        lines.append("    return clip")
+        return "\n".join(lines) + "\n"
+
     if mode is LinearisationMode.PQ:
         peak = SSIM2_ASSUMED_MASTERING_PEAK if mastering_missing else None
         lines.append(_pq_chain(assumed_peak=peak))

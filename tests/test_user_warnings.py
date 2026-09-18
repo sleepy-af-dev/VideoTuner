@@ -7,7 +7,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from videotuner.progress import UserWarningHandler
+from videotuner.progress import PipelineDisplay, UserWarningHandler
 from videotuner.utils import USER_FACING, warn_user
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "videotuner"
@@ -129,3 +129,68 @@ def test_the_handler_ignores_records_below_warning() -> None:
         log.removeHandler(handler)
 
     assert sink.getvalue() == ""
+
+
+def test_a_warning_printed_inside_a_live_progress_bar_is_not_corrupted() -> None:
+    """Reproduces the case a full run can miss: ``warn_user`` firing while a
+    ``Stage``'s Rich ``Live`` context is open, as at the indexer-subprocess-
+    failed site inside pipeline.py's "Building {indexer} Index" stage.
+
+    ``force_terminal=True`` makes Rich treat the sink as a real terminal, so
+    its ``Progress``/``Live`` machinery does the same in-place, escape-code
+    driven redraw it would on a real screen rather than staying silent (Rich
+    gates that rendering on ``Console.is_terminal``). Entering a stage
+    triggers an immediate first redraw (``Live.start(refresh=True)``), and
+    exiting one triggers an unconditional final redraw before the transient
+    bar clears (``Live.stop()``) - both deterministic, so the warning printed
+    in between is provably bracketed by live bar frames rather than printed
+    before the bar started or after it had already stopped.
+    """
+    sink = io.StringIO()
+    console = Console(file=sink, force_terminal=True, width=200, no_color=True)
+    display = PipelineDisplay(console=console, show_title=False)
+
+    handler = UserWarningHandler(display.console)
+    log = logging.getLogger("videotuner.test.live_bar")
+    log.addHandler(handler)
+    try:
+        with display.stage("Building FFMS2 Index", total=100) as stage:
+            stage.update(completed=10)
+            warn_user(log, "indexer subprocess failed: %s", "boom")
+            stage.update(completed=100)
+    finally:
+        log.removeHandler(handler)
+
+    output = sink.getvalue()
+    assert "indexer subprocess failed: boom" in output
+
+    # Rich separates a live redraw burst from a plain print with a real
+    # newline; the redraw burst itself is many "\r"-joined frames with no
+    # real newline between them. Splitting on "\r" as well as "\n" gives one
+    # entry per rendered frame, so a warning glued onto a bar frame - rather
+    # than printed as its own frame - would show up sharing an entry with
+    # bar content instead of getting one to itself.
+    frames = [frame for line in output.split("\n") for frame in line.split("\r")]
+    bar_frames = [
+        i
+        for i, frame in enumerate(frames)
+        if "Building FFMS2 Index" in frame and "%" in frame
+    ]
+    warning_frames = [
+        i
+        for i, frame in enumerate(frames)
+        if "indexer subprocess failed: boom" in frame
+    ]
+
+    # The bar actually rendered - proves the Live context was genuinely open
+    # and driving output, not skipped because of how the sink was built.
+    assert bar_frames
+    # The warning got a frame of its own ...
+    assert warning_frames
+    for i in warning_frames:
+        assert "Building FFMS2 Index" not in frames[i]
+        assert "%" not in frames[i]
+    # ... positioned between an earlier and a later bar frame, proving it
+    # printed while the bar was live rather than just somewhere in the
+    # output.
+    assert min(bar_frames) < min(warning_frames) < max(bar_frames)

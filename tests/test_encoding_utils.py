@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -32,6 +35,7 @@ from videotuner.encoding_utils import (
     is_hdr_video,
     read_indexed_frame_count,
     resolve_absolute_path,
+    run_vspipe_encode,
 )
 
 
@@ -1107,3 +1111,88 @@ class TestDistortedIndexPath:
         assert ffms2 != lsmash
         assert ffms2.suffix == indexer_spec(IndexerType.FFMS2).index_suffix
         assert lsmash.suffix == indexer_spec(IndexerType.LSMASH).index_suffix
+
+
+class TestRunVspipeEncodeStop:
+    """The optional early-stop event."""
+
+    @staticmethod
+    def _producer(count: int) -> list[str]:
+        return [
+            sys.executable,
+            "-c",
+            f"import sys\nfor i in range({count}):\n"
+            "    sys.stdout.write(f'{i}\\n')\n    sys.stdout.flush()\n",
+        ]
+
+    @staticmethod
+    def _echo() -> list[str]:
+        return [
+            sys.executable,
+            "-c",
+            "import sys\nfor line in sys.stdin:\n"
+            "    sys.stderr.write(line)\n    sys.stderr.flush()\n",
+        ]
+
+    def test_a_set_event_returns_instead_of_raising(self) -> None:
+        # Both processes are killed on purpose, so their exit codes say
+        # nothing. Treating them as failures would turn every early stop
+        # into a spurious error.
+        stop = threading.Event()
+
+        def handler(line: str) -> bool:
+            if line.strip() == "5":
+                stop.set()
+            return True
+
+        out = run_vspipe_encode(
+            vspipe_args=self._producer(200_000),
+            encoder_args=self._echo(),
+            vs_env=dict(os.environ),
+            cwd=None,
+            line_handler=handler,
+            stop=stop,
+        )
+        assert "5" in out
+
+    def test_a_set_event_stops_before_the_end(self) -> None:
+        stop = threading.Event()
+
+        def handler(line: str) -> bool:
+            if line.strip() == "5":
+                stop.set()
+            return True
+
+        out = run_vspipe_encode(
+            vspipe_args=self._producer(200_000),
+            encoder_args=self._echo(),
+            vs_env=dict(os.environ),
+            cwd=None,
+            line_handler=handler,
+            stop=stop,
+        )
+        # Generous: pipe buffers let a lot through before the kill lands.
+        # The claim is only that it did not run to completion.
+        assert len(out.splitlines()) < 200_000
+
+    def test_no_event_behaves_exactly_as_before(self) -> None:
+        out = run_vspipe_encode(
+            vspipe_args=self._producer(50),
+            encoder_args=self._echo(),
+            vs_env=dict(os.environ),
+            cwd=None,
+            line_handler=None,
+        )
+        assert len(out.splitlines()) == 50
+
+    def test_an_unset_event_does_not_stop_anything(self) -> None:
+        stop = threading.Event()
+        out = run_vspipe_encode(
+            vspipe_args=self._producer(50),
+            encoder_args=self._echo(),
+            vs_env=dict(os.environ),
+            cwd=None,
+            line_handler=None,
+            stop=stop,
+        )
+        assert len(out.splitlines()) == 50

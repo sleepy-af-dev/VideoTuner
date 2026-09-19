@@ -1025,6 +1025,7 @@ def run_vspipe_encode(
     vs_env: dict[str, str],
     cwd: Path | None,
     line_handler: Callable[[str], bool] | None,
+    stop: threading.Event | None = None,
 ) -> str:
     """Run vspipe | encoder encoding pipeline.
 
@@ -1037,6 +1038,10 @@ def run_vspipe_encode(
         vs_env: Environment with VapourSynth paths
         cwd: Working directory
         line_handler: Optional callback for progress lines
+        stop: Optional event the line handler may set to end the run early.
+            Both processes are then killed and their exit statuses ignored,
+            since the caller already has what it needed. Callers that pass
+            nothing behave exactly as before.
 
     Returns:
         Combined process output string
@@ -1098,6 +1103,14 @@ def run_vspipe_encode(
                         _ = line_handler(line)
                     except Exception:
                         log.debug("Progress callback error", exc_info=True)
+                if stop is not None and stop.is_set():
+                    # Killing both closes their pipes, so the other two
+                    # reader threads reach end of stream and their joins
+                    # return. Two threads can arrive here at once; a second
+                    # terminate() on a dead process is a no-op.
+                    vspipe_proc.terminate()
+                    encoder_proc.terminate()
+                    break
         finally:
             _ = wrapper.detach()
 
@@ -1123,6 +1136,11 @@ def run_vspipe_encode(
 
     encoder_ret = encoder_proc.wait()
     vspipe_ret = vspipe_proc.wait()
+
+    if stop is not None and stop.is_set():
+        # Both processes were killed on purpose. Their exit statuses record
+        # that they were killed, not that the work failed.
+        return "\n".join(captured)
 
     if encoder_ret != 0 or vspipe_ret != 0:
         encoder_output = "\n".join(captured) if captured else ""

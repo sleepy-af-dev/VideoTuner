@@ -170,3 +170,13 @@ RESERVED_JOB_SUBDIRS: frozenset[str] = frozenset({"temp"})
 # A job folder shortened below this stops being recognisable, so the batch
 # folder gives up characters instead.
 JOB_FOLDER_MIN_CHARS: int = 40
+
+# =============================================================================
+# CropDetect
+# =============================================================================
+
+# Fewest frames crop detection will judge a source on. The sample step is
+# lowered to reach this on a short source, where a 30-second interval would
+# otherwise yield one or two frames. One frame is not a measurement: a single
+# dark or bright picture would set the crop for every encode that follows.
+CROPDETECT_MIN_SAMPLES: int = 5

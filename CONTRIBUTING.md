@@ -12,7 +12,7 @@ This project has a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you 
 
 - Python 3.13+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
-- External tools on PATH: FFmpeg (with libvmaf, libplacebo), ffprobe, mkvmerge
+- External tools on PATH: FFmpeg (with libvmaf), ffprobe, mkvmerge
 
 ### Development Setup
 

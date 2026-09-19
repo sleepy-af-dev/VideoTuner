@@ -24,7 +24,6 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "videotuner"
 #
 # Counts above 1 are each a real pair, not an accident:
 #   profiles.py            the HDR/SDR dict check and its x264 twin
-#   tonemapping.py         "ffmpeg not found" also ends "...no Vulkan support"
 #   vmaf_assessment.py     the same, for "...no VMAF v1 support"
 USER_FACING_WARNINGS = {
     ("cropdetect.py", "Crop detection failed", 1),
@@ -38,8 +37,6 @@ USER_FACING_WARNINGS = {
     ("pipeline_validation.py", "Usable frames", 1),
     ("pipeline_validation.py", "No %s samples possible", 1),
     ("profiles.py", "Skipping parameter", 2),
-    ("tonemapping.py", "assuming no Vulkan support", 2),
-    ("tonemapping.py", "ffmpeg not found", 1),
     ("utils.py", "Could not parse luminance string", 1),
     ("utils.py", "Could not read mastering display primaries", 1),
     ("vmaf_assessment.py", "assuming no VMAF v1 support", 2),

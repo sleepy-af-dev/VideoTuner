@@ -113,15 +113,18 @@ The CRF search uses interpolated binary search to efficiently find the optimal C
 **How it works:**
 
 1. **Early Pipeline Stage**: Runs immediately after building the source index, before any encoding
-2. **Smart sampling**: Samples one frame every 30 seconds across the middle 80% of the video
+2. **Smart sampling**: Samples one frame every 30 seconds across the middle 80% of the
+   video, and never fewer than five frames, so a short source is not judged on one picture
 3. **Conservative cropping**: Uses the minimum (safest) crop values across all sampled frames to avoid accidentally cropping content
 4. **Consistent application**: The same crop values are applied to ALL encodes and to the frames both metrics read, across all phases
 
 **Detection method:**
 
-- Uses FFmpeg's `cropdetect` filter with per-sample timestamp seeking for fast detection
+- Reads the source through the indexer `--indexer` selects and analyses the frames it
+  asks for by number, then hands them to FFmpeg's `cropdetect` filter
 - Supports two modes: `black` (default, pixel threshold) and `mvedges` (motion + edge detection)
-- HDR sources are automatically tonemapped to SDR before cropdetect for consistent behavior
+- HDR sources are tonemapped to SDR first, by the same operator VMAF and SSIMULACRA2
+  use, so a crop does not depend on what the machine can run
 - Detects letterboxing (black bars top/bottom) and pillarboxing (black bars left/right)
 - Reports final dimensions in the console: `Detecting Crop Done! (3840x1608)`
 
@@ -180,7 +183,7 @@ VideoTuner and all bundled dependencies are 64-bit Windows binaries. Linux and m
 
 Both installation methods require these external tools on PATH:
 
-- **FFmpeg** (with libvmaf and libplacebo) and **FFprobe**. The VMAF v1 models
+- **FFmpeg** (with libvmaf) and **FFprobe**. The VMAF v1 models
   need **libvmaf 3.2.0** or newer, which is a property of the libvmaf your
   FFmpeg links rather than of the FFmpeg version. VideoTuner probes for them at
   startup and falls back to the legacy v0 models with a warning if they are
@@ -672,10 +675,9 @@ Both metrics always convert an HDR input to SDR before scoring it, because
 neither VMAF nor SSIMULACRA2 is defined on HDR. They use the same tonemapping
 operator, so an HDR score from one is comparable with the other's.
 
-`--indexer` applies to every operation that builds an index: sample extraction
-for encoding, VMAF and SSIMULACRA2. One run therefore reads video one way
-throughout. Cropdetect reads through FFmpeg and builds no index, so it is
-unaffected.
+`--indexer` applies to every operation that reads video: sample extraction for
+encoding, crop detection, VMAF and SSIMULACRA2. One run therefore reads video
+one way throughout.
 
 ### Guard Bands
 

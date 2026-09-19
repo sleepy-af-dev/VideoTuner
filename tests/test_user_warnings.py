@@ -27,8 +27,9 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "videotuner"
 #   tonemapping.py         "ffmpeg not found" also ends "...no Vulkan support"
 #   vmaf_assessment.py     the same, for "...no VMAF v1 support"
 USER_FACING_WARNINGS = {
-    ("create_encodes.py", "No sample frames to analyse", 1),
-    ("create_encodes.py", "cropdetect produced no output", 1),
+    ("cropdetect.py", "Crop detection failed", 1),
+    ("cropdetect.py", "No sample frames to analyse", 1),
+    ("cropdetect.py", "cropdetect produced no output", 1),
     ("encoding_utils.py", "the index will be built automatically", 1),
     ("media.py", "Unknown chroma_location", 1),
     ("pipeline.py", "VMAF v1 models not found", 1),

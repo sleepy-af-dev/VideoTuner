@@ -13,12 +13,12 @@ from .constants import (
     CRF_SEARCH_MAX_ITERATIONS,
     METRIC_DECIMALS,
 )
-from .create_encodes import calculate_cropdetect_values
 from .crf_search import (
     CRFFloorError,
     CRFSearchState,
     QualityTarget,
 )
+from .cropdetect import calculate_cropdetect_values, cropdetect_sample_plan
 from .encoding_utils import (
     CropValues,
     IndexerType,
@@ -569,10 +569,16 @@ def _run_pipeline_body(
         measured: list[CropValues] = []
         for source, source_info in zip(source_paths, infos, strict=True):
             source_frames = get_frame_count(source, source_info)
-            # Calculate expected sample count for progress bar
-            _skip = max(1, int(source_frames * 0.10))
-            _step = max(1, round(source_info.fps * args.cropdetect_interval))
-            expected_samples = len(range(_skip, source_frames - _skip, _step))
+            # One plan, used for both the progress total and the script, so
+            # the bar cannot describe a different set of frames from the one
+            # analysed.
+            plan = cropdetect_sample_plan(
+                start_frame=0,
+                num_frames=source_frames,
+                fps=source_info.fps,
+                interval=args.cropdetect_interval,
+            )
+            expected_samples = plan.count if plan is not None else 0
             log.info(
                 "Detecting crop in %s (%d frames, %d samples)...",
                 source.name,
@@ -595,7 +601,9 @@ def _run_pipeline_body(
                         start_frame=0,
                         num_frames=source_frames,
                         fps=source_info.fps,
-                        is_hdr=is_hdr_video(source_info.color_trc),
+                        info=source_info,
+                        cache_file=cache_files[source],
+                        indexer=args.indexer,
                         interval=args.cropdetect_interval,
                         ffmpeg_bin=args.ffmpeg_bin,
                         source_width=source_info.width or 0,

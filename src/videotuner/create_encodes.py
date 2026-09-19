@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import logging
 import shlex
-import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .media import VideoInfo
@@ -28,9 +27,7 @@ from .encoding_utils import (
 )
 from .media import get_video_format
 from .profiles import Profile, create_multipass_profile
-from .tonemapping import build_tonemap_chain, has_vulkan_support
-from .tool_parsers import CROPDETECT_RE
-from .utils import log_separator, run_capture, warn_user
+from .utils import log_separator, run_capture
 
 logger = logging.getLogger(__name__)
 
@@ -60,180 +57,6 @@ def mux_to_mkv(
 
     log.debug("mkvmerge mux cmd: %s", " ".join(shlex.quote(str(c)) for c in mux_args))
     _ = run_capture(mux_args, cwd=cwd, line_callback=line_handler)
-
-
-def calculate_cropdetect_values(
-    source_path: Path,
-    start_frame: int,
-    num_frames: int,
-    fps: float,
-    *,
-    is_hdr: bool = False,
-    interval: int = 30,
-    ffmpeg_bin: str = "ffmpeg",
-    source_width: int,
-    source_height: int,
-    cwd: Path | None = None,
-    line_handler: Callable[[str], bool] | None = None,
-    cropdetect_mode: str = "black",
-    cropdetect_limit: int | None = None,
-    cropdetect_round: int = 2,
-    cropdetect_mv_threshold: int | None = None,
-    cropdetect_low: float | None = None,
-    cropdetect_high: float | None = None,
-) -> CropValues:
-    """Calculate crop values using FFmpeg cropdetect with timestamp seeking.
-
-    Seeks to individual sample points across the middle 80% of the video
-    instead of decoding every frame, making it much faster for long videos.
-    For HDR content, a tonemapping filter is inserted before cropdetect
-    (GPU libplacebo if available, CPU hable otherwise).
-
-    Args:
-        source_path: Input source video path.
-        start_frame: First frame to analyse (0-indexed).
-        num_frames: Total number of frames in the video.
-        fps: Video framerate for sampling frequency.
-        is_hdr: Whether the source is HDR (PQ/HLG).
-        interval: Seconds between sampled frames.
-        ffmpeg_bin: Path to the ffmpeg binary.
-        source_width: Width of the source video in pixels.
-        source_height: Height of the source video in pixels.
-        cwd: Working directory for execution.
-        line_handler: Optional callback for progress parsing.
-        cropdetect_mode: Detection mode (``"black"`` or ``"mvedges"``).
-        cropdetect_limit: Black pixel threshold 0-255 (None = FFmpeg default 24).
-        cropdetect_round: Crop dimension divisibility (default 2).
-        cropdetect_mv_threshold: Motion threshold in pixels (None = FFmpeg default 8).
-        cropdetect_low: Canny low threshold 0.0-1.0 (None = FFmpeg default).
-        cropdetect_high: Canny high threshold 0.0-1.0 (None = FFmpeg default).
-
-    Returns:
-        CropValues with left, right, top, bottom crop values.
-
-    Raises:
-        RuntimeError: If ffmpeg binary is not found.
-    """
-    log = logging.getLogger(__name__)
-
-    # Guard: skip first/last 10 % of frames to avoid intros/outros
-    skip = max(1, int(num_frames * 0.10))
-    safe_start = start_frame + skip
-    safe_end = start_frame + num_frames - skip
-    step = max(1, round(fps * interval))
-
-    # Generate sample frame positions and convert to timestamps
-    sample_frames = list(range(safe_start, safe_end, step))
-    if not sample_frames:
-        warn_user(log, "No sample frames to analyse — returning zero crop")
-        return CropValues(left=0, right=0, top=0, bottom=0)
-
-    # Build filter chain (no select filter — one frame per seek)
-    filters: list[str] = []
-    if is_hdr:
-        use_gpu = has_vulkan_support(ffmpeg_bin)
-        filters.append(
-            build_tonemap_chain(source_width, source_height, use_gpu=use_gpu)
-        )
-    # Normalise to 8-bit YUV so cropdetect's limit (default 24/255) is
-    # interpreted consistently regardless of source bit depth.
-    filters.append("format=yuv420p")
-    # Build cropdetect filter with user-configurable parameters.
-    # skip=0: evaluate immediately (default skip=2 discards frames, which
-    # produces no output when we only pass a single frame per seek).
-    # reset=1: detect per-frame independently.
-    cd_parts = [f"round={cropdetect_round}", "reset=1", "skip=0"]
-    if cropdetect_mode != "black":
-        cd_parts.append(f"mode={cropdetect_mode}")
-    if cropdetect_limit is not None:
-        cd_parts.append(f"limit={cropdetect_limit}")
-    if cropdetect_mv_threshold is not None:
-        cd_parts.append(f"mv_threshold={cropdetect_mv_threshold}")
-    if cropdetect_low is not None:
-        cd_parts.append(f"low={cropdetect_low}")
-    if cropdetect_high is not None:
-        cd_parts.append(f"high={cropdetect_high}")
-    filters.append(f"cropdetect={':'.join(cd_parts)}")
-    vf = ",".join(filters)
-
-    abs_source = resolve_absolute_path(source_path, cwd)
-
-    min_left = source_width
-    min_right = source_width
-    min_top = source_height
-    min_bottom = source_height
-    any_detected = False
-
-    for i, frame_num in enumerate(sample_frames):
-        timestamp = frame_num / fps
-        cmd = [
-            ffmpeg_bin,
-            "-hide_banner",
-            "-ss",
-            f"{timestamp:.3f}",
-            "-i",
-            str(abs_source),
-            "-frames:v",
-            "1",
-            "-vf",
-            vf,
-            "-an",
-            "-sn",
-            "-dn",
-            "-f",
-            "null",
-            "-",
-        ]
-
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=60,
-                cwd=str(cwd) if cwd else None,
-            )
-        except subprocess.TimeoutExpired:
-            log.debug("cropdetect timed out at %.3fs, skipping sample", timestamp)
-            if line_handler:
-                _ = line_handler(f"frame= {i + 1}")
-            continue
-        except FileNotFoundError as e:
-            raise RuntimeError(f"Command not found: {ffmpeg_bin}") from e
-
-        output = result.stderr + "\n" + result.stdout
-        matches = cast(list[tuple[str, str, str, str]], CROPDETECT_RE.findall(output))
-        for w_s, h_s, x_s, y_s in matches:
-            w, h, x, y = int(w_s), int(h_s), int(x_s), int(y_s)
-            min_left = min(min_left, x)
-            min_top = min(min_top, y)
-            min_right = min(min_right, source_width - w - x)
-            min_bottom = min(min_bottom, source_height - h - y)
-            any_detected = True
-
-        if line_handler:
-            _ = line_handler(f"frame= {i + 1}")
-
-    if not any_detected:
-        warn_user(log, "cropdetect produced no output — returning zero crop")
-        return CropValues(left=0, right=0, top=0, bottom=0)
-
-    # Clamp negatives (can happen if cropdetect returns a larger area than source)
-    left_val = max(0, min_left)
-    right_val = max(0, min_right)
-    top_val = max(0, min_top)
-    bottom_val = max(0, min_bottom)
-
-    log.debug(
-        "CropDetect values calculated: L=%d R=%d T=%d B=%d",
-        left_val,
-        right_val,
-        top_val,
-        bottom_val,
-    )
-    return CropValues(left=left_val, right=right_val, top=top_val, bottom=bottom_val)
 
 
 def encode_concatenated_reference(

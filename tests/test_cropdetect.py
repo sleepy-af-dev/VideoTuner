@@ -2,16 +2,25 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
 
 from videotuner.constants import CROPDETECT_MIN_SAMPLES
 from videotuner.cropdetect import (
+    accumulate_crop,
     build_cropdetect_vpy_script,
+    calculate_cropdetect_values,
     cropdetect_sample_plan,
+    make_crop_handler,
 )
-from videotuner.encoding_utils import IndexerType, VapourSynthEnv, write_vpy_script
+from videotuner.encoding_utils import (
+    CropValues,
+    IndexerType,
+    VapourSynthEnv,
+    write_vpy_script,
+)
 from videotuner.media import VideoInfo
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -287,3 +296,120 @@ def test_vspipe_writes_the_frames_the_plan_describes(tmp_path: Path) -> None:
     # 10-bit in, 8-bit out: the conversion is the point.
     assert fields["Format Name"] == "YUV420P8"
     assert fields["Frames"] == str(plan.count)
+
+
+class TestCropAccumulation:
+    """What the streamed crop lines add up to."""
+
+    @staticmethod
+    def _lines(*crops: str) -> list[str]:
+        return [
+            f"[Parsed_cropdetect_0 @ 0x0] x1:0 x2:0 y1:0 y2:0 w:0 h:0 "
+            f"x:0 y:0 pts:0 t:0.0 limit:0.094118 {c}"
+            for c in crops
+        ]
+
+    def test_the_least_aggressive_crop_per_edge_wins(self) -> None:
+        # A dark scene makes cropdetect read the picture itself as black and
+        # report a huge crop. Taking the minimum means only what every frame
+        # agrees is black gets cropped.
+        result = accumulate_crop(
+            self._lines("crop=1920:800:0:140", "crop=1920:1080:0:0"),
+            source_width=1920,
+            source_height=1080,
+        )
+        assert result == CropValues(left=0, right=0, top=0, bottom=0)
+
+    def test_a_consistent_bar_survives(self) -> None:
+        result = accumulate_crop(
+            self._lines("crop=1920:800:0:140", "crop=1920:804:0:138"),
+            source_width=1920,
+            source_height=1080,
+        )
+        assert result == CropValues(left=0, right=0, top=138, bottom=138)
+
+    def test_no_output_is_no_crop(self) -> None:
+        result = accumulate_crop([], source_width=1920, source_height=1080)
+        assert result == CropValues(left=0, right=0, top=0, bottom=0)
+
+    def test_a_crop_larger_than_the_source_clamps_to_zero(self) -> None:
+        result = accumulate_crop(
+            self._lines("crop=1930:1090:0:0"),
+            source_width=1920,
+            source_height=1080,
+        )
+        assert result == CropValues(left=0, right=0, top=0, bottom=0)
+
+
+class TestEarlyExit:
+    """When the pipe is allowed to stop."""
+
+    @staticmethod
+    def _line(crop: str) -> str:
+        return f"[Parsed_cropdetect_0 @ 0x0] limit:0.094118 {crop}"
+
+    def test_a_full_frame_stops_the_pipe(self) -> None:
+        # Crops combine with min and clamp at zero, so one frame with no
+        # crop on any edge has already fixed the answer at 0,0,0,0. No later
+        # frame can lower it, so decoding the rest buys nothing.
+        stop = threading.Event()
+        handler = make_crop_handler(
+            [], stop, source_width=1920, source_height=1080, line_handler=None
+        )
+        _ = handler(self._line("crop=1920:1080:0:0"))
+        assert stop.is_set()
+
+    def test_a_real_crop_does_not_stop_the_pipe(self) -> None:
+        stop = threading.Event()
+        handler = make_crop_handler(
+            [], stop, source_width=1920, source_height=1080, line_handler=None
+        )
+        _ = handler(self._line("crop=1920:800:0:140"))
+        assert not stop.is_set()
+
+    def test_one_edge_still_cropped_does_not_stop_the_pipe(self) -> None:
+        # Pillarbox with no letterbox: three edges are zero and one is not.
+        stop = threading.Event()
+        handler = make_crop_handler(
+            [], stop, source_width=1920, source_height=1080, line_handler=None
+        )
+        _ = handler(self._line("crop=1800:1080:60:0"))
+        assert not stop.is_set()
+
+    def test_the_wrapped_handler_still_sees_every_line(self) -> None:
+        # The progress bar reads ffmpeg's frame= lines through this wrapper.
+        seen: list[str] = []
+        stop = threading.Event()
+
+        def record(line: str) -> bool:
+            seen.append(line)
+            return True
+
+        handler = make_crop_handler(
+            [],
+            stop,
+            source_width=1920,
+            source_height=1080,
+            line_handler=record,
+        )
+        _ = handler("frame=   7 fps=0.0 q=-0.0 size=N/A time=00:00:00.29")
+        assert seen == ["frame=   7 fps=0.0 q=-0.0 size=N/A time=00:00:00.29"]
+
+
+class TestNoUsableFrames:
+    """The guard before any process starts."""
+
+    def test_a_source_with_no_usable_range_reports_no_crop(self) -> None:
+        # No plan means no script, so nothing is launched at all.
+        result = calculate_cropdetect_values(
+            source_path=Path("source.mkv"),
+            start_frame=0,
+            num_frames=2,
+            fps=24.0,
+            info=_SDR,
+            cache_file=Path("source.ffindex"),
+            indexer=IndexerType.FFMS2,
+            source_width=1920,
+            source_height=1080,
+        )
+        assert result == CropValues(left=0, right=0, top=0, bottom=0)

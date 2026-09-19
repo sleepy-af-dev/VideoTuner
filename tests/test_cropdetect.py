@@ -10,6 +10,7 @@ import pytest
 from videotuner.constants import CROPDETECT_MIN_SAMPLES
 from videotuner.cropdetect import (
     accumulate_crop,
+    build_cropdetect_filter,
     build_cropdetect_vpy_script,
     calculate_cropdetect_values,
     cropdetect_sample_plan,
@@ -435,3 +436,45 @@ class TestCropdetectParsing:
         output = "frame= 100 fps=50.0 q=28.0 size=N/A time=00:00:04.00"
         matches: list[tuple[str, str, str, str]] = CROPDETECT_RE.findall(output)
         assert len(matches) == 0
+
+
+class TestFilterArgument:
+    """The only thing that carries a user's settings to FFmpeg."""
+
+    def test_reset_and_skip_are_always_set(self) -> None:
+        # Both are load-bearing and neither is a user setting. skip=0 evaluates
+        # the very first frame, where FFmpeg's default of 2 would discard
+        # frames we deliberately selected. reset=1 detects each frame on its
+        # own, which is what produces one line per frame and lets the minimum
+        # across frames mean what it says.
+        assert "reset=1" in build_cropdetect_filter(round_to=2, limit=None)
+        assert "skip=0" in build_cropdetect_filter(round_to=2, limit=None)
+
+    def test_the_rounding_reaches_ffmpeg(self) -> None:
+        # FFmpeg's own default is 16, so omitting this would silently round
+        # every crop to a multiple of 16 instead of the 2 we ask for.
+        assert "round=2" in build_cropdetect_filter(round_to=2, limit=None)
+        assert "round=16" in build_cropdetect_filter(round_to=16, limit=None)
+
+    def test_a_limit_reaches_ffmpeg_when_given(self) -> None:
+        # A code value, not a fraction: FFmpeg reads a value of 1 or more as
+        # an absolute threshold, which is why the pipe emits 8-bit frames.
+        assert "limit=30" in build_cropdetect_filter(round_to=2, limit=30)
+
+    def test_no_limit_is_omitted_rather_than_guessed(self) -> None:
+        # Passing nothing leaves FFmpeg on its own default of 0.0941176, which
+        # scales by bit depth to the same 24 at 8 bits. Emitting a value here
+        # would hard-code what the filter already gets right.
+        assert "limit=" not in build_cropdetect_filter(round_to=2, limit=None)
+
+    def test_it_is_one_filter_with_colon_separated_options(self) -> None:
+        # The string is spliced straight into -vf, so its shape is a contract
+        # with FFmpeg's parser rather than a formatting choice.
+        built = build_cropdetect_filter(round_to=4, limit=12)
+        assert built.startswith("cropdetect=")
+        assert set(built.removeprefix("cropdetect=").split(":")) == {
+            "round=4",
+            "reset=1",
+            "skip=0",
+            "limit=12",
+        }

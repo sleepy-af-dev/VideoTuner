@@ -80,12 +80,8 @@ class PipelineArgs:
     vs_plugin_dir: Path | None = None
     crop_detect: bool = True
     cropdetect_interval: int = 30
-    cropdetect_mode: str = "black"
     cropdetect_limit: int | None = None
     cropdetect_round: int = 2
-    cropdetect_mv_threshold: int | None = None
-    cropdetect_low: float | None = None
-    cropdetect_high: float | None = None
     predicted_bitrate_warning_percent: float | None = None
     show_best_within_budget: bool = False
     continue_budget_search: bool = False
@@ -226,14 +222,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help=f"Ceiling on seconds between sampled frames for crop detection; lowered when it would sample fewer than five (default: {_get_default('cropdetect_interval')})",  # noqa: E501  # TODO(E501): shorten line
     )
     _ = cropdetect_group.add_argument(
-        "--cropdetect-mode",
-        type=str,
-        choices=["black", "mvedges"],
-        default=_get_default("cropdetect_mode"),
-        dest="cropdetect_mode",
-        help="Detection mode: black (pixel threshold) or mvedges (motion + edges)",
-    )
-    _ = cropdetect_group.add_argument(
         "--cropdetect-limit",
         type=int,
         default=_get_default("cropdetect_limit"),
@@ -246,27 +234,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=_get_default("cropdetect_round"),
         dest="cropdetect_round",
         help=f"Crop dimension divisibility (default: {_get_default('cropdetect_round')}). Use 16 for best codec alignment.",  # noqa: E501  # TODO(E501): shorten line
-    )
-    _ = cropdetect_group.add_argument(
-        "--cropdetect-mv-threshold",
-        type=int,
-        default=_get_default("cropdetect_mv_threshold"),
-        dest="cropdetect_mv_threshold",
-        help="Motion vector threshold in pixels (default: FFmpeg's 8)",
-    )
-    _ = cropdetect_group.add_argument(
-        "--cropdetect-low",
-        type=float,
-        default=_get_default("cropdetect_low"),
-        dest="cropdetect_low",
-        help="Canny low threshold 0.0-1.0 (default: FFmpeg's ~0.02)",
-    )
-    _ = cropdetect_group.add_argument(
-        "--cropdetect-high",
-        type=float,
-        default=_get_default("cropdetect_high"),
-        dest="cropdetect_high",
-        help="Canny high threshold 0.0-1.0 (default: FFmpeg's ~0.06)",
     )
 
     # -------------------------------------------------------------------------
@@ -769,22 +736,6 @@ def validate_cropdetect_args(
     if args.cropdetect_limit is not None and not (0 <= args.cropdetect_limit <= 255):
         parser.error(
             f"--cropdetect-limit must be between 0 and 255 (got {args.cropdetect_limit})"  # noqa: E501  # TODO(E501): shorten line
-        )
-    if args.cropdetect_low is not None and not (0.0 <= args.cropdetect_low <= 1.0):
-        parser.error(
-            f"--cropdetect-low must be between 0.0 and 1.0 (got {args.cropdetect_low})"
-        )
-    if args.cropdetect_high is not None and not (0.0 <= args.cropdetect_high <= 1.0):
-        parser.error(
-            f"--cropdetect-high must be between 0.0 and 1.0 (got {args.cropdetect_high})"  # noqa: E501  # TODO(E501): shorten line
-        )
-    if (
-        args.cropdetect_low is not None
-        and args.cropdetect_high is not None
-        and args.cropdetect_low > args.cropdetect_high
-    ):
-        parser.error(
-            f"--cropdetect-low ({args.cropdetect_low}) must be <= --cropdetect-high ({args.cropdetect_high})"  # noqa: E501  # TODO(E501): shorten line
         )
 
 

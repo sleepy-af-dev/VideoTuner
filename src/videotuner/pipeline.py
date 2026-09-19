@@ -610,12 +610,8 @@ def _run_pipeline_body(
                         source_height=source_info.height or 0,
                         cwd=repo_root,
                         line_handler=cropdetect_stage.make_cropdetect_handler(),
-                        cropdetect_mode=args.cropdetect_mode,
                         cropdetect_limit=args.cropdetect_limit,
                         cropdetect_round=args.cropdetect_round,
-                        cropdetect_mv_threshold=args.cropdetect_mv_threshold,
-                        cropdetect_low=args.cropdetect_low,
-                        cropdetect_high=args.cropdetect_high,
                     )
                 )
 

@@ -252,6 +252,33 @@ def make_crop_handler(
     return handler
 
 
+def build_cropdetect_filter(*, round_to: int, limit: int | None) -> str:
+    """Build the ``cropdetect`` filter argument handed to FFmpeg.
+
+    ``skip=0`` evaluates the very first frame, where FFmpeg's default of 2
+    would discard frames this module deliberately selected. ``reset=1``
+    detects each frame on its own, which is what produces one ``crop=`` line
+    per frame and lets ``accumulate_crop``'s minimum mean what it says.
+
+    Args:
+        round_to: Crop dimension divisibility. FFmpeg's own default is 16,
+            which would round every crop far coarser than this tool wants.
+        limit: Threshold below which a pixel counts as black, as a code
+            value, or None to leave FFmpeg on its own default. FFmpeg reads a
+            value of 1 or more as absolute and anything below 1 as a fraction
+            of full scale; its default of 0.0941176 scales to 24 at 8 bits,
+            which is why the pipe feeding this filter emits 8-bit frames.
+
+    Returns:
+        One filter, its options separated by colons, ready to splice into
+        ``-vf``.
+    """
+    parts = [f"round={round_to}", "reset=1", "skip=0"]
+    if limit is not None:
+        parts.append(f"limit={limit}")
+    return f"cropdetect={':'.join(parts)}"
+
+
 def calculate_cropdetect_values(
     source_path: Path,
     start_frame: int,
@@ -267,12 +294,8 @@ def calculate_cropdetect_values(
     source_height: int,
     cwd: Path | None = None,
     line_handler: Callable[[str], bool] | None = None,
-    cropdetect_mode: str = "black",
     cropdetect_limit: int | None = None,
     cropdetect_round: int = 2,
-    cropdetect_mv_threshold: int | None = None,
-    cropdetect_low: float | None = None,
-    cropdetect_high: float | None = None,
 ) -> CropValues:
     """Detect the crop by piping selected frames into ffmpeg's cropdetect.
 
@@ -295,12 +318,8 @@ def calculate_cropdetect_values(
         source_height: Height of the source video in pixels.
         cwd: Working directory for execution.
         line_handler: Optional callback for progress parsing.
-        cropdetect_mode: Detection mode (``"black"`` or ``"mvedges"``).
         cropdetect_limit: Black pixel threshold 0-255 (None = FFmpeg default 24).
         cropdetect_round: Crop dimension divisibility (default 2).
-        cropdetect_mv_threshold: Motion threshold in pixels (None = FFmpeg default 8).
-        cropdetect_low: Canny low threshold 0.0-1.0 (None = FFmpeg default).
-        cropdetect_high: Canny high threshold 0.0-1.0 (None = FFmpeg default).
 
     Returns:
         CropValues with left, right, top, bottom crop values. No crop at all
@@ -315,21 +334,9 @@ def calculate_cropdetect_values(
         warn_user(logger, "No sample frames to analyse — returning zero crop")
         return CropValues(left=0, right=0, top=0, bottom=0)
 
-    # skip=0 evaluates the very first frame; the default skip=2 would discard
-    # frames we deliberately selected. reset=1 detects each frame on its own,
-    # which is what makes one line per frame and lets the minimum above mean
-    # what it says.
-    cd_parts = [f"round={cropdetect_round}", "reset=1", "skip=0"]
-    if cropdetect_mode != "black":
-        cd_parts.append(f"mode={cropdetect_mode}")
-    if cropdetect_limit is not None:
-        cd_parts.append(f"limit={cropdetect_limit}")
-    if cropdetect_mv_threshold is not None:
-        cd_parts.append(f"mv_threshold={cropdetect_mv_threshold}")
-    if cropdetect_low is not None:
-        cd_parts.append(f"low={cropdetect_low}")
-    if cropdetect_high is not None:
-        cd_parts.append(f"high={cropdetect_high}")
+    crop_filter = build_cropdetect_filter(
+        round_to=cropdetect_round, limit=cropdetect_limit
+    )
 
     crop_lines: list[str] = []
     stop = threading.Event()
@@ -364,7 +371,7 @@ def calculate_cropdetect_values(
             "-i",
             "pipe:0",
             "-vf",
-            f"cropdetect={':'.join(cd_parts)}",
+            crop_filter,
             "-an",
             "-sn",
             "-dn",

@@ -53,6 +53,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The lossless reference copy that VMAF and SSIMULACRA2 scored an encode against. Both now score directly against the source, which saves one lossless encode per job. Frame identity between the two paths was proven rather than assumed: a test hashes every sampled frame read from the source against the same frame read from the old reference, across constant and variable frame rates, a container that outlives its video track, and both indexers. Isolated from the VMAF tonemapping change above, removing the reference measured roughly 9-11% faster across a 4-iteration CRF search on a 4K PQ input sample, at both 4 and 32 cores. Combined with that change, a run is still slower overall: net roughly 14% at 32 cores and 87% at 4, since the tonemapping cost is the larger of the two
 - The Vulkan capability probe. Nothing tonemaps through FFmpeg any more, so
   FFmpeg no longer needs to be built with libplacebo.
+- `--cropdetect-mode`, `--cropdetect-mv-threshold`, `--cropdetect-low` and
+  `--cropdetect-high`. All four configured FFmpeg's `mvedges` detection mode,
+  which has never worked here. `mvedges` reads motion vectors from side data
+  FFmpeg attaches only when a decoder is asked for it with
+  `-flags2 +export_mvs`, and no version of this tool has set that. Measured on
+  a letterboxed input sample, `mvedges` returned the full frame on all 49
+  frames, logging "no motion vectors available" each time, while `black` mode
+  found the bars. It could not be salvaged either: crop values combine by
+  taking the smallest per edge, and an I-frame carries no motion vectors and so
+  returns the full frame, which drives that minimum to zero. Frames also reach
+  the filter as raw y4m now, with no decoder, so the side data can never be
+  present. `black` mode is unaffected and was always the default, and
+  `--cropdetect-limit` and `--cropdetect-round` still tune it.
 
 ### Fixed
 

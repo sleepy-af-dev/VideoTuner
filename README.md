@@ -122,9 +122,7 @@ The CRF search uses interpolated binary search to efficiently find the optimal C
 
 - Reads the source through the indexer `--indexer` selects and analyses the frames it
   asks for by number, then hands them to FFmpeg's `cropdetect` filter
-- Supports two modes: `black` (default, pixel threshold) and `mvedges` (motion + edge detection).
-  `--cropdetect-mv-threshold` has no effect on the current path, because frames reach the
-  filter as raw y4m with no decoder, so motion vectors are never present
+- Finds bars by pixel threshold, tunable with `--cropdetect-limit`
 - HDR sources are tonemapped to SDR first, by the same operator VMAF and SSIMULACRA2
   use, so a crop does not depend on what the machine can run
 - Detects letterboxing (black bars top/bottom) and pillarboxing (black bars left/right)
@@ -627,12 +625,8 @@ Run `videotuner --help` for complete options. Key options include:
 | --------------------------- | ------------ | ------------------------------------------------- |
 | `--no-cropdetect`           | -            | Disable automatic crop detection                  |
 | `--cropdetect-interval`     | `30`         | Ceiling on seconds between sampled frames for crop detection; lowered when it would sample fewer than five |
-| `--cropdetect-mode`         | `black`      | Detection mode: `black` or `mvedges`              |
 | `--cropdetect-limit`        | FFmpeg 24    | Black pixel threshold 0-255                       |
 | `--cropdetect-round`        | `2`          | Crop dimension divisibility (FFmpeg default: 16)  |
-| `--cropdetect-mv-threshold` | FFmpeg 8     | Motion vector threshold in pixels                 |
-| `--cropdetect-low`          | FFmpeg ~0.02 | Canny low threshold 0.0-1.0                       |
-| `--cropdetect-high`         | FFmpeg ~0.06 | Canny high threshold 0.0-1.0                      |
 
 ### Target Options
 

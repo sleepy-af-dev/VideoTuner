@@ -22,6 +22,7 @@ from videotuner.encoding_utils import (
     write_vpy_script,
 )
 from videotuner.media import VideoInfo
+from videotuner.tool_parsers import CROPDETECT_RE
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VS_DIR = REPO_ROOT / "vapoursynth-portable"
@@ -413,3 +414,24 @@ class TestNoUsableFrames:
             source_height=1080,
         )
         assert result == CropValues(left=0, right=0, top=0, bottom=0)
+
+
+class TestCropdetectParsing:
+    """Tests for CROPDETECT_RE regex."""
+
+    def test_parse_crop_line(self) -> None:
+        line = "[Parsed_cropdetect_0 @ 0x...] x1:0 x2:3839 y1:276 y2:1863 w:3840 h:1584 x:0 y:278 pts:1001 t:1.001000 limit:0.094118 crop=3840:1584:0:278"  # noqa: E501  # TODO(E501): shorten line
+        matches: list[tuple[str, str, str, str]] = CROPDETECT_RE.findall(line)
+        assert len(matches) == 1
+        w, h, x, y = matches[0]
+        assert (w, h, x, y) == ("3840", "1584", "0", "278")
+
+    def test_parse_multiple_lines(self) -> None:
+        output = "crop=3840:1584:0:278\ncrop=3840:1580:0:280\ncrop=3840:1584:0:278\n"
+        matches: list[tuple[str, str, str, str]] = CROPDETECT_RE.findall(output)
+        assert len(matches) == 3
+
+    def test_no_match(self) -> None:
+        output = "frame= 100 fps=50.0 q=28.0 size=N/A time=00:00:04.00"
+        matches: list[tuple[str, str, str, str]] = CROPDETECT_RE.findall(output)
+        assert len(matches) == 0

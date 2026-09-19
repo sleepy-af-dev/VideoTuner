@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING
 
 from .encoding_utils import IndexerType, indexer_spec
 from .metric_colour import (
+    ColourTarget,
     LinearisationMode,
-    MetricTarget,
     colour_preamble,
     linearisation_mode,
     missing_colour_tags,
@@ -60,7 +60,7 @@ def build_vmaf_vpy_script(
         mode,
         missing=missing_colour_tags(info),
         mastering_missing=is_pq and missing_mastering_display(info),
-        target=MetricTarget.VMAF,
+        target=ColourTarget.VMAF,
     )
     spec = indexer_spec(indexer)
     dis_expr = spec.source_expr(str(dis_path.resolve()), str(dis_cache))

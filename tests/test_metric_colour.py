@@ -19,8 +19,8 @@ from videotuner.encoding_utils import (
 from videotuner.media import VideoInfo
 from videotuner.metric_colour import (
     _FALLBACK_VALUES,
+    ColourTarget,
     LinearisationMode,
-    MetricTarget,
     colour_assumption_notes,
     colour_preamble,
     linearisation_mode,
@@ -716,7 +716,7 @@ def test_an_sdr_input_reports_no_peak_assumption() -> None:
 
 
 def test_the_ssim2_target_ends_in_linear_rgbs() -> None:
-    src = colour_preamble(LinearisationMode.SDR, missing=[], target=MetricTarget.SSIM2)
+    src = colour_preamble(LinearisationMode.SDR, missing=[], target=ColourTarget.SSIM2)
     assert "vs.RGBS" in src
     assert "vs.YUV420P10" not in src
 
@@ -725,7 +725,7 @@ def test_the_vmaf_target_ends_in_limited_range_yuv() -> None:
     # PQ rather than SDR: an SDR clip bound for VMAF is already in the form
     # VMAF wants and is returned unconverted, so this tail is only reached
     # once a tone curve has run and the frames have to be encoded back.
-    src = colour_preamble(LinearisationMode.PQ, missing=[], target=MetricTarget.VMAF)
+    src = colour_preamble(LinearisationMode.PQ, missing=[], target=ColourTarget.VMAF)
     assert "vs.YUV420P10" in src
     assert 'matrix_s="709"' in src
     assert 'range_s="limited"' in src
@@ -734,15 +734,15 @@ def test_the_vmaf_target_ends_in_limited_range_yuv() -> None:
 def test_the_default_target_is_ssim2() -> None:
     # Every existing caller passes no target, and must keep the chain it had.
     assert colour_preamble(LinearisationMode.PQ, missing=[]) == colour_preamble(
-        LinearisationMode.PQ, missing=[], target=MetricTarget.SSIM2
+        LinearisationMode.PQ, missing=[], target=ColourTarget.SSIM2
     )
 
 
 @pytest.mark.parametrize("mode", list(LinearisationMode))
 def test_both_targets_share_one_tonemap_call(mode: LinearisationMode) -> None:
     # The point of one module: the front cannot differ between metrics.
-    ssim2 = colour_preamble(mode, missing=[], target=MetricTarget.SSIM2)
-    vmaf = colour_preamble(mode, missing=[], target=MetricTarget.VMAF)
+    ssim2 = colour_preamble(mode, missing=[], target=ColourTarget.SSIM2)
+    vmaf = colour_preamble(mode, missing=[], target=ColourTarget.VMAF)
     for call in ("core.tonemap.BT2390(", "core.tonemap.BT2407(", "core.tonemap.HLG("):
         assert (call in ssim2) == (call in vmaf)
 
@@ -764,7 +764,7 @@ def test_the_vmaf_chain_emits_limited_range_bt709_yuv(
     mode, construction, _, mastering_missing = _CASES[source_case]
     script = tmp_path / "chain.vpy"
     preamble = colour_preamble(
-        mode, missing=[], mastering_missing=mastering_missing, target=MetricTarget.VMAF
+        mode, missing=[], mastering_missing=mastering_missing, target=ColourTarget.VMAF
     )
     _ = script.write_text(
         "import vapoursynth as vs\n"
@@ -817,7 +817,7 @@ def test_an_sdr_clip_bound_for_vmaf_is_not_converted_at_all() -> None:
     # 420-444-420, applies a 709 EOTF/OETF pair, converts range twice and
     # requantises — lossy, pointless when nothing tonemaps, and it smooths
     # both clips alike so every SDR score comes out flattered.
-    src = colour_preamble(LinearisationMode.SDR, missing=[], target=MetricTarget.VMAF)
+    src = colour_preamble(LinearisationMode.SDR, missing=[], target=ColourTarget.VMAF)
     assert "core.resize." not in src
     assert "core.tonemap." not in src
     assert "vs.RGBS" not in src
@@ -827,7 +827,7 @@ def test_an_sdr_clip_bound_for_vmaf_is_not_converted_at_all() -> None:
 def test_an_sdr_clip_bound_for_ssimulacra2_is_still_converted() -> None:
     # SSIMULACRA2 scores in linear light by definition, so its SDR chain is
     # not the one being removed.
-    src = colour_preamble(LinearisationMode.SDR, missing=[], target=MetricTarget.SSIM2)
+    src = colour_preamble(LinearisationMode.SDR, missing=[], target=ColourTarget.SSIM2)
     assert "vs.RGBS" in src
     assert 'transfer_s="linear"' in src
 
@@ -836,7 +836,7 @@ def test_an_sdr_clip_bound_for_ssimulacra2_is_still_converted() -> None:
 def test_an_hdr_clip_bound_for_vmaf_still_tonemaps(mode: LinearisationMode) -> None:
     # Only SDR skips the conversion. HDR genuinely needs it: VMAF is not
     # defined on HDR, so the tonemap and the encode back to SDR both stay.
-    src = colour_preamble(mode, missing=[], target=MetricTarget.VMAF)
+    src = colour_preamble(mode, missing=[], target=ColourTarget.VMAF)
     assert "core.tonemap.BT2390(" in src
     assert "vs.YUV420P10" in src
 
@@ -847,8 +847,63 @@ def test_an_untagged_sdr_clip_bound_for_vmaf_still_gets_its_tags() -> None:
     src = colour_preamble(
         LinearisationMode.SDR,
         missing=["transfer", "primaries", "matrix"],
-        target=MetricTarget.VMAF,
+        target=ColourTarget.VMAF,
     )
     assert "SetFrameProps" in src
     assert "_Transfer=1" in src
     assert "return clip" in src
+
+
+def test_cropdetect_hdr_ends_in_eight_bit_yuv() -> None:
+    # cropdetect's limit defaults to 24 in 8-bit units, so the depth is part
+    # of what the flag means. 10-bit would silently reinterpret it.
+    src = colour_preamble(
+        LinearisationMode.PQ, missing=[], target=ColourTarget.CROPDETECT
+    )
+    assert "format=vs.YUV420P8" in src
+    assert "format=vs.YUV420P10" not in src
+    assert 'range_s="limited"' in src
+
+
+def test_cropdetect_sdr_converts_format_but_not_colour() -> None:
+    # An SDR clip is already BT.709, so nothing is tonemapped. The depth
+    # still drops, which is what ffmpeg's format=yuv420p did before.
+    src = colour_preamble(
+        LinearisationMode.SDR, missing=[], target=ColourTarget.CROPDETECT
+    )
+    assert "core.resize.Bicubic(clip, format=vs.YUV420P8)" in src
+    assert "vs.RGBS" not in src
+    assert "core.tonemap." not in src
+    assert "range_s" not in src
+
+
+def test_cropdetect_sdr_is_not_vmafs_passthrough() -> None:
+    # VMAF returns the clip untouched. Cropdetect must not, or a 10-bit
+    # source reaches the filter at 10 bits.
+    crop = colour_preamble(
+        LinearisationMode.SDR, missing=[], target=ColourTarget.CROPDETECT
+    )
+    vmaf = colour_preamble(LinearisationMode.SDR, missing=[], target=ColourTarget.VMAF)
+    assert "    return clip\n" in vmaf
+    assert "    return clip\n" not in crop
+
+
+def test_the_emitted_docstring_never_names_the_wrong_consumer() -> None:
+    # A reader meets this docstring inside a generated .vpy with no other
+    # context. A cropdetect script claiming VMAF would be a plain lie.
+    for mode in (LinearisationMode.SDR, LinearisationMode.PQ, LinearisationMode.HLG):
+        src = colour_preamble(mode, missing=[], target=ColourTarget.CROPDETECT)
+        assert "VMAF" not in src
+        assert "SSIMULACRA2" not in src
+
+
+def test_cropdetect_still_writes_missing_tag_fallbacks() -> None:
+    # The SDR cropdetect branch returns early, so it has to keep the
+    # SetFrameProps the branch above it emits.
+    src = colour_preamble(
+        LinearisationMode.SDR,
+        missing=["transfer", "primaries", "matrix"],
+        target=ColourTarget.CROPDETECT,
+    )
+    assert "core.std.SetFrameProps(clip, _Transfer=1, _Primaries=1, _Matrix=1)" in src
+    assert "core.resize.Bicubic(clip, format=vs.YUV420P8)" in src

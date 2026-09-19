@@ -1,4 +1,4 @@
-"""Colour handling shared by the SSIMULACRA2 and VMAF assessments.
+"""Colour handling shared by the SSIMULACRA2, VMAF and cropdetect paths.
 
 SSIMULACRA2 is an SDR metric: its weights were fitted on SDR still-image
 datasets and it has no concept of absolute luminance. The reference
@@ -15,6 +15,11 @@ both of its conversion paths early-return on such a clip - RGBS skips its
 ``toRGBS``, and a linear transfer skips its sRGB step - so the pre-converted
 frames reach the metric untouched. VMAF gets the same chain's output encoded
 back to limited-range BT.709 YUV, which is what it was trained on.
+
+Cropdetect is not a metric, but it needs the same thing VMAF does: an HDR
+input carried to SDR by one operator, in its encoded form rather than in
+light. It takes the chain at 8 bits, because the threshold it compares
+against is a code value.
 """
 
 from __future__ import annotations
@@ -45,16 +50,17 @@ class LinearisationMode(StrEnum):
     SDR = "sdr"
 
 
-class MetricTarget(StrEnum):
-    """Which metric the converted frames are for.
+class ColourTarget(StrEnum):
+    """Which consumer the converted frames are for.
 
-    Both metrics share the tonemapping front and differ only in what they
-    want handed to them: SSIMULACRA2 scores in linear light, VMAF scores
-    ordinary SDR video.
+    All three share the tonemapping front and differ only in what they want
+    handed to them: SSIMULACRA2 scores in linear light, VMAF scores ordinary
+    SDR video, and cropdetect reads 8-bit luma against a code-value threshold.
     """
 
     SSIM2 = "ssim2"
     VMAF = "vmaf"
+    CROPDETECT = "cropdetect"
 
 
 # SSIMULACRA2 takes the front's own output: vszip's two conversion paths both
@@ -67,10 +73,19 @@ class MetricTarget(StrEnum):
 # Only reached for HDR. An SDR clip bound for VMAF is already in the form VMAF
 # wants and returns unconverted, which `colour_preamble` handles before it gets
 # this far.
+#
+# Cropdetect takes the same encoded SDR video as VMAF, one step shallower:
+# its limit is a code value in 8-bit units, so the depth is part of what
+# --cropdetect-limit means.
 _TAILS = {
-    MetricTarget.SSIM2: "    return out",
-    MetricTarget.VMAF: (
+    ColourTarget.SSIM2: "    return out",
+    ColourTarget.VMAF: (
         "    return core.resize.Bicubic(out, format=vs.YUV420P10,\n"
+        '                               transfer_s="709", matrix_s="709",\n'
+        '                               range_s="limited")'
+    ),
+    ColourTarget.CROPDETECT: (
+        "    return core.resize.Bicubic(out, format=vs.YUV420P8,\n"
         '                               transfer_s="709", matrix_s="709",\n'
         '                               range_s="limited")'
     ),
@@ -214,7 +229,7 @@ def colour_preamble(
     *,
     missing: Sequence[str],
     mastering_missing: bool = False,
-    target: MetricTarget = MetricTarget.SSIM2,
+    target: ColourTarget = ColourTarget.SSIM2,
 ) -> str:
     """Emit the VapourSynth source defining ``prepare(clip)``.
 
@@ -246,19 +261,24 @@ def colour_preamble(
             which it would otherwise raise for want of. Ignored for HLG,
             whose peak the plugin already defaults, and for SDR, which never
             tonemaps.
-        target: Which metric the frames are for. Both share the tonemapping
-            front; SSIMULACRA2 takes its linear RGBS output directly, while
-            VMAF has it encoded to limited-range BT.709 YUV.
+        target: Which consumer the frames are for. All three share the
+            tonemapping front; SSIMULACRA2 takes its linear RGBS output
+            directly, VMAF has it encoded to limited-range BT.709 YUV at 10
+            bits, and cropdetect takes the same at 8 bits.
 
     Returns:
         Python source defining ``prepare(clip)``, for embedding in a .vpy.
     """
     # The emitted docstring describes what this particular chain does, since a
     # reader meets it in a generated .vpy with no other context.
-    if mode is LinearisationMode.SDR and target is MetricTarget.VMAF:
+    if mode is LinearisationMode.SDR and target is ColourTarget.VMAF:
         summary = "Tag a clip VMAF can score as it stands."
-    elif target is MetricTarget.VMAF:
+    elif mode is LinearisationMode.SDR and target is ColourTarget.CROPDETECT:
+        summary = "Tag an SDR clip and reduce it to 8-bit for crop detection."
+    elif target is ColourTarget.VMAF:
         summary = "Tonemap an HDR clip to SDR and encode it back for VMAF."
+    elif target is ColourTarget.CROPDETECT:
+        summary = "Tonemap an HDR clip to 8-bit SDR for crop detection."
     else:
         summary = "Convert a tagged clip to linear RGBS, tonemapping HDR first."
     lines = [
@@ -269,7 +289,7 @@ def colour_preamble(
         values = _FALLBACK_VALUES[mode]
         assigns = ", ".join(f"{_TAG_PROPS[tag]}={values[tag]}" for tag in missing)
         lines.append(f"    clip = core.std.SetFrameProps(clip, {assigns})")
-    if mode is LinearisationMode.SDR and target is MetricTarget.VMAF:
+    if mode is LinearisationMode.SDR and target is ColourTarget.VMAF:
         # Nothing to do. VMAF reads code values, and its models were fitted on
         # SDR video in its native encoded form, so the frames it wants are the
         # ones already on disk. Converting to linear RGB and back would
@@ -286,6 +306,17 @@ def colour_preamble(
         # conversion, not the tagging, and vspipe -c mkv carries those
         # properties into the stream ffmpeg reads.
         lines.append("    return clip")
+        return "\n".join(lines) + "\n"
+
+    if mode is LinearisationMode.SDR and target is ColourTarget.CROPDETECT:
+        # Nothing to tonemap, but the depth still has to drop. cropdetect's
+        # limit is a code value: the default 24 is 24/255, so handing it a
+        # 10-bit clip reinterprets the flag by a factor of four. ffmpeg did
+        # this with format=yuv420p before the decode moved here.
+        #
+        # No range_s, so limited stays limited and full stays full, which is
+        # what ffmpeg's format filter did.
+        lines.append("    return core.resize.Bicubic(clip, format=vs.YUV420P8)")
         return "\n".join(lines) + "\n"
 
     if mode is LinearisationMode.PQ:

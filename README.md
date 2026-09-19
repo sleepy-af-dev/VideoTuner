@@ -122,7 +122,9 @@ The CRF search uses interpolated binary search to efficiently find the optimal C
 
 - Reads the source through the indexer `--indexer` selects and analyses the frames it
   asks for by number, then hands them to FFmpeg's `cropdetect` filter
-- Supports two modes: `black` (default, pixel threshold) and `mvedges` (motion + edge detection)
+- Supports two modes: `black` (default, pixel threshold) and `mvedges` (motion + edge detection).
+  `--cropdetect-mv-threshold` has no effect on the current path, because frames reach the
+  filter as raw y4m with no decoder, so motion vectors are never present
 - HDR sources are tonemapped to SDR first, by the same operator VMAF and SSIMULACRA2
   use, so a crop does not depend on what the machine can run
 - Detects letterboxing (black bars top/bottom) and pillarboxing (black bars left/right)
@@ -208,7 +210,7 @@ Download the latest release from the [Releases page](https://github.com/sleepy-a
 | [ffms2](https://github.com/FFMS/ffms2)                                       | 5.1.2 (3af2ef2) | Frame-accurate video indexing (`ffms2.dll`, `ffmsindex.exe`), built from source |
 | [LSMASHSource](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works) | 1310.0.0.0     | Alternative video indexing (`LSMASHSource.dll`, `LSMASHSource_indexing.exe`), selected with `--indexer lsmash` |
 | [vszip](https://github.com/dnjulek/vapoursynth-zip)                          | 22.1.0         | SSIMULACRA2 quality metric calculation                       |
-| [vs-tonemap](https://github.com/sleepy-af-dev/vs-tonemap)                    | 0.2.0          | Tonemapping for VMAF and SSIMULACRA2 (BT.2390 tone curve, BT.2407 gamut mapping) |
+| [vs-tonemap](https://github.com/sleepy-af-dev/vs-tonemap)                    | 0.2.0          | Tonemapping for VMAF, SSIMULACRA2 and crop detection (BT.2390 tone curve, BT.2407 gamut mapping) |
 
 ### From Source
 
@@ -624,7 +626,7 @@ Run `videotuner --help` for complete options. Key options include:
 | Option                      | Default      | Description                                       |
 | --------------------------- | ------------ | ------------------------------------------------- |
 | `--no-cropdetect`           | -            | Disable automatic crop detection                  |
-| `--cropdetect-interval`     | `30`         | Seconds between sampled frames for crop detection |
+| `--cropdetect-interval`     | `30`         | Ceiling on seconds between sampled frames for crop detection; lowered when it would sample fewer than five |
 | `--cropdetect-mode`         | `black`      | Detection mode: `black` or `mvedges`              |
 | `--cropdetect-limit`        | FFmpeg 24    | Black pixel threshold 0-255                       |
 | `--cropdetect-round`        | `2`          | Crop dimension divisibility (FFmpeg default: 16)  |
@@ -875,7 +877,7 @@ The pipeline is organized into modules:
 - `vmaf_assessment.py` - VMAF quality metric assessment and result parsing
 - `vmaf_script.py` - Builds the VapourSynth script that pipes the reference and distorted clips into VMAF as one stream
 - `ssimulacra2_assessment.py` - SSIMULACRA2 quality metric assessment and result parsing
-- `metric_colour.py` - Shared HDR→SDR colour conversion chain VMAF and SSIMULACRA2 both score through
+- `metric_colour.py` - Shared HDR→SDR colour conversion chain VMAF, SSIMULACRA2 and crop detection all read through
 
 ### Utilities
 

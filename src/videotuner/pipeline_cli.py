@@ -223,7 +223,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=_get_default("cropdetect_interval"),
         dest="cropdetect_interval",
-        help=f"Seconds between sampled frames for crop detection (default: {_get_default('cropdetect_interval')})",  # noqa: E501  # TODO(E501): shorten line
+        help=f"Ceiling on seconds between sampled frames for crop detection; lowered when it would sample fewer than five (default: {_get_default('cropdetect_interval')})",  # noqa: E501  # TODO(E501): shorten line
     )
     _ = cropdetect_group.add_argument(
         "--cropdetect-mode",

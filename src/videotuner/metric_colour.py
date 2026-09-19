@@ -36,9 +36,10 @@ if TYPE_CHECKING:
     from .media import VideoInfo
 
 
-#: Label for the operator that takes an HDR input to SDR before scoring. Both
-#: VMAF and SSIMULACRA2 share it: neither metric is defined on HDR, so an HDR
-#: input always goes through it before either one scores it.
+#: Label for the operator that takes an HDR input to SDR before scoring. VMAF,
+#: SSIMULACRA2 and crop detection all share it: neither metric is defined on
+#: HDR, and crop detection needs the same conversion, so an HDR input always
+#: goes through it before any of the three reads it.
 SSIM2_TONEMAP_BACKEND = "vs-tonemap (BT.2390 + BT.2407)"
 
 
@@ -352,8 +353,10 @@ def colour_assumption_notes(info: VideoInfo) -> list[str]:
         assumed = "BT.709" if mode is LinearisationMode.SDR else "BT.2020"
         notes.append(
             f"Input declares no {', '.join(absent)}; assuming {assumed} for "
-            "VMAF and SSIMULACRA2. Scores stay comparable between encodes "
-            "of this input, but not against a differently tagged one."
+            "VMAF, SSIMULACRA2 and crop detection. Scores stay comparable "
+            "between encodes of this input, but not against a differently "
+            "tagged one, and a wrong guess also shifts where crop detection "
+            "ends the black bars, changing every encode's dimensions."
         )
 
     # HLG needs no equivalent: tonemap.HLG defaults its own peak and writes
@@ -361,9 +364,12 @@ def colour_assumption_notes(info: VideoInfo) -> list[str]:
     if mode is LinearisationMode.PQ and missing_mastering_display(info):
         notes.append(
             "Input declares no mastering display; assuming a "
-            f"{SSIM2_ASSUMED_MASTERING_PEAK} cd/m2 peak for VMAF and "
-            "SSIMULACRA2. Scores stay comparable between encodes of this "
-            "input, but not against one that declares its own peak."
+            f"{SSIM2_ASSUMED_MASTERING_PEAK} cd/m2 peak for VMAF, "
+            "SSIMULACRA2 and crop detection. Scores stay comparable "
+            "between encodes of this input, but not against one that "
+            "declares its own peak, and a wrong peak also shifts where "
+            "crop detection ends the black bars, changing every encode's "
+            "dimensions."
         )
 
     return notes

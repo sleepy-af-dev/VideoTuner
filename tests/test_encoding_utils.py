@@ -1220,19 +1220,51 @@ class TestCropValues:
 class TestCombineCropValues:
     """Reconciling crops when files in one source disagree on active area.
 
-    Splicing needs every clip the same size, so the most aggressive crop wins
-    on each edge independently.
+    Splicing needs every clip the same size, so one crop must serve them all.
+    The safest crop wins on each edge independently: the smallest, matching
+    how frames combine within a single file.
     """
 
     def test_single_value_is_returned_unchanged(self) -> None:
         crop = CropValues(left=0, right=0, top=140, bottom=140)
         assert combine_crop_values([crop]) == crop
 
-    def test_most_aggressive_edge_wins(self) -> None:
+    def test_the_safest_edge_wins(self) -> None:
         a = CropValues(left=0, right=0, top=140, bottom=140)
         b = CropValues(left=0, right=0, top=132, bottom=132)
 
-        assert combine_crop_values([a, b]) == a
+        assert combine_crop_values([a, b]) == b
+
+    def test_a_file_that_reaches_the_edge_protects_every_file(self) -> None:
+        # The case this rule exists for. A source whose aspect ratio changes
+        # part way through - a film with taller sequences - has bars in one
+        # file and none in another. Taking the larger crop would cut the
+        # taller footage; taking the smaller leaves bars on the rest, which
+        # is recoverable.
+        letterboxed = CropValues(left=0, right=0, top=132, bottom=132)
+        full_height = CropValues(left=0, right=0, top=0, bottom=0)
+
+        assert combine_crop_values([letterboxed, full_height]) == full_height
+
+    def test_it_matches_combining_every_frame_at_once(self) -> None:
+        # Taking the smallest is associative, so measuring per file and then
+        # combining gives the same answer as one pass over every frame of
+        # every file. That equivalence is the whole point: it makes the
+        # documented rule - the smallest crop across all sampled frames -
+        # true for a directory of files as well as for one.
+        per_file = [
+            CropValues(left=8, right=0, top=140, bottom=8),
+            CropValues(left=0, right=12, top=6, bottom=136),
+            CropValues(left=4, right=20, top=20, bottom=40),
+        ]
+        every_frame_at_once = CropValues(
+            left=min(v.left for v in per_file),
+            right=min(v.right for v in per_file),
+            top=min(v.top for v in per_file),
+            bottom=min(v.bottom for v in per_file),
+        )
+
+        assert combine_crop_values(per_file) == every_frame_at_once
 
     def test_edges_are_combined_independently(self) -> None:
         """The result can be a crop no single file measured."""
@@ -1241,7 +1273,7 @@ class TestCombineCropValues:
 
         combined = combine_crop_values([a, b])
 
-        assert combined == CropValues(left=8, right=12, top=140, bottom=136)
+        assert combined == CropValues(left=0, right=0, top=0, bottom=0)
         assert combined not in (a, b)
 
     def test_no_values_means_no_crop(self) -> None:

@@ -65,10 +65,21 @@ class SampledSource:
 def combine_crop_values(values: Sequence[CropValues]) -> CropValues:
     """Reconcile crops measured on files that make up one source.
 
-    Splicing requires every clip to share dimensions, so the most aggressive
-    crop wins on each edge independently. The result may therefore be a crop no
-    single file measured, which is the safe direction: it can only remove more
-    border, never reinstate content another file cropped away.
+    Splicing requires every clip to share dimensions, so one crop must serve
+    them all. The smallest wins on each edge independently, which is the same
+    direction frames combine within a single file: crop only what every
+    analysed frame of every file agrees is black.
+
+    Taking the smallest is associative, so measuring per file and then
+    combining gives the same answer as one pass over every frame of every
+    file. The two-step split is an implementation detail rather than a second
+    rule.
+
+    The alternative, taking the largest, cuts picture on a source whose active
+    area changes part way through. A film with taller sequences has bars in
+    one file and none in another; the file that reaches the edge is reporting
+    content, not a bad measurement, and overruling it crops that footage away.
+    Leaving bars on the rest is recoverable. Cutting picture is not.
 
     Args:
         values: Crop measured for each file, in any order
@@ -79,10 +90,10 @@ def combine_crop_values(values: Sequence[CropValues]) -> CropValues:
     if not values:
         return CropValues(left=0, right=0, top=0, bottom=0)
     return CropValues(
-        left=max(v.left for v in values),
-        right=max(v.right for v in values),
-        top=max(v.top for v in values),
-        bottom=max(v.bottom for v in values),
+        left=min(v.left for v in values),
+        right=min(v.right for v in values),
+        top=min(v.top for v in values),
+        bottom=min(v.bottom for v in values),
     )
 
 

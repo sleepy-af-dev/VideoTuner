@@ -564,8 +564,10 @@ def _run_pipeline_body(
 
     if crop_detect:
         # Each file is measured on its own and the results combined, taking the
-        # most aggressive crop per edge: splicing needs matching dimensions, and
-        # cropping more can only remove border, never reinstate content.
+        # smallest crop per edge: splicing needs matching dimensions, and a file
+        # whose frames reach the edge is reporting content, not a bad
+        # measurement. Same direction frames combine within a file, so the split
+        # into two steps changes no answer.
         measured: list[CropValues] = []
         for source, source_info in zip(source_paths, infos, strict=True):
             source_frames = get_frame_count(source, source_info)

@@ -33,6 +33,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Crop detection never judges a source on fewer than five frames. At the default
   30-second interval a short source could previously be cropped on the strength
   of a single frame.
+- With `--as-one-source`, crops measured on the separate files are reconciled by
+  taking the **smallest** per edge rather than the largest. Joining still
+  requires matching dimensions, so one crop serves every file, but a file whose
+  frames reach the edge now keeps the others uncropped instead of being
+  overruled. That file is reporting content, not a bad measurement. The previous
+  rule cut picture on a source whose active area changes part way through: a
+  film with taller sequences has bars in one file and none in another, and
+  taking the larger crop removed that footage. This also makes the two steps one
+  rule — the smallest crop across every analysed frame of every file — which is
+  the direction frames have always combined within a single file, and what the
+  documentation already described. A folder whose files genuinely share their
+  letterboxing is unaffected. A folder where one file has a burned-in caption or
+  a logo inside the bar will now crop less, or not at all.
 
 ### Added
 

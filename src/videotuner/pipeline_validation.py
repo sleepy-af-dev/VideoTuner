@@ -347,7 +347,7 @@ def check_sources_compatible(
     were asked for.
 
     Differing active area after crop detection is deliberately absent - that is
-    reconciled by taking the most aggressive crop, not rejected.
+    reconciled by taking the smallest crop, not rejected.
 
     Args:
         sources: One entry per file, in playback order

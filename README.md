@@ -414,6 +414,8 @@ Quality targets define the minimum acceptable scores. CRF search will find the h
 
 **Note:** At least one target is required unless using `--assessment-only` mode. Multiple targets can be combined - all must be met.
 
+**Repeat runs:** when a profile sets VBV, as every sample profile does, x265 and x264 do not always produce the same encode twice, because their VBV rate control depends on thread timing. Two runs on the same input can then report scores a few hundredths of a point apart, and a score that close to a target could move the chosen CRF by one step. Profiles whose VBV limits the bitrate, such as the streaming ones, vary more often. Without VBV, runs repeat exactly.
+
 ### Encoding Profiles
 
 Define encoding profiles in `profiles.yaml`. Each profile specifies an encoder and parameters that control encoding quality vs. speed tradeoffs.

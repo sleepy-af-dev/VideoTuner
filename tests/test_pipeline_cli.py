@@ -206,3 +206,16 @@ def test_the_tonemap_flag_is_gone() -> None:
     parser = build_arg_parser()
     with pytest.raises(SystemExit):
         _ = parser.parse_args(["input.mkv", "--tonemap", "off"])
+
+
+def test_a_relative_workdir_is_made_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # VapourSynth runs from another folder, so a relative work folder resolved
+    # against the wrong place and both metrics failed. Single runs and batches
+    # both read this parsed value.
+    monkeypatch.chdir(tmp_path)
+    args = _parse("--workdir", "runs/../jobs")
+    assert args.workdir is not None
+    assert args.workdir == tmp_path / "jobs"
+    assert args.workdir.is_absolute()

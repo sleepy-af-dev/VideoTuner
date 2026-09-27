@@ -8,6 +8,7 @@ construction, and comprehensive argument validation.
 from __future__ import annotations
 
 import argparse
+import os
 from collections.abc import Iterable
 from dataclasses import MISSING, dataclass, fields
 from pathlib import Path
@@ -541,6 +542,13 @@ def parse_cli(argv: Iterable[str] | None = None) -> PipelineArgs:
     # it, so the two never have to be passed together.
     if getattr(parsed, "continue_budget_search", False):
         parsed.show_best_within_budget = True
+
+    # VapourSynth and FFmpeg run from other folders and are handed paths under
+    # the work folder, so it must be absolute; a relative one resolved against
+    # the wrong folder and both metrics failed.
+    workdir = getattr(parsed, "workdir", None)
+    if isinstance(workdir, Path):
+        parsed.workdir = Path(os.path.abspath(workdir))
 
     return PipelineArgs(**vars(parsed))  # pyright: ignore[reportAny]
 

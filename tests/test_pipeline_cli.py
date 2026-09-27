@@ -222,8 +222,25 @@ def test_a_relative_workdir_is_made_absolute(
 
 
 @pytest.mark.parametrize("flag", ["--vmaf-log", "--ssim2-log"])
-def test_the_metric_log_flags_are_gone(flag: str) -> None:
+def test_the_metric_log_flags_are_gone(
+    flag: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     # Neither was ever read: the per-frame JSON always goes in the run folder.
+    # The CHANGELOG promises an error that names the flag.
     parser = build_arg_parser()
     with pytest.raises(SystemExit):
         _ = parser.parse_args(["input.mkv", flag, "x.json"])
+    assert flag in _error_line(capsys.readouterr().err)
+
+
+def test_relative_input_and_vapoursynth_folders_are_made_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Indexing, encoding and SSIMULACRA2 run from other folders, so relative
+    # paths resolved against the wrong one: a relative input could not be
+    # opened, and a relative --vs-dir lost SSIMULACRA2.
+    monkeypatch.chdir(tmp_path)
+    args = parse_cli(["clips/a.mkv", "--vs-dir", "vs", "--vs-plugin-dir", "vs/plugins"])
+    assert args.input == tmp_path / "clips" / "a.mkv"
+    assert args.vs_dir == tmp_path / "vs"
+    assert args.vs_plugin_dir == tmp_path / "vs" / "plugins"

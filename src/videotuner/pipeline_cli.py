@@ -527,12 +527,14 @@ def parse_cli(argv: Iterable[str] | None = None) -> PipelineArgs:
     if getattr(parsed, "continue_budget_search", False):
         parsed.show_best_within_budget = True
 
-    # VapourSynth and FFmpeg run from other folders and are handed paths under
-    # the work folder, so it must be absolute; a relative one resolved against
-    # the wrong folder and both metrics failed.
-    workdir = getattr(parsed, "workdir", None)
-    if isinstance(workdir, Path):
-        parsed.workdir = Path(os.path.abspath(workdir))
+    # Indexing, encoding, VapourSynth and FFmpeg run from other folders, so every
+    # path the user gives is made absolute against the folder they ran from. A
+    # relative one resolved against the wrong folder: the input could not be
+    # opened, and a relative work folder or --vs-dir lost the metrics.
+    for name in ("input", "workdir", "vs_dir", "vs_plugin_dir"):
+        value = getattr(parsed, name, None)
+        if isinstance(value, Path):
+            setattr(parsed, name, Path(os.path.abspath(value)))
 
     return PipelineArgs(**vars(parsed))  # pyright: ignore[reportAny]
 

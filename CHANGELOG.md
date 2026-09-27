@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-27
+
 ### Changed
 
 - **Breaking:** VMAF scores with the v1 models. v1 rebuilds the feature set: VIF is gone, banding (CAMBI) and chroma are scored rather than treated as side metrics, and NEG behaviour is on by default. v1 is calibrated to the v0 scale, but the numbers still move, and more on harder encodes. Measured against 0.6.0 on identical SDR encodes, where nothing else changed, the VMAF mean fell by a median of 0.6 at CRF 18 and 3.3 at CRF 26, and the 1% low by 3.1 and 8.4. **Re-derive any saved `--vmaf-*` target.** HDR moves further, since its tonemapping changed as well; see the VMAF tonemapping entry below. Netflix shipped these in libvmaf 3.2.0
@@ -283,7 +285,8 @@ Initial release.
 - Multi-profile comparison mode
 - Rich console progress display
 
-[Unreleased]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sleepy-af-dev/VideoTuner/releases/tag/v0.4.1

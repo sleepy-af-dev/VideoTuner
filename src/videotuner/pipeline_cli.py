@@ -69,14 +69,12 @@ class PipelineArgs:
     vmaf: bool = True
     vmaf_model: str | None = None
     v0_vmaf: bool = False
-    vmaf_log: Path | None = None
 
     guard_start_percent: float = 0.0
     guard_end_percent: float = 0.0
     guard_seconds: float = 0.0
 
     ssim2: bool = True
-    ssim2_log: Path | None = None
     vs_dir: Path | None = None
     vs_plugin_dir: Path | None = None
     crop_detect: bool = True
@@ -489,20 +487,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         metavar="DIR",
         default=_get_default("vs_plugin_dir"),
         help="VapourSynth plugin directory",
-    )
-    _ = paths_group.add_argument(
-        "--vmaf-log",
-        type=Path,
-        metavar="PATH",
-        default=_get_default("vmaf_log"),
-        help="VMAF JSON log path (default: under workdir)",
-    )
-    _ = paths_group.add_argument(
-        "--ssim2-log",
-        type=Path,
-        metavar="PATH",
-        default=_get_default("ssim2_log"),
-        help="SSIMULACRA2 JSON log path (default: under workdir)",
     )
 
     # -------------------------------------------------------------------------

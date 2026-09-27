@@ -79,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the filter as raw y4m now, with no decoder, so the side data can never be
   present. `black` mode is unaffected and was always the default, and
   `--cropdetect-limit` and `--cropdetect-round` still tune it.
+- `--vmaf-log` and `--ssim2-log`. Neither was ever read: the per-frame VMAF and
+  SSIMULACRA2 JSON is written into the run folder whatever they were given, so
+  both options did nothing. A script that still passes either now stops with an
+  error naming it.
 
 ### Fixed
 

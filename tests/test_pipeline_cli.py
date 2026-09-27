@@ -219,3 +219,11 @@ def test_a_relative_workdir_is_made_absolute(
     assert args.workdir is not None
     assert args.workdir == tmp_path / "jobs"
     assert args.workdir.is_absolute()
+
+
+@pytest.mark.parametrize("flag", ["--vmaf-log", "--ssim2-log"])
+def test_the_metric_log_flags_are_gone(flag: str) -> None:
+    # Neither was ever read: the per-frame JSON always goes in the run folder.
+    parser = build_arg_parser()
+    with pytest.raises(SystemExit):
+        _ = parser.parse_args(["input.mkv", flag, "x.json"])

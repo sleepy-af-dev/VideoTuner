@@ -34,6 +34,8 @@ USER_FACING_WARNINGS = {
     ("pipeline.py", "VMAF v1 models not found", 1),
     ("pipeline_iteration.py", "No bitrate data available from shared", 1),
     ("pipeline_iteration.py", "No bitrate data available from concatenated", 1),
+    ("pipeline_iteration.py", "VMAF assessment failed", 1),
+    ("pipeline_iteration.py", "SSIMULACRA2 assessment failed", 1),
     ("pipeline_validation.py", "Usable frames", 1),
     ("pipeline_validation.py", "No %s samples possible", 1),
     ("profiles.py", "Skipping parameter", 2),

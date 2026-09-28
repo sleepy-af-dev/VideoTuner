@@ -178,7 +178,14 @@ def run_vmaf_assessment(
             family=ctx.vmaf_family,
         )
     except Exception as e:
-        ctx.log.error("VMAF assessment failed: %s", e)
+        # On the terminal as well as in the log: a run that carries on without
+        # a metric measures less than was asked for, and says so.
+        warn_user(
+            ctx.log,
+            "VMAF assessment failed (iteration %d), continuing without it: %s",
+            iteration,
+            e,
+        )
         return []
 
 
@@ -224,7 +231,12 @@ def run_ssim2_assessment(
             repo_root=ctx.repo_root,
         )
     except Exception as e:
-        ctx.log.error("SSIM2 assessment failed: %s", e)
+        warn_user(
+            ctx.log,
+            "SSIMULACRA2 assessment failed (iteration %d), continuing without it: %s",
+            iteration,
+            e,
+        )
         return []
 
 

@@ -10,6 +10,7 @@ from videotuner import pipeline
 from videotuner.media import InvalidVideoFileError
 from videotuner.pipeline import main
 from videotuner.pipeline_cli import build_arg_parser, parse_cli
+from videotuner.pipeline_validation import AssessmentError
 
 
 def _argv(target: Path) -> list[str]:
@@ -252,3 +253,16 @@ def test_log_file_help_names_the_real_default() -> None:
     text = build_arg_parser().format_help()
     assert "job.log" in text
     assert "<name>.log" not in text
+
+
+def test_a_run_with_no_scores_ends_with_an_error_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # When neither metric produces a score the search cannot go on. The user
+    # needs the reason and a failing exit code, not a Python traceback.
+    def no_scores(*_args: object, **_kwargs: object) -> object:
+        raise AssessmentError("Assessment failed: no scores")
+
+    monkeypatch.setattr(pipeline, "_run_pipeline_body", no_scores)
+    assert main(["input.mkv", "--preset", "slow", "--vmaf-target", "95"]) == 1
+    assert "Assessment failed: no scores" in capsys.readouterr().out

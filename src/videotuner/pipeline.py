@@ -8,6 +8,8 @@ from datetime import datetime
 from itertools import count
 from pathlib import Path
 
+from rich.markup import escape
+
 from .budget_search import run_budget_search, select_within_budget
 from .constants import (
     CRF_SEARCH_MAX_ITERATIONS,
@@ -67,6 +69,7 @@ from .pipeline_types import (
     JobResult,
 )
 from .pipeline_validation import (
+    AssessmentError,
     build_targets,
     check_sources_compatible,
     has_targets,
@@ -250,6 +253,13 @@ def run_pipeline(
     pre_existing = set(map(id, root.handlers))
     try:
         return _run_pipeline_body(args, show_title=show_title, job_folder=job_folder)
+    except AssessmentError as e:
+        # Neither metric produced a score, so the search cannot go on. The job
+        # log already has the details; a traceback adds nothing to act on.
+        PipelineDisplay(show_title=False).console.print(
+            f"\n[bold red]Error:[/bold red] {escape(str(e))}\n"
+        )
+        return JobResult.failure(Path(args.input), "assessment failed")
     finally:
         for handler in list(root.handlers):
             if id(handler) not in pre_existing:

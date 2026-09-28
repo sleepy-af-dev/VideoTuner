@@ -506,7 +506,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         nargs="?",
         const="",
         default=_get_default("log_file"),
-        help="Write summary log to file (default: <workdir>/<name>.log)",
+        help="Write the job log to PATH (default: job.log in the run folder)",
     )
 
     return p

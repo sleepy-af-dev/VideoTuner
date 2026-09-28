@@ -244,3 +244,11 @@ def test_relative_input_and_vapoursynth_folders_are_made_absolute(
     assert args.input == tmp_path / "clips" / "a.mkv"
     assert args.vs_dir == tmp_path / "vs"
     assert args.vs_plugin_dir == tmp_path / "vs" / "plugins"
+
+
+def test_log_file_help_names_the_real_default() -> None:
+    # The run writes job.log in its run folder; the help once promised a file
+    # named after the input.
+    text = build_arg_parser().format_help()
+    assert "job.log" in text
+    assert "<name>.log" not in text

@@ -26,6 +26,7 @@ from videotuner.metric_colour import (
     linearisation_mode,
     missing_colour_tags,
     missing_mastering_display,
+    vmaf_encode_source,
 )
 from videotuner.ssimulacra2_assessment import (
     _build_ssim2_script,  # pyright: ignore[reportPrivateUsage]
@@ -758,6 +759,41 @@ def test_both_targets_share_one_tonemap_call(mode: LinearisationMode) -> None:
     vmaf = colour_preamble(mode, missing=[], target=ColourTarget.VMAF)
     for call in ("core.tonemap.BT2390(", "core.tonemap.BT2407(", "core.tonemap.HLG("):
         assert (call in ssim2) == (call in vmaf)
+
+
+@pytest.mark.parametrize(
+    ("mode", "missing", "mastering_missing"),
+    [
+        (LinearisationMode.PQ, [], False),
+        (LinearisationMode.PQ, [], True),
+        (LinearisationMode.PQ, ["primaries", "matrix"], False),
+        (LinearisationMode.HLG, [], False),
+        (LinearisationMode.HLG, ["matrix"], False),
+    ],
+    ids=["pq", "pq_no_mastering", "pq_untagged", "hlg", "hlg_untagged"],
+)
+def test_the_ssim2_chain_plus_the_vmaf_encode_is_the_vmaf_chain(
+    mode: LinearisationMode, missing: list[str], mastering_missing: bool
+) -> None:
+    # The combined pass hands VMAF SSIMULACRA2's frames through
+    # encode_for_vmaf. It scores what the separate VMAF path scores only if
+    # the VMAF chain is the SSIMULACRA2 chain with that one step added.
+    # Line 1 of each preamble is its docstring, which names the target.
+    ssim2 = colour_preamble(
+        mode, missing=missing, mastering_missing=mastering_missing
+    ).splitlines()
+    vmaf = colour_preamble(
+        mode,
+        missing=missing,
+        mastering_missing=mastering_missing,
+        target=ColourTarget.VMAF,
+    ).splitlines()
+    encode = vmaf_encode_source().splitlines()
+
+    assert vmaf[0] == ssim2[0] == "def prepare(clip):"
+    assert ssim2[-1] == "    return out"
+    assert encode[0] == "def encode_for_vmaf(out):"
+    assert vmaf[2:] == ssim2[2:-1] + encode[1:]
 
 
 # Measured against vs-tonemap 0.2.0 on 2026-09-18. _Range=0 is limited.

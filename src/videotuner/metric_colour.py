@@ -329,6 +329,23 @@ def colour_preamble(
     return "\n".join(lines) + "\n"
 
 
+def vmaf_encode_source() -> str:
+    """Emit ``encode_for_vmaf(out)``, the step VMAF adds to the chain.
+
+    When both metrics are scored in one pass, VMAF takes the frames
+    SSIMULACRA2's ``prepare`` produced and encodes them back to SDR video
+    itself. The body is the VMAF target's own tail, so both paths run one
+    definition of that step and cannot drift apart.
+
+    Only an HDR input reaches this. An SDR clip goes to VMAF unconverted, so
+    its VMAF frames are not SSIMULACRA2's plus a step.
+
+    Returns:
+        Python source defining ``encode_for_vmaf(out)``, for a .vpy.
+    """
+    return "def encode_for_vmaf(out):\n" + _TAILS[ColourTarget.VMAF] + "\n"
+
+
 def colour_assumption_notes(info: VideoInfo) -> list[str]:
     """Describe what the shared colour chain has to assume for an input.
 

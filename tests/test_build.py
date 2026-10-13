@@ -7,9 +7,17 @@ warning, so nothing else fails when one silently rots.
 
 from __future__ import annotations
 
+import contextlib
+import inspect
 import re
+import urllib.request
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import cast
 
+import pytest
+
+import build
 from build import CHECKSUMS, PYTHON_PROBE_CAP, VS_PACKAGE_SUBDIR, patch_vs_installer
 from videotuner.encoding_utils import VS_PACKAGE_SUBDIR as RUNTIME_VS_PACKAGE_SUBDIR
 
@@ -78,3 +86,95 @@ def test_every_bundled_download_has_a_real_checksum() -> None:
     """
     for name, digest in CHECKSUMS.items():
         assert re.fullmatch(r"[0-9a-f]{64}", digest), f"{name} has no SHA256: {digest}"
+
+
+_MODULE: dict[str, object] = dict(vars(build))
+
+#: Every download function, found rather than listed, so one added later is
+#: covered by the guard test below without anyone remembering to add it.
+DOWNLOADERS: list[tuple[str, Callable[[Path], None]]] = [
+    (name, cast("Callable[[Path], None]", member))
+    for name, member in sorted(_MODULE.items())
+    if name.startswith("download_") and inspect.isfunction(member)
+]
+
+
+def _run_downloader(
+    fn: Callable[[Path], None],
+    dest: Path,
+    present: Sequence[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[str]:
+    """Run one download function with the network and extraction stubbed.
+
+    Args:
+        fn: The download function under test.
+        dest: Directory it installs into. Created if it does not exist.
+        present: Files placed there first, standing in for what an earlier
+            provisioning run left behind.
+        monkeypatch: Used to replace the download and extraction calls.
+
+    Returns:
+        The basenames the function extracted, empty when its guard skipped the
+        download or when it does not extract from a 7z archive at all.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    for name in present:
+        _ = (dest / name).write_bytes(b"")
+
+    extracted: list[str] = []
+
+    def fake_extract(_archive: Path, files: list[str], dest_dir: Path) -> None:
+        for member in files:
+            extracted.append(Path(member).name)
+            _ = (dest_dir / Path(member).name).write_bytes(b"")
+
+    def fake_urlretrieve(_url: str, filename: Path) -> tuple[Path, None]:
+        _ = Path(filename).write_bytes(b"")
+        return Path(filename), None
+
+    def fake_verify(_path: Path, _digest: str, _name: str) -> None:
+        return None
+
+    monkeypatch.setattr(build, "extract_from_7z", fake_extract)
+    monkeypatch.setattr(build, "verify_checksum", fake_verify)
+    monkeypatch.setattr(urllib.request, "urlretrieve", fake_urlretrieve)
+
+    # A function that installs a whole directory opens the archive itself and
+    # exits when the stub file turns out not to be one. That leaves nothing
+    # extracted, which is what skips it below.
+    with contextlib.suppress(SystemExit):
+        fn(dest)
+
+    return extracted
+
+
+@pytest.mark.parametrize(("name", "fn"), DOWNLOADERS)
+def test_download_guard_covers_every_file_it_extracts(
+    name: str,
+    fn: Callable[[Path], None],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A guard that tests fewer files than it installs leaves one missing.
+
+    Each of these skips the download when its files are already there. Testing
+    one file of several means an install provisioned before the second file was
+    added is treated as complete, and the missing one never arrives. The trap
+    has been walked into twice, so this measures the guard rather than trusting
+    it: run the function once to learn what it extracts, then again with each
+    of those files missing in turn.
+    """
+    files = _run_downloader(fn, tmp_path / name, (), monkeypatch)
+    if len(files) < 2:
+        pytest.skip(f"{name} does not extract more than one file")
+
+    for missing in files:
+        rest = [f for f in files if f != missing]
+        again = _run_downloader(
+            fn, tmp_path / f"{name}-without-{missing}", rest, monkeypatch
+        )
+        assert again, (
+            f"{name} skipped its download with {missing} missing, so its guard"
+            " tests fewer files than it installs"
+        )

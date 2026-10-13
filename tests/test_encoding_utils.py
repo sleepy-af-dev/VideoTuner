@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -13,6 +17,7 @@ from videotuner.encoding_utils import (
     VS_PACKAGE_SUBDIR,
     CropValues,
     EncoderPaths,
+    IndexerType,
     SampledSource,
     UsableRange,
     VapourSynthEnv,
@@ -22,11 +27,16 @@ from videotuner.encoding_utils import (
     build_x264_command,
     build_x265_command,
     calculate_usable_frames,
+    combine_crop_values,
     create_temp_encode_paths,
+    distorted_index_path,
     get_encoder_bin,
     get_vapoursynth_portable_dir,
+    indexer_spec,
     is_hdr_video,
+    read_indexed_frame_count,
     resolve_absolute_path,
+    run_vspipe_encode,
 )
 
 
@@ -395,6 +405,24 @@ class TestVapourSynthEnv:
                 env.validate()
             assert "ffms2.dll" in str(exc_info.value)
 
+    def test_validate_raises_when_lsmash_missing(self):
+        """Test validate raises FileNotFoundError when LSMASHSource.dll is missing."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = Path(tmpdir)
+            vs_dir = cwd / "vapoursynth-portable"
+            plugins_dir = vs_dir / "vs-plugins"
+            plugins_dir.mkdir(parents=True)
+            package_dir = vs_dir / VS_PACKAGE_SUBDIR
+            package_dir.mkdir(parents=True, exist_ok=True)
+            (package_dir / "vsscript.dll").touch()
+            (plugins_dir / "ffms2.dll").touch()
+
+            env = VapourSynthEnv.from_cwd(cwd)
+
+            with pytest.raises(FileNotFoundError) as exc_info:
+                env.validate()
+            assert "LSMASHSource.dll" in str(exc_info.value)
+
     def test_validate_raises_when_vspipe_missing(self):
         """Test validate raises FileNotFoundError when vspipe.exe is missing."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -406,6 +434,7 @@ class TestVapourSynthEnv:
             package_dir.mkdir(parents=True, exist_ok=True)
             (package_dir / "vsscript.dll").touch()
             (plugins_dir / "ffms2.dll").touch()
+            (plugins_dir / "LSMASHSource.dll").touch()
 
             env = VapourSynthEnv.from_cwd(cwd)
 
@@ -425,6 +454,7 @@ class TestVapourSynthEnv:
             (package_dir / "vsscript.dll").touch()
             (package_dir / "vspipe.exe").touch()
             (plugins_dir / "ffms2.dll").touch()
+            (plugins_dir / "LSMASHSource.dll").touch()
 
             env = VapourSynthEnv.from_cwd(cwd)
             # Should not raise
@@ -520,6 +550,7 @@ class TestEncoderPaths:
             (package_dir / "vsscript.dll").touch()
             (package_dir / "vspipe.exe").touch()
             (plugins_dir / "ffms2.dll").touch()
+            (plugins_dir / "LSMASHSource.dll").touch()
 
             paths = EncoderPaths.from_cwd(cwd, EncoderType.X265)
             # Should not raise
@@ -821,6 +852,7 @@ class TestBuildSamplingVpyScriptOneSource:
             interval_frames=1600,
             region_frames=20,
             fps=24.0,
+            indexer=IndexerType.FFMS2,
         )
 
         assert script.count("ffms2.Source") == 1
@@ -833,6 +865,7 @@ class TestBuildSamplingVpyScriptOneSource:
             interval_frames=1600,
             region_frames=20,
             fps=24.0,
+            indexer=IndexerType.FFMS2,
         )
 
         assert "Splice" not in script
@@ -851,6 +884,7 @@ class TestBuildSamplingVpyScriptManySources:
             interval_frames=1600,
             region_frames=20,
             fps=24.0,
+            indexer=IndexerType.FFMS2,
         )
 
         assert script.count("ffms2.Source") == 3
@@ -864,6 +898,7 @@ class TestBuildSamplingVpyScriptManySources:
             interval_frames=1600,
             region_frames=20,
             fps=24.0,
+            indexer=IndexerType.FFMS2,
         )
 
         assert script.count("std.Splice") == 1
@@ -876,7 +911,370 @@ class TestBuildSamplingVpyScriptManySources:
             region_frames=20,
             fps=24.0,
             crop_values=CropValues(left=0, right=0, top=140, bottom=140),
+            indexer=IndexerType.FFMS2,
         )
 
         assert script.count("std.Crop") == 1
         assert script.index("std.Splice") < script.index("std.Crop")
+
+
+def test_each_indexer_has_its_own_index_suffix() -> None:
+    # Different suffixes mean switching indexers cannot collide: an index of
+    # the other kind stays on disk unused rather than being read as the wrong
+    # format.
+    suffixes = {indexer_spec(i).index_suffix for i in IndexerType}
+    assert suffixes == {".ffindex", ".lwi"}
+
+
+def test_ffms2_spec_names_its_own_filter_and_tools() -> None:
+    spec = indexer_spec(IndexerType.FFMS2)
+    assert spec.index_suffix == ".ffindex"
+    assert spec.indexer_exe == "ffmsindex.exe"
+    assert spec.plugin_dll == "ffms2.dll"
+    assert spec.display_name == "FFMS2"
+
+
+def test_lsmash_spec_names_its_own_filter_and_tools() -> None:
+    spec = indexer_spec(IndexerType.LSMASH)
+    assert spec.index_suffix == ".lwi"
+    assert spec.indexer_exe == "LSMASHSource_indexing.exe"
+    assert spec.plugin_dll == "LSMASHSource.dll"
+    assert spec.display_name == "LSMASHSource"
+
+
+def test_ffms2_source_expression_is_positional() -> None:
+    expr = indexer_spec(IndexerType.FFMS2).source_expr("C:/in.mkv", "C:/in.ffindex")
+    assert expr == 'core.ffms2.Source(r"C:/in.mkv", cachefile=r"C:/in.ffindex")'
+
+
+def test_lsmash_source_expression_names_its_source_argument() -> None:
+    expr = indexer_spec(IndexerType.LSMASH).source_expr("C:/in.mkv", "C:/in.lwi")
+    expected = 'core.lsmas.LWLibavSource(source=r"C:/in.mkv", cachefile=r"C:/in.lwi")'
+    assert expr == expected
+
+
+def test_sampling_script_uses_the_selected_filter(tmp_path: Path) -> None:
+    source = SampledSource(
+        path=tmp_path / "in.mkv",
+        cache_file=tmp_path / "in.lwi",
+        usable_range=UsableRange(start=0, end=100, frame_count=100),
+    )
+    script = build_sampling_vpy_script(
+        [source],
+        interval_frames=10,
+        region_frames=2,
+        fps=24.0,
+        indexer=IndexerType.LSMASH,
+    )
+    assert "core.lsmas.LWLibavSource(" in script
+    assert "core.ffms2.Source(" not in script
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+VS_PYTHON = REPO_ROOT / "vapoursynth-portable" / "python.exe"
+
+requires_vapoursynth = pytest.mark.skipif(
+    not VS_PYTHON.exists(),
+    reason="vapoursynth-portable is not provisioned; run tools/update_vs.py",
+)
+
+
+class TestReadIndexedFrameCount:
+    """The true count, read from the index the run already built.
+
+    `estimate_frame_count` multiplies a rate by a duration, which no single
+    rate describes for a variable frame rate file. The indexed clip's own
+    length is what the sampler will actually see, so it is the right answer
+    rather than a closer guess.
+    """
+
+    @requires_vapoursynth
+    def test_reads_the_count_the_sampler_will_see(self, tmp_path: Path) -> None:
+        source = tmp_path / "clip.mkv"
+        _ = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=64x64:rate=24:duration=2",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:v",
+                "libx265",
+                "-x265-params",
+                "lossless=1",
+                str(source),
+            ],
+            capture_output=True,
+            check=True,
+        )
+
+        count = read_indexed_frame_count(
+            source,
+            tmp_path / "clip.ffindex",
+            indexer=IndexerType.FFMS2,
+            cwd=REPO_ROOT,
+        )
+        assert count == 48  # 2 seconds at 24fps
+
+    @requires_vapoursynth
+    def test_a_variable_rate_clip_reports_its_real_length(self, tmp_path: Path) -> None:
+        # The case the estimate gets wrong: dropping two frames in three and
+        # stretching the timestamps leaves a clip whose nominal rate times its
+        # duration overshoots what it actually holds.
+        source = tmp_path / "vfr.mkv"
+        _ = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=64x64:rate=24:duration=6",
+                "-vf",
+                "select='not(mod(n,3))',setpts=N/(24*TB)*1.37",
+                "-fps_mode",
+                "vfr",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:v",
+                "libx265",
+                "-x265-params",
+                "lossless=1",
+                str(source),
+            ],
+            capture_output=True,
+            check=True,
+        )
+
+        count = read_indexed_frame_count(
+            source,
+            tmp_path / "vfr.ffindex",
+            indexer=IndexerType.FFMS2,
+            cwd=REPO_ROOT,
+        )
+        assert count == 48  # 144 source frames, every third kept
+
+    def test_an_unreadable_source_yields_nothing_rather_than_raising(
+        self, tmp_path: Path
+    ) -> None:
+        # A frame count must never be able to end a run: the caller keeps its
+        # estimate and warns.
+        count = read_indexed_frame_count(
+            tmp_path / "does-not-exist.mkv",
+            tmp_path / "does-not-exist.ffindex",
+            indexer=IndexerType.FFMS2,
+            cwd=REPO_ROOT,
+        )
+        assert count is None
+
+
+class TestDistortedIndexPath:
+    """One index per distorted encode, shared by whichever metrics read it."""
+
+    def test_both_metrics_derive_the_same_path_for_one_file(self) -> None:
+        # In shared-sampling mode VMAF and SSIMULACRA2 score the same encode.
+        # Two names for its index means indexing it twice, and a search of ten
+        # iterations pays that ten times over.
+        dis = Path("C:/job/profile_a/shared_distorted_crf28.0_iter1.mkv")
+        first = distorted_index_path(dis, IndexerType.FFMS2)
+        second = distorted_index_path(dis, IndexerType.FFMS2)
+        assert first == second
+
+    def test_the_same_name_in_two_profiles_does_not_collide(self) -> None:
+        # Multi-profile mode encodes one file per profile, and they share a
+        # stem. A shared index path would hand one profile's index to another
+        # profile's encode; ffms2 rejects a mismatched index outright rather
+        # than rebuilding, and that failure is swallowed into a dropped metric.
+        a = Path("C:/job/profile_a/shared_distorted_crf28.0_iter1.mkv")
+        b = Path("C:/job/profile_b/shared_distorted_crf28.0_iter1.mkv")
+        assert distorted_index_path(a, IndexerType.FFMS2) != distorted_index_path(
+            b, IndexerType.FFMS2
+        )
+
+    def test_the_index_sits_beside_the_encode_it_describes(self) -> None:
+        dis = Path("C:/job/profile_a/shared_distorted_crf28.0_iter1.mkv")
+        path = distorted_index_path(dis, IndexerType.FFMS2)
+        assert path.parent == dis.parent
+        assert path.name.startswith(dis.stem)
+
+    def test_each_indexer_names_its_own_suffix(self) -> None:
+        # Switching indexers must not hand one filter the other's index.
+        dis = Path("C:/job/dis.mkv")
+        ffms2 = distorted_index_path(dis, IndexerType.FFMS2)
+        lsmash = distorted_index_path(dis, IndexerType.LSMASH)
+        assert ffms2 != lsmash
+        assert ffms2.suffix == indexer_spec(IndexerType.FFMS2).index_suffix
+        assert lsmash.suffix == indexer_spec(IndexerType.LSMASH).index_suffix
+
+
+class TestRunVspipeEncodeStop:
+    """The optional early-stop event."""
+
+    @staticmethod
+    def _producer(count: int) -> list[str]:
+        return [
+            sys.executable,
+            "-c",
+            f"import sys\nfor i in range({count}):\n"
+            + "    sys.stdout.write(f'{i}\\n')\n    sys.stdout.flush()\n",
+        ]
+
+    @staticmethod
+    def _echo() -> list[str]:
+        return [
+            sys.executable,
+            "-c",
+            "import sys\nfor line in sys.stdin:\n"
+            + "    sys.stderr.write(line)\n    sys.stderr.flush()\n",
+        ]
+
+    def test_a_set_event_returns_instead_of_raising(self) -> None:
+        # Both processes are killed on purpose, so their exit codes say
+        # nothing. Treating them as failures would turn every early stop
+        # into a spurious error.
+        stop = threading.Event()
+
+        def handler(line: str) -> bool:
+            if line.strip() == "5":
+                stop.set()
+            return True
+
+        out = run_vspipe_encode(
+            vspipe_args=self._producer(200_000),
+            encoder_args=self._echo(),
+            vs_env=dict(os.environ),
+            cwd=None,
+            line_handler=handler,
+            stop=stop,
+        )
+        assert "5" in out
+
+    def test_a_set_event_stops_before_the_end(self) -> None:
+        stop = threading.Event()
+
+        def handler(line: str) -> bool:
+            if line.strip() == "5":
+                stop.set()
+            return True
+
+        out = run_vspipe_encode(
+            vspipe_args=self._producer(200_000),
+            encoder_args=self._echo(),
+            vs_env=dict(os.environ),
+            cwd=None,
+            line_handler=handler,
+            stop=stop,
+        )
+        # Generous: pipe buffers let a lot through before the kill lands.
+        # The claim is only that it did not run to completion.
+        assert len(out.splitlines()) < 200_000
+
+    def test_no_event_behaves_exactly_as_before(self) -> None:
+        out = run_vspipe_encode(
+            vspipe_args=self._producer(50),
+            encoder_args=self._echo(),
+            vs_env=dict(os.environ),
+            cwd=None,
+            line_handler=None,
+        )
+        assert len(out.splitlines()) == 50
+
+    def test_an_unset_event_does_not_stop_anything(self) -> None:
+        stop = threading.Event()
+        out = run_vspipe_encode(
+            vspipe_args=self._producer(50),
+            encoder_args=self._echo(),
+            vs_env=dict(os.environ),
+            cwd=None,
+            line_handler=None,
+            stop=stop,
+        )
+        assert len(out.splitlines()) == 50
+
+
+class TestCropValues:
+    """Tests for CropValues dataclass."""
+
+    def test_create_crop_values(self) -> None:
+        """Test creating CropValues with all fields."""
+        crop = CropValues(left=10, right=20, top=5, bottom=15)
+        assert crop.left == 10
+        assert crop.right == 20
+        assert crop.top == 5
+        assert crop.bottom == 15
+
+    def test_frozen_dataclass(self) -> None:
+        """Test CropValues is frozen (immutable)."""
+        crop = CropValues(left=10, right=20, top=5, bottom=15)
+        with pytest.raises(AttributeError):
+            setattr(crop, "left", 100)
+
+
+class TestCombineCropValues:
+    """Reconciling crops when files in one source disagree on active area.
+
+    Splicing needs every clip the same size, so one crop must serve them all.
+    The safest crop wins on each edge independently: the smallest, matching
+    how frames combine within a single file.
+    """
+
+    def test_single_value_is_returned_unchanged(self) -> None:
+        crop = CropValues(left=0, right=0, top=140, bottom=140)
+        assert combine_crop_values([crop]) == crop
+
+    def test_the_safest_edge_wins(self) -> None:
+        a = CropValues(left=0, right=0, top=140, bottom=140)
+        b = CropValues(left=0, right=0, top=132, bottom=132)
+
+        assert combine_crop_values([a, b]) == b
+
+    def test_a_file_that_reaches_the_edge_protects_every_file(self) -> None:
+        # The case this rule exists for. A source whose aspect ratio changes
+        # part way through - a film with taller sequences - has bars in one
+        # file and none in another. Taking the larger crop would cut the
+        # taller footage; taking the smaller leaves bars on the rest, which
+        # is recoverable.
+        letterboxed = CropValues(left=0, right=0, top=132, bottom=132)
+        full_height = CropValues(left=0, right=0, top=0, bottom=0)
+
+        assert combine_crop_values([letterboxed, full_height]) == full_height
+
+    def test_it_matches_combining_every_frame_at_once(self) -> None:
+        # Taking the smallest is associative, so measuring per file and then
+        # combining gives the same answer as one pass over every frame of
+        # every file. That equivalence is the whole point: it makes the
+        # documented rule - the smallest crop across all sampled frames -
+        # true for a directory of files as well as for one.
+        per_file = [
+            CropValues(left=8, right=0, top=140, bottom=8),
+            CropValues(left=0, right=12, top=6, bottom=136),
+            CropValues(left=4, right=20, top=20, bottom=40),
+        ]
+        every_frame_at_once = CropValues(
+            left=min(v.left for v in per_file),
+            right=min(v.right for v in per_file),
+            top=min(v.top for v in per_file),
+            bottom=min(v.bottom for v in per_file),
+        )
+
+        assert combine_crop_values(per_file) == every_frame_at_once
+
+    def test_edges_are_combined_independently(self) -> None:
+        """The result can be a crop no single file measured."""
+        a = CropValues(left=8, right=0, top=140, bottom=0)
+        b = CropValues(left=0, right=12, top=0, bottom=136)
+
+        combined = combine_crop_values([a, b])
+
+        assert combined == CropValues(left=0, right=0, top=0, bottom=0)
+        assert combined not in (a, b)
+
+    def test_no_values_means_no_crop(self) -> None:
+        assert combine_crop_values([]) == CropValues(left=0, right=0, top=0, bottom=0)

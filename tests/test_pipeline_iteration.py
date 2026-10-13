@@ -1,5 +1,6 @@
 """Tests for pipeline iteration module."""
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -7,11 +8,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from videotuner import encoding_utils
+from videotuner.encoding_utils import CropValues, SampledSource, UsableRange
+from videotuner.media import VideoInfo
 from videotuner.pipeline_cli import PipelineArgs
 from videotuner.pipeline_iteration import (
     MetricSampleParams,
+    build_reference_script,
     calculate_metric_params,
     extract_scores,
+    reference_video_info,
 )
 from videotuner.pipeline_types import IterationContext
 
@@ -189,3 +195,111 @@ class TestExtractScores:
         scores = extract_scores([vmaf1, vmaf2], [])
 
         assert scores["vmaf_mean"] == 95.0  # From vmaf1, not vmaf2
+
+
+_SOURCE = SampledSource(
+    path=Path("source.mkv"),
+    cache_file=Path("source.ffindex"),
+    usable_range=UsableRange(start=0, end=240, frame_count=240),
+)
+
+_PARAMS = MetricSampleParams(
+    metric_type="vmaf",
+    num_samples=10,
+    total_frames=20,
+    interval_frames=24,
+    region_frames=2,
+)
+
+
+def _ctx(*, crop_detect: bool, crop: CropValues | None) -> IterationContext:
+    """A context carrying only what the two helpers below read."""
+    return cast(
+        IterationContext,
+        cast(
+            object,
+            SimpleNamespace(
+                sources=[_SOURCE],
+                info=VideoInfo(fps=24.0, duration=10.0, width=3840, height=2160),
+                repo_root=Path("/repo"),
+                crop_values=crop,
+                args=PipelineArgs(input=Path("test.mkv"), crop_detect=crop_detect),
+            ),
+        ),
+    )
+
+
+class TestReferenceComesFromTheSharedGenerator:
+    """tests/test_frame_accuracy.py proves one generator selects the frames
+    the encoder gets. A second implementation of that selection, however
+    faithful today, would sit outside the proof, so what the metrics score
+    against has to be the same function's output.
+    """
+
+    def test_the_script_is_the_sampling_script(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def fake(**kwargs: object) -> str:
+            captured.update(kwargs)
+            return "sampled = <selected>"
+
+        monkeypatch.setattr(encoding_utils, "build_sampling_vpy_script", fake)
+
+        got = build_reference_script(_ctx(crop_detect=False, crop=None), _PARAMS)
+
+        assert got == "sampled = <selected>"
+        assert captured["sources"] == [_SOURCE]
+        assert captured["interval_frames"] == 24
+        assert captured["region_frames"] == 2
+        assert captured["fps"] == 24.0
+
+    @pytest.mark.parametrize("crop_detect", [True, False])
+    def test_crop_is_gated_the_way_the_encoder_gates_it(
+        self, monkeypatch: pytest.MonkeyPatch, crop_detect: bool
+    ) -> None:
+        # encode_concatenated_distorted applies crop only when cropdetect is
+        # on. Framing the reference differently from the encode would score
+        # two different pictures against each other.
+        crop = CropValues(left=0, right=0, top=140, bottom=140)
+        captured: dict[str, object] = {}
+
+        def fake(**kwargs: object) -> str:
+            captured.update(kwargs)
+            return ""
+
+        monkeypatch.setattr(encoding_utils, "build_sampling_vpy_script", fake)
+
+        _ = build_reference_script(_ctx(crop_detect=crop_detect, crop=crop), _PARAMS)
+
+        assert captured["crop_values"] == (crop if crop_detect else None)
+
+
+class TestReferenceVideoInfo:
+    """VMAF scales the distorted track to the reference's dimensions, and the
+    reference is now a cropped clip rather than a file that can be probed.
+    """
+
+    def test_crop_comes_off_the_dimensions(self) -> None:
+        crop = CropValues(left=0, right=0, top=140, bottom=140)
+
+        info = reference_video_info(_ctx(crop_detect=True, crop=crop))
+
+        assert (info.width, info.height) == (3840, 1880)
+
+    def test_without_cropdetect_the_source_dimensions_stand(self) -> None:
+        crop = CropValues(left=0, right=0, top=140, bottom=140)
+
+        info = reference_video_info(_ctx(crop_detect=False, crop=crop))
+
+        assert (info.width, info.height) == (3840, 2160)
+
+    def test_everything_but_the_dimensions_is_the_source(self) -> None:
+        # The frames are the source's own, so its colour tags describe them.
+        crop = CropValues(left=20, right=20, top=0, bottom=0)
+        ctx = _ctx(crop_detect=True, crop=crop)
+
+        info = reference_video_info(ctx)
+
+        assert info == replace(ctx.info, width=3800)

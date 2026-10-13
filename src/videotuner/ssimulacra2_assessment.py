@@ -9,11 +9,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .encoding_utils import VapourSynthEnv, write_vpy_script
-from .media import get_assessment_frame_count
+from .encoding_utils import (
+    IndexerType,
+    VapourSynthEnv,
+    build_source_index,
+    distorted_index_path,
+    indexer_spec,
+    write_vpy_script,
+)
+from .metric_colour import (
+    LinearisationMode,
+    colour_preamble,
+    linearisation_mode,
+    missing_colour_tags,
+    missing_mastering_display,
+)
 from .utils import ensure_dir, run_capture
 
 if TYPE_CHECKING:
+    from .media import VideoInfo
     from .profiles import Profile
     from .progress import PipelineDisplay
 
@@ -65,12 +79,149 @@ def _calculate_stats_from_scores(scores: list[float]) -> SSIM2Result:
     )
 
 
+#: Emitted into the .vpy only when the colour chain actually calls vs-tonemap.
+_TONEMAP_GUARD = """
+    if not hasattr(core, 'tonemap'):
+        print(
+            "ERROR: vs-tonemap plugin not loaded; an HDR input cannot be "
+            "tonemapped for SSIMULACRA2. Run tools/update_vs.py to install it.",
+            file=sys.stderr, flush=True,
+        )
+        sys.exit(1)
+"""
+
+
+def _build_ssim2_script(
+    *,
+    ref_script: str,
+    dis_path: Path,
+    dis_cache: Path,
+    preamble: str,
+    indexer: IndexerType,
+) -> str:
+    """Build the VapourSynth script that scores SSIMULACRA2.
+
+    Args:
+        ref_script: Output of ``build_sampling_vpy_script``, which imports
+            VapourSynth and binds the selected frames to ``sampled``.
+        dis_path: Distorted video path.
+        dis_cache: Index file for the distorted encode.
+        preamble: Source defining ``prepare(clip)``, from ``colour_preamble``.
+            Whether it calls vs-tonemap also decides whether the script
+            guards on that plugin being loaded.
+        indexer: Source filter to load the distorted encode with.
+
+    Returns:
+        The .vpy contents.
+    """
+    # Gate the vs-tonemap guard on what the preamble actually emitted: only the
+    # PQ and HLG chains call the plugin, and an SDR run must not demand one it
+    # never touches. Without the guard a missing plugin raises AttributeError,
+    # which is swallowed upstream, so the SSIMULACRA2 column simply comes back
+    # empty with nothing said on the terminal.
+    tonemap_guard = _TONEMAP_GUARD if "core.tonemap." in preamble else ""
+
+    other = next(member for member in IndexerType if member is not indexer)
+    display_name = indexer_spec(indexer).display_name
+
+    return f"""{ref_script}
+
+import sys
+
+{preamble}
+
+# Force unbuffered output
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
+# The reference is the sampling script above, so the source has already been
+# opened by the time this runs - and opened once already this iteration, by
+# the encode that produced the distorted clip below.
+ref = sampled
+print(f"[vszip] Reference: {{ref.width}}x{{ref.height}}, {{ref.format.name}}, {{len(ref)}} frames", file=sys.stderr, flush=True)
+
+# Only a failure to open a file can be answered by switching indexers, so the
+# hint is scoped to the load. Everything after it - the colour chain, the
+# tone curve, the metric - fails for reasons no indexer change can fix.
+try:
+    print("[vszip] Loading distorted video...", file=sys.stderr, flush=True)
+    dis = {indexer_spec(indexer).source_expr(str(dis_path.resolve()), str(dis_cache))}
+    print(f"[vszip] Distorted: {{dis.width}}x{{dis.height}}, {{dis.format.name}}, {{len(dis)}} frames", file=sys.stderr, flush=True)
+except Exception as e:
+    print(f"ERROR: {{e}}", file=sys.stderr, flush=True)
+    print(
+        "HINT: this run used the {display_name} indexer."
+        " If the input cannot be read, try --indexer {other.value}",
+        file=sys.stderr, flush=True,
+    )
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+
+try:
+    # Validate dimensions match
+    if ref.width != dis.width or ref.height != dis.height:
+        print(f"ERROR: Resolution mismatch - ref={{ref.width}}x{{ref.height}}, dis={{dis.width}}x{{dis.height}}", file=sys.stderr, flush=True)
+        sys.exit(1)
+
+    # Check if vszip plugin is available
+    if not hasattr(core, 'vszip'):
+        print("ERROR: vszip plugin not loaded", file=sys.stderr, flush=True)
+        sys.exit(1)
+{tonemap_guard}
+    print("[vszip] Converting to linear light...", file=sys.stderr, flush=True)
+    # vszip mishandles colour: it forces sRGB on the transfer and ignores the
+    # primaries. Both of its conversion paths early-return on a linear RGBS
+    # clip, so the conversion is done here and vszip is handed the result.
+    ref = prepare(ref)
+    dis = prepare(dis)
+
+    print("[vszip] Running SSIMULACRA2 comparison...", file=sys.stderr, flush=True)
+    result = ref.vszip.SSIMULACRA2(dis)
+
+    total_frames = len(result)
+    print(f"[vszip] Processing {{total_frames}} frames", file=sys.stderr, flush=True)
+
+    if total_frames == 0:
+        print("ERROR: SSIMULACRA2 returned empty result", file=sys.stderr, flush=True)
+        sys.exit(1)
+
+    # Iterate frames and collect scores.
+    # frames() defaults prefetch to the core's thread count and backlog to three
+    # times that, and every in-flight frame is an RGBS clip at source resolution,
+    # about 95 MB at 4K. Measured on a 4K PQ pair on 32 threads: uncapped peaked
+    # at 19.2 GiB of working set, prefetch=8 at 13.3 GiB for 1.2x the wall clock,
+    # prefetch=4 at 10.4 GiB for 2.2x. 8 is the knee, and the cap only binds
+    # above 8 cores, which is where the memory grows. close=True releases each
+    # frame as the loop advances.
+    for i, frame in enumerate(result.frames(prefetch=8, close=True)):
+        score = frame.props.get("SSIMULACRA2", None)
+        if score is not None:
+            # Print score to stdout for parsing
+            print(f"SCORE:{{score}}", flush=True)
+        else:
+            print(f"WARNING: Frame {{i}} has no SSIMULACRA2 property", file=sys.stderr, flush=True)
+        # Progress to stderr for line_handler
+        print(f"vszip progress: {{i + 1}}/{{total_frames}}", file=sys.stderr, flush=True)
+
+    print("[vszip] Assessment complete", file=sys.stderr, flush=True)
+
+except Exception as e:
+    print(f"ERROR: {{e}}", file=sys.stderr, flush=True)
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+"""  # noqa: E501  # TODO(E501): shorten line
+
+
 def _run_vszip_assessment(
     *,
-    ref_path: Path,
+    ref_script: str,
     dis_path: Path,
     vs_env: VapourSynthEnv,
     temp_dir: Path,
+    info: VideoInfo,
+    indexer: IndexerType,
     line_handler: Callable[[str], bool] | None = None,
 ) -> SSIM2Result:
     """Run SSIMULACRA2 assessment via vszip VapourSynth plugin.
@@ -79,10 +230,13 @@ def _run_vszip_assessment(
     per-frame scores, then calculates summary statistics.
 
     Args:
-        ref_path: Reference video path
+        ref_script: Sampling script whose ``sampled`` clip is the reference.
         dis_path: Distorted video path
         vs_env: VapourSynth environment configuration
         temp_dir: Directory for temporary files
+        info: Probed metadata for the input, used to pick the colour
+            conversion the reference and distorted clips are scored through.
+        indexer: Source filter to load the distorted encode with.
         line_handler: Optional callback for progress updates
 
     Returns:
@@ -101,76 +255,39 @@ def _run_vszip_assessment(
     vpy_path = temp_dir / "vszip_ssim2.vpy"
 
     # Build VapourSynth script that calculates SSIMULACRA2 and prints scores
-    # Using lsmas for video loading (same as our encoding pipeline)
-    ref_cache = temp_dir / "vszip_ref.lwi"
-    dis_cache = temp_dir / "vszip_dis.lwi"
+    dis_cache = distorted_index_path(dis_path, indexer)
 
-    vpy_content = f'''import vapoursynth as vs
-import sys
-
-core = vs.core
-
-# Force unbuffered output
-sys.stdout.reconfigure(line_buffering=True)
-sys.stderr.reconfigure(line_buffering=True)
-
-try:
-    print("[vszip] Loading reference video...", file=sys.stderr, flush=True)
-    # Load reference and distorted videos
-    ref = core.lsmas.LWLibavSource(
-        source=r"{ref_path.resolve()}",
-        cachefile=r"{ref_cache}"
+    # Both of these read the input's probe. The reference is the input, so it
+    # matches by construction; the distorted encode agrees with it because the
+    # encoder parameter builders write --colorprim/--transfer/--colormatrix
+    # from this same VideoInfo. An encoder that stopped carrying the tags
+    # across would break the assumption silently, since the script would then
+    # retag the encode against the wrong probe.
+    # What these assume is reported once at startup by
+    # colour_assumption_notes, since both follow from the probe alone and
+    # this function runs once per CRF iteration.
+    #
+    # A PQ input that declares no mastering display gives BT2390 no peak
+    # luminance, and it raises rather than guessing. Assume the BT.2100
+    # reference display instead, so the metric is scored rather than dropped.
+    # One decision reaches both clips, since prepare() is one function applied
+    # to each. HLG needs no equivalent: tonemap.HLG defaults its own peak.
+    mode = linearisation_mode(info.color_trc)
+    absent = missing_colour_tags(info)
+    is_pq = mode is LinearisationMode.PQ
+    mastering_missing = is_pq and missing_mastering_display(info)
+    preamble = colour_preamble(
+        mode, missing=absent, mastering_missing=mastering_missing
     )
-    print(f"[vszip] Reference: {{ref.width}}x{{ref.height}}, {{ref.format.name}}, {{len(ref)}} frames", file=sys.stderr, flush=True)
+    log.info("SSIMULACRA2 colour conversion: %s", mode.value)
 
-    print("[vszip] Loading distorted video...", file=sys.stderr, flush=True)
-    dis = core.lsmas.LWLibavSource(
-        source=r"{dis_path.resolve()}",
-        cachefile=r"{dis_cache}"
+    vpy_content = _build_ssim2_script(
+        ref_script=ref_script,
+        dis_path=dis_path,
+        dis_cache=dis_cache,
+        preamble=preamble,
+        indexer=indexer,
     )
-    print(f"[vszip] Distorted: {{dis.width}}x{{dis.height}}, {{dis.format.name}}, {{len(dis)}} frames", file=sys.stderr, flush=True)
-
-    # Validate dimensions match
-    if ref.width != dis.width or ref.height != dis.height:
-        print(f"ERROR: Resolution mismatch - ref={{ref.width}}x{{ref.height}}, dis={{dis.width}}x{{dis.height}}", file=sys.stderr, flush=True)
-        sys.exit(1)
-
-    # Check if vszip plugin is available
-    if not hasattr(core, 'vszip'):
-        print("ERROR: vszip plugin not loaded", file=sys.stderr, flush=True)
-        sys.exit(1)
-
-    print("[vszip] Running SSIMULACRA2 comparison...", file=sys.stderr, flush=True)
-    # vszip.SSIMULACRA2 handles format conversion internally
-    result = ref.vszip.SSIMULACRA2(dis)
-
-    total_frames = len(result)
-    print(f"[vszip] Processing {{total_frames}} frames", file=sys.stderr, flush=True)
-
-    if total_frames == 0:
-        print("ERROR: SSIMULACRA2 returned empty result", file=sys.stderr, flush=True)
-        sys.exit(1)
-
-    # Iterate frames and collect scores
-    for i in range(total_frames):
-        frame = result.get_frame(i)
-        score = frame.props.get("SSIMULACRA2", None)
-        if score is not None:
-            # Print score to stdout for parsing
-            print(f"SCORE:{{score}}", flush=True)
-        else:
-            print(f"WARNING: Frame {{i}} has no SSIMULACRA2 property", file=sys.stderr, flush=True)
-        # Progress to stderr for line_handler
-        print(f"vszip progress: {{i + 1}}/{{total_frames}}", file=sys.stderr, flush=True)
-
-    print("[vszip] Assessment complete", file=sys.stderr, flush=True)
-
-except Exception as e:
-    print(f"ERROR: {{e}}", file=sys.stderr, flush=True)
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-'''  # noqa: E501  # TODO(E501): shorten line
 
     write_vpy_script(vpy_path, vpy_content)
     log.debug("vszip script written to: %s", vpy_path)
@@ -206,15 +323,11 @@ except Exception as e:
         # Clean up temporary files
         if vpy_path.exists():
             vpy_path.unlink()
-        # Clean up cache files
-        if ref_cache.exists():
-            ref_cache.unlink()
-        if dis_cache.exists():
-            dis_cache.unlink()
 
 
 def assess_ssim2_concatenated(
-    reference_path: Path,
+    reference_script: str,
+    reference_frames: int,
     distorted_path: Path,
     workdir: Path,
     temp_dir: Path,
@@ -223,13 +336,18 @@ def assess_ssim2_concatenated(
     display: PipelineDisplay,
     log: logging.Logger,
     iteration: int,
+    info: VideoInfo,
+    indexer: IndexerType,
+    repo_root: Path,
 ) -> list[SSIM2Result]:
-    """Run SSIMULACRA2 assessment on concatenated reference and distorted files.
+    """Run SSIMULACRA2 assessment on the sampled source and a distorted encode.
 
     Uses vszip VapourSynth plugin for CPU-based SSIMULACRA2 calculation.
 
     Args:
-        reference_path: Path to concatenated lossless reference
+        reference_script: Sampling script that selects the reference frames
+            from the source, the same one the encoder is fed.
+        reference_frames: How many frames that script yields, for progress.
         distorted_path: Path to concatenated distorted encode
         workdir: Working directory for output files
         temp_dir: Temporary directory for intermediate files
@@ -238,6 +356,12 @@ def assess_ssim2_concatenated(
         display: Progress display manager
         log: Logger instance
         iteration: Current iteration number
+        info: Probed metadata for the input, used to pick the colour
+            conversion the reference and distorted clips are scored through.
+        indexer: Source filter to load the distorted encode with.
+        repo_root: Repository root, used to locate the indexer executable
+            for the pre-build step. ``workdir`` is a per-job folder under it,
+            not the directory ``vapoursynth-portable`` lives in.
 
     Returns:
         List containing single SSIM2Result for the concatenated comparison
@@ -248,22 +372,46 @@ def assess_ssim2_concatenated(
         get_profile_dir(workdir, profile) / f"ssim2_concatenated_iter{iteration}.json"
     )
 
-    # Get frame count for progress tracking
-    total_frames = get_assessment_frame_count(reference_path)
+    # Build the distorted index up front so it gets a progress display, rather
+    # than letting the source filter build it silently on first decode. The
+    # reference needs nothing here: the sampling script reads the source
+    # through indexes the job built before encoding.
+    #
+    # `distorted_index_path` names it beside the encode, so VMAF reuses this
+    # one rather than building a second under a different name. Nothing is
+    # deleted first: the encode's own name carries its CRF and iteration, so
+    # an index at that path can only ever describe the file beside it.
+    dis_cache = distorted_index_path(distorted_path, indexer)
+    with display.stage(
+        f"Indexing distorted ({indexer_spec(indexer).display_name})",
+        total=1,
+        show_eta=True,
+        transient=True,
+        show_done=True,
+    ) as index_stage:
+        _ = build_source_index(
+            source_path=distorted_path,
+            cache_file=dis_cache,
+            indexer=indexer,
+            cwd=repo_root,
+            line_handler=index_stage.make_index_handler(),
+        )
 
     with display.stage(
         "Running SSIMULACRA2 assessment",
-        total=total_frames,
+        total=reference_frames,
         show_eta=True,
         transient=True,
         show_done=True,
     ) as stage:
         result = _run_vszip_assessment(
-            ref_path=reference_path,
+            ref_script=reference_script,
             dis_path=distorted_path,
             vs_env=vs_env,
             temp_dir=temp_dir,
-            line_handler=stage.make_vszip_handler(total_frames=total_frames),
+            info=info,
+            indexer=indexer,
+            line_handler=stage.make_vszip_handler(total_frames=reference_frames),
         )
 
     # Write JSON log

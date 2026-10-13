@@ -15,10 +15,13 @@ from rich.table import Table
 
 from .constants import METRIC_DECIMALS
 from .crf_search import CRF_CEILING, QualityTarget
+from .encoding_utils import indexer_spec
 from .pipeline_cli import DEFAULT_CRF_INTERVAL, DEFAULT_CRF_START_VALUE, get_default
 
 if TYPE_CHECKING:
+    from .encoding_utils import IndexerType
     from .pipeline_types import Budget, BudgetPoint, JobResult, MultiProfileResult
+    from .vmaf_types import VmafModelChoice
 
 #: Metric key to display name, in the order metrics are shown. Single source of
 #: truth for both the per-job assessment summary and the batch summary.
@@ -53,7 +56,7 @@ class PipelineArgsProtocol(Protocol):
     ssim2_interval_frames: int
     ssim2_region_frames: int
     vmaf_model: str | None
-    tonemap: str
+    indexer: IndexerType
     guard_start_percent: float
     guard_end_percent: float
     guard_seconds: float
@@ -119,6 +122,8 @@ def display_settings_summary(
     args: PipelineArgsProtocol,
     multi_profile_display: str = "",
     source_name: str = "",
+    tonemap_operator: str | None = None,
+    vmaf_choice: VmafModelChoice | None = None,
 ) -> None:
     """Display active settings summary to console.
 
@@ -127,6 +132,14 @@ def display_settings_summary(
         args: Pipeline arguments
         multi_profile_display: Pre-formatted string showing profiles/groups for multi-profile mode
         source_name: Name of the source video file
+        tonemap_operator: Label for the operator that takes an HDR input to
+            SDR before scoring, or None when the source is SDR and nothing
+            tonemaps. Both VMAF and SSIMULACRA2 run every HDR input through
+            it, since neither metric is defined on HDR, so one line covers
+            whichever of them is enabled.
+        vmaf_choice: Resolved VMAF model generation, or None when VMAF is off.
+            The exact model varies per comparison, but the generation is settled
+            before the run and decides whether a score compares with an old one.
     """  # noqa: E501  # TODO(E501): shorten line
     console.print()
     console.print("[bold]Settings[/bold]")
@@ -151,6 +164,11 @@ def display_settings_summary(
 
     console.print(f"  CropDetect: {'Enabled' if args.crop_detect else 'Disabled'}")
 
+    # Every frame the run reads comes through the indexer, so an archived run
+    # folder that does not name it cannot be told apart from a default one.
+    if args.indexer != get_default("indexer"):
+        console.print(f"  Indexer: {indexer_spec(args.indexer).display_name}")
+
     # Log non-default sampling parameters
     if args.vmaf_interval_frames != get_default("vmaf_interval_frames"):
         console.print(f"  VMAF Interval: {args.vmaf_interval_frames} frames")
@@ -161,11 +179,20 @@ def display_settings_summary(
     if args.ssim2_region_frames != get_default("ssim2_region_frames"):
         console.print(f"  SSIM2 Region: {args.ssim2_region_frames} frames")
 
-    # Log non-default analysis options
-    if args.vmaf_model is not None:
-        console.print(f"  VMAF Model: {args.vmaf_model}")
-    if args.tonemap != get_default("tonemap"):
-        console.print(f"  Tonemap: {args.tonemap}")
+    # The generation always, since v0 and v1 numbers are not comparable and a
+    # fallback otherwise looks identical to a deliberate v0 run.
+    if vmaf_choice is not None:
+        if vmaf_choice.explicit_model is not None:
+            console.print(f"  VMAF models: {vmaf_choice.explicit_model}")
+        elif vmaf_choice.fell_back:
+            console.print(
+                f"  VMAF models: [yellow]{vmaf_choice.family} (fallback,"
+                + " v1 unavailable)[/yellow]"
+            )
+        else:
+            console.print(f"  VMAF models: {vmaf_choice.family}")
+    if tonemap_operator is not None:
+        console.print(f"  Tonemapping: {tonemap_operator}")
 
     # Log non-default guard bands
     if args.guard_start_percent > 0:

@@ -7,6 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-13
+
+### Changed
+
+- **Breaking:** VMAF scores with the v1 models. v1 rebuilds the feature set: VIF is gone, banding (CAMBI) and chroma are scored rather than treated as side metrics, and NEG behaviour is on by default. v1 is calibrated to the v0 scale, but the numbers still move, and more on harder encodes. Measured against 0.6.0 on identical SDR encodes, where nothing else changed, the VMAF mean fell by a median of 0.6 at CRF 18 and 3.3 at CRF 26, and the 1% low by 3.1 and 8.4. **Re-derive any saved `--vmaf-*` target.** To keep them for now instead, pass `--v0-vmaf`: measured against 0.6.0 on a machine with a GPU, SDR scores came out identical and HDR scores within 0.6, apart from one animated sample that scored up to 2.9 higher. 0.6.0 without a GPU tonemapped HDR differently and was not measured, and SSIMULACRA2 has no legacy mode, so its targets still need re-deriving. HDR moved further in the measurement; its tonemapping changed too, see the VMAF tonemapping entry below. Netflix shipped these in libvmaf 3.2.0
+- The model is chosen by display and viewing distance rather than by source resolution, which is what the model names describe. A source at 2160p or above scores against `vmaf_v1.0.16_1d5h_2160`, anything below against `vmaf_v1.0.16_3d0h`, the 1080p living-room model Netflix treat as standard. A source at 47fps or above takes the matching `_hfr` variant
+- VMAF is measured at 10-bit whatever the encode depth, which is what lets CAMBI see banding. When the encode was 8-bit, `cambi.enc_bitdepth` tells CAMBI so, since it scales its detection by the depth the content was encoded at rather than the depth it is handed
+- **Breaking:** SSIMULACRA2 scores the image the metric was designed for. Frames are converted to linear light from the transfer the input declares, and HDR is tonemapped to SDR first with BT.2390 and gamut-mapped with BT.2407, rather than being handed to the metric as raw HDR. The previous behaviour linearised everything through the sRGB curve regardless of what the input was, so an HDR input was scored in a domain the metric was never fitted for. **Every SSIMULACRA2 score changes.** Measured against 0.6.0 on identical encodes, as the median across the test samples: SDR barely moves, its median score +0.1 at CRF 18 and +0.7 at CRF 26 and its 5% low -0.9 and -1.8, because SDR is now linearised with the BT.1886 display curve rather than sRGB. HLG's median score falls by 2.2 and 4.7. PQ varies most, in either direction depending on the content: its median score shifts from -15.6 to +14.1 across the samples, -3.3 and -4.3 at the median. Any saved `--ssim2-mean-target`, `--ssim2-median-target`, `--ssim2-95pct-target` or `--ssim2-5pct-target` needs re-deriving. Kept as they are, 0.6.0's targets make most HDR searches settle on lower CRFs and higher bitrates: with VMAF 95 and SSIMULACRA2 median 80, 5 of the 9 PQ test samples came out at a 59% to 83% higher bitrate (3 came out lower), and all 4 HLG samples at a 16% to 33% higher one
+- HDR runs take longer per CRF search iteration than in 0.6.0, and more so on fewer cores; SDR runs are a little faster. Median wall clock per iteration, same targets, on 32 logical CPUs: SDR 7.7% faster, PQ 7.9% slower, HLG 22% slower. Held to 4 physical cores, one sample each: SDR 1.1% faster, PQ 15.9% slower, HLG 38.5% slower. Two things add the HDR time: tonemapping on the CPU, which 0.6.0 did on the GPU for VMAF when one was available and not at all for SSIMULACRA2; and encoding at the lower CRFs that most HDR searches now settle on with the same targets. Assessment keeps several decoded frames in flight, each a full-resolution float image, so peak memory is higher too: 16.3 GiB against 0.6.0's 8.7 GiB for a 4K PQ input sample on 32 logical CPUs, measured as the peak committed memory of VideoTuner and every process it started. SSIMULACRA2 holds at most 8 frames in flight; the VMAF pipe sets no such cap, so its share can grow with core count
+- HLG inputs are tonemapped against an assumed 1000 cd/m2 peak, the BT.2100 reference display. HLG carries no mastering display metadata to signal a real one, so an HLG score rests on that assumption in a way a PQ score with a declared mastering display does not
+- A PQ input that declares no mastering display is tonemapped against an assumed 1000 cd/m2 peak, the BT.2100 reference display. The BT.2390 tone curve needs a peak luminance, and that metadata is normally where it comes from. The terminal and the run log both record the assumption. Scores for such an input stay comparable between encodes of it, but not against an input that declares its own peak: measured on a 4K PQ input sample, assuming 1000 where the master really was 1000 changed nothing, while assuming it against a 4000 cd/m2 master moved the mean by 0.6 points
+- SSIMULACRA2 reads through the same indexer as the encoding path (`--indexer`, default `ffms2`) rather than always LSMASHSource. The source index written beside each input is named for the selected indexer's suffix, `.ffindex` or `.lwi`, so switching indexers leaves the index of the other kind on disk unused rather than replacing it, and switching back finds it still valid
+- Warnings that change what a run measures now print to the terminal as well as the job log. An assumed colour tag, an assumed mastering display peak, a VMAF model fallback, a metric disabled for want of usable frames, a metric that failed outright while the run carried on without it: each of these alters the numbers or drops one of them, and each was previously written to the job log alone. A run that quietly measured something other than what was asked for looked identical to one that did not. Search outcomes and cleanup failures are unchanged, since the results tables already carry the first and nothing can be done about the second
+- VMAF tonemaps an HDR input with the same BT.2390 tone curve and BT.2407 gamut mapping SSIMULACRA2 uses, read through the same VapourSynth pipe, rather than with FFmpeg's own tonemapping (libplacebo where a usable GPU exists, zscale otherwise). HDR VMAF scores change as a result, and no longer depend on whether the machine has a usable GPU. Together with the v1 models, measured on identical encodes at CRF 26 against 0.6.0 on a machine with a GPU, where 0.6.0 tonemapped with libplacebo, the HDR VMAF mean fell by a median of 6.7 on PQ and 3.5 on HLG, and the 1% low by 10.6 and 5.7. Scored with the v0 models on both sides (`--v0-vmaf`), the tonemapping change alone moved the mean by less than 0.4 on every sample but one animation, where it rose by 1.4 to 2.2. How the two changes split under v1 was not measured. SDR scores are unchanged, to nine decimal places against FFmpeg reading the same two files: an SDR input needs no tonemapping, so it reaches libvmaf exactly as it comes off disk. `--indexer` now reaches VMAF as well as sample extraction and SSIMULACRA2, so switching indexers changes what VMAF reads from disk; ffms2 and lsmash decode identically to each other, so it changes no score. Its cost in speed is part of the assessment-speed entry above
+- A distorted encode is indexed once per iteration rather than once per metric. In shared-sampling mode VMAF and SSIMULACRA2 score the same file, and each built its own index of it and deleted that index afterwards, so a ten-iteration search paid for twenty indexes of ten files. The index is now named beside the encode it describes, which both metrics derive identically and neither removes
+- Crop detection now reads through the indexer you select with `--indexer`,
+  rather than always seeking by timestamp through FFmpeg. It picks its sample
+  frames by number, so it analyses the frames it asked for instead of whichever
+  ones a timestamp seek landed on.
+- Crop detection tonemaps an HDR input with the same operator VMAF and
+  SSIMULACRA2 use. It previously used libplacebo on a machine with a Vulkan GPU
+  and zscale with hable on one without, so two machines could report different
+  crops from the same source. **Crop values can change, which changes every
+  encode that follows.**
+- Crop detection never judges a source on fewer than five frames. At the default
+  30-second interval a short source could previously be cropped on the strength
+  of a single frame.
+- With `--as-one-source`, crops measured on the separate files are reconciled by
+  taking the **smallest** per edge rather than the largest. Joining still
+  requires matching dimensions, so one crop serves every file, but a file whose
+  frames reach the edge now keeps the others uncropped instead of being
+  overruled. That file is reporting content, not a bad measurement. The previous
+  rule cut picture on a source whose active area changes part way through: a
+  film with taller sequences has bars in one file and none in another, and
+  taking the larger crop removed that footage. This also makes the two steps one
+  rule — the smallest crop across every analysed frame of every file — which is
+  the direction frames have always combined within a single file, and what the
+  documentation already described. A folder whose files genuinely share their
+  letterboxing is unaffected. A folder where one file has a burned-in caption or
+  a logo inside the bar will now crop less, or not at all.
+
+### Added
+
+- `--v0-vmaf`, which scores with the legacy v0 models and reverts the measurement depth to match the encode, so a run reproduces what earlier releases did and can be compared against them. Combining it with `--vmaf-model` naming a v1 model is an error rather than a silent choice between the two
+- The VMAF model generation is named in the settings header, and the exact model recorded in the job log. A fallback to v0 is marked as a fallback: v0 and v1 numbers are not comparable, and an unnoticed fallback otherwise produces v0 scores that pass for v1 against a v1 target
+- A startup probe for the v1 models, run once and cached. There is no way to ask FFmpeg which libvmaf it links, so the probe scores a synthetic pair and reads the exit code. It costs about 0.07s, is skipped when its answer cannot matter, and falls back to v0 with a warning to both the terminal and the log
+- A named model that the linked libvmaf cannot load now fails with a message naming the model and the libvmaf version needed, rather than an ffmpeg exit status
+- Bundled vs-tonemap 0.2.0, a VapourSynth tonemapping plugin implementing the ITU-R BT.2390 tone curve and BT.2407 gamut mapping. It runs inside the VapourSynth graph, so an input's mastering display metadata is read where it still exists. HDR VMAF and SSIMULACRA2 now both need it: neither metric is defined on HDR, so an HDR input is tonemapped before either one scores it, and without the plugin that step fails. A pre-built release bundles it. An existing `vapoursynth-portable/` set up from source does not have it until `tools/update_vs.py` is re-run, and a run that needs it and cannot find it now says so rather than dropping the metric with nothing on the terminal
+- The colour conversion applied to each assessment is named in the log, and a tag an input doesn't declare is reported rather than silently assumed. Only the missing tags are overwritten: an input that declares a transfer but not its primaries keeps that transfer. What's assumed depends on the conversion selected: BT.709 for an SDR input, matching what every other tool in the chain assumes for an untagged one, or BT.2020 primaries and matrix for a PQ or HLG input, since BT.709 would be the wrong guess for HDR content. Both the terminal and the log name what was missing and what was assumed
+- `--indexer ffms2|lsmash`, choosing the source filter that reads and indexes video. One run now indexes one way throughout: previously, sample extraction for encoding always used ffms2 and SSIMULACRA2's own scoring step always used LSMASHSource, with no way to change either. **Scores are unaffected:** the two filters decode identically, measured on PQ, HLG and SDR inputs. The flag reaches every operation that builds an index: encoding sample extraction, VMAF, SSIMULACRA2, and crop detection
+- Bundled the LSMASHSource indexer executable, so `--indexer lsmash` builds its index up front with a progress display rather than silently during the first decode
+- An `--indexer` other than the default is named in the settings summary. Every frame a run reads comes through the indexer, and an archived run folder otherwise gives no way to tell which one read them
+- The settings summary names the tonemapping operator a run used, when an HDR input needed one. VMAF and SSIMULACRA2 now share the same operator, so the one line names it for both
+
+### Removed
+
+- `--tonemap`. VMAF and SSIMULACRA2 both tonemap an HDR input unconditionally now, with the same operator, so the flag had nothing left to choose between: `off` never stopped SSIMULACRA2 from tonemapping, and now it does not stop VMAF either
+- The lossless reference copy that VMAF and SSIMULACRA2 scored an encode against. Both now score directly against the source, which saves one lossless encode per job. Frame identity between the two paths was proven rather than assumed: a test hashes every sampled frame read from the source against the same frame read from the old reference, across constant and variable frame rates, a container that outlives its video track, and both indexers. The overall change in speed is in the assessment-speed entry above
+- The Vulkan capability probe. Nothing tonemaps through FFmpeg any more, so
+  FFmpeg no longer needs to be built with libplacebo.
+- `--cropdetect-mode`, `--cropdetect-mv-threshold`, `--cropdetect-low` and
+  `--cropdetect-high`. All four configured FFmpeg's `mvedges` detection mode,
+  which has never worked here. `mvedges` reads motion vectors from side data
+  FFmpeg attaches only when a decoder is asked for it with
+  `-flags2 +export_mvs`, and no version of this tool has set that. Measured on
+  a letterboxed input sample, `mvedges` returned the full frame on all 49
+  frames, logging "no motion vectors available" each time, while `black` mode
+  found the bars. It could not be salvaged either: crop values combine by
+  taking the smallest per edge, and an I-frame carries no motion vectors and so
+  returns the full frame, which drives that minimum to zero. Frames also reach
+  the filter as raw y4m now, with no decoder, so the side data can never be
+  present. `black` mode is unaffected and was always the default, and
+  `--cropdetect-limit` and `--cropdetect-round` still tune it.
+- `--vmaf-log` and `--ssim2-log`. Neither was ever read: the per-frame VMAF and
+  SSIMULACRA2 JSON is written into the run folder whatever they were given, so
+  both options did nothing. A script that still passes either now stops with an
+  error naming it.
+
+### Fixed
+
+- A source whose container reports no frame count is counted from the index the run already builds, rather than estimated by multiplying its frame rate by its duration. No single rate describes a variable frame rate file, so that estimate could overshoot, and the sampler then planned samples past the end of the source. The trim clamped rather than failing, so a run quietly measured fewer frames than it was asked for. Measured on a variable frame rate input: 65 frames estimated against 48 real. When the two disagree the run now says so and names both numbers. A source that reports its own frame count is unaffected and costs nothing extra
+- Relative paths resolve against the folder VideoTuner is run from. A relative input could not be opened from any folder other than VideoTuner's own, and a relative `--workdir` or `--vs-dir` lost SSIMULACRA2: its VapourSynth script failed, and the run carried on with VMAF alone, noting the failure only in the job log. `--vs-plugin-dir` is made absolute the same way
+- A run where neither VMAF nor SSIMULACRA2 produces a score ends with an error message and exit code 1, instead of a Python traceback
+- The `--log-file` help names its real default, `job.log` in the run folder
+
 ## [0.6.0] - 2026-09-11
 
 Colour metadata was read from one source and compared against the vocabulary of
@@ -202,7 +287,8 @@ Initial release.
 - Multi-profile comparison mode
 - Rich console progress display
 
-[Unreleased]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/sleepy-af-dev/VideoTuner/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/sleepy-af-dev/VideoTuner/releases/tag/v0.4.1

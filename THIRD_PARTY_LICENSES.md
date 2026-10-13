@@ -10,6 +10,7 @@ VideoTuner bundles the following third-party software components. This document 
 | x265 Patman's Mod | GPL-2.0-or-later | <https://github.com/Patman86/x265-Mod-by-Patman> |
 | VapourSynth | LGPL-2.1-or-later | <https://github.com/vapoursynth/vapoursynth> |
 | vapoursynth-zip | MIT | <https://github.com/dnjulek/vapoursynth-zip> |
+| vs-tonemap | MIT + Apache-2.0 + BSL-1.0 | <https://github.com/sleepy-af-dev/vs-tonemap> |
 | FFMS2 | GPL-3.0 (binary) | <https://github.com/FFMS/ffms2> |
 | LSMASHSource | ISC + LGPL-2.1 | <https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works> |
 | L-SMASH | ISC | <https://github.com/l-smash/l-smash> |
@@ -17,7 +18,7 @@ VideoTuner bundles the following third-party software components. This document 
 
 ## Source Code Availability
 
-For GPL and LGPL licensed components, source code is available at the URLs listed above. You may also request source code by contacting the VideoTuner maintainers.
+For GPL and LGPL licensed components, the corresponding source is the upstream project linked in the table above. `build.py` pins the exact release or commit of every bundled component, so the source that matches a given binary is the one that pin names. FFMS2 is built from source during the release rather than downloaded, and its section below records the commit it was built from.
 
 ---
 
@@ -59,7 +60,7 @@ Full license text: [licenses/LGPL-2.1.txt](licenses/LGPL-2.1.txt)
 
 ## vapoursynth-zip (vszip)
 
-**Location:** `vapoursynth-portable/vs-plugins/vszip.dll`\
+**Location:** `vapoursynth-portable/vs-plugins/vszip/`, holding `vszip.dll`, its per-CPU variants and `manifest.vs`\
 **License:** MIT License\
 **Copyright:** Copyright (c) 2024 Julek
 
@@ -68,6 +69,24 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Full license text: [licenses/MIT.txt](licenses/MIT.txt)
+
+---
+
+## vs-tonemap
+
+**Location:** `vapoursynth-portable/vs-plugins/vs-tonemap/vs-tonemap.dll`, with `LICENSE` and `NOTICE` alongside\
+**License:** MIT License, statically linking Google Highway (Apache-2.0) and SLEEF (Boost Software License 1.0)\
+**Copyright:** Copyright (c) 2026 sleepy-af-dev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The plugin directory ships complete rather than as a bare DLL: `LICENSE` and `NOTICE` sit beside `vs-tonemap.dll`. The `NOTICE` carries the attribution that section 4 of the Apache License 2.0 requires a redistributor to pass on, and includes the full text of both that licence and the Boost Software License 1.0.
 
 Full license text: [licenses/MIT.txt](licenses/MIT.txt)
 
@@ -89,7 +108,7 @@ Full license text: [licenses/GPL-3.0.txt](licenses/GPL-3.0.txt)
 
 ## LSMASHSource
 
-**Location:** `vapoursynth-portable/vs-plugins/LSMASHSource.dll`\
+**Location:** `vapoursynth-portable/vs-plugins/LSMASHSource.dll`, `LSMASHSource_indexing.exe`\
 **License:** ISC License (L-SMASH portions) + LGPL-2.1 (VapourSynth portions)\
 **Copyright:** Copyright (C) 2011-2015 L-SMASH Works project contributors
 

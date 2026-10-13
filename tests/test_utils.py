@@ -15,6 +15,7 @@ from videotuner.utils import (
     ensure_dir,
     fit_path_segment,
     job_folder_budget,
+    master_display_arg,
     parse_master_display_metadata,
     resolve_run_folder,
     use_utf8_output,
@@ -196,9 +197,14 @@ class TestJobFolderBudget:
     def test_a_slug_shorter_than_the_fixed_dirs_does_not_win(
         self, tmp_path: Path
     ) -> None:
-        """Profile dirs sit beside reference/ and temp/, so the longest bounds it."""
+        """Profile dirs sit beside temp/, so the longest of them bounds it."""
+        # "abc" is shorter than temp/ and "abcde" is longer, so only the
+        # second one moves the budget.
         assert job_folder_budget(tmp_path, ["P"]) == job_folder_budget(
-            tmp_path, ["reference"]
+            tmp_path, ["abc"]
+        )
+        assert job_folder_budget(tmp_path, ["P"]) > job_folder_budget(
+            tmp_path, ["abcde"]
         )
 
     def test_longest_slug_wins(self, tmp_path: Path) -> None:
@@ -326,3 +332,24 @@ class TestUseUtf8Output:
         Console(file=stream, width=80).print(
             "VMAF Mean \u2265 95.0 \u2713 \u2717 \u26a0"
         )
+
+
+def test_master_display_arg_formats_a_declared_display() -> None:
+    got = master_display_arg("BT.2020", "min: 0.0001 cd/m2, max: 1000 cd/m2")
+    assert got is not None
+    assert got.startswith("G(")
+    assert got.endswith("L(10000000,1)")
+
+
+def test_master_display_arg_is_none_without_primaries() -> None:
+    # x265 writes --master-display only when both fields parse, so a
+    # half-declared display reaches a decoded frame as no properties at all.
+    assert master_display_arg(None, "min: 0.0001 cd/m2, max: 1000 cd/m2") is None
+
+
+def test_master_display_arg_is_none_without_luminance() -> None:
+    assert master_display_arg("BT.2020", None) is None
+
+
+def test_master_display_arg_is_none_when_the_pair_cannot_be_parsed() -> None:
+    assert master_display_arg("BT.2020", "not a luminance string") is None

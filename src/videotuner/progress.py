@@ -20,12 +20,13 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
+from rich.text import Text
 
 from .constants import PROGRESS_BAR_WIDTH
 from .encoder_type import EncoderType
 from .tool_parsers import (
     FFMPEG_FRAME_RE,
-    FFMSINDEX_PROGRESS_RE,
+    INDEX_PROGRESS_RE,
     MKVMERGE_PCT_RE,
     SSIM_LINE_RE,
     VSZIP_PROGRESS_RE,
@@ -37,6 +38,7 @@ from .tool_parsers import (
     X265_PROGRESS_RE,
     clean_ansi,
 )
+from .utils import USER_FACING
 from .version import __version__
 
 LineHandler = Callable[[str], bool]
@@ -399,18 +401,18 @@ class Stage:
 
         return handler
 
-    def make_ffmsindex_handler(self) -> LineHandler:
-        """Create a handler for ffmsindex progress output.
+    def make_index_handler(self) -> LineHandler:
+        """Create a handler for index-building progress output.
 
-        ffmsindex outputs progress in the format:
-            "Indexing, please wait... 0%"
-            "Indexing, please wait... 50%"
-            "Indexing, please wait... 100%"
+        Both indexers report a percentage, just with different surrounding
+        text:
+            "Indexing, please wait... 50%"       (ffmsindex)
+            "Creating lwi index file 50%"        (LSMASHSource_indexing)
         """
 
         def handler(line: str) -> bool:
             line = clean_ansi(line)
-            match = FFMSINDEX_PROGRESS_RE.search(line)
+            match = INDEX_PROGRESS_RE.search(line)
             if not match:
                 return False
 
@@ -522,3 +524,45 @@ class Stage:
             return True
 
         return handler
+
+
+class UserWarningHandler(logging.Handler):
+    """Prints the warnings ``warn_user`` marks, as they happen.
+
+    The job log takes every warning through its own handler. This one takes
+    the subset a user has to act on and prints it through the run's console,
+    so the transcript keeps those warnings in the order they happened.
+    """
+
+    def __init__(self, console: Console) -> None:
+        """Build the handler.
+
+        Args:
+            console: The run's console, normally the ``TeeConsole`` the
+                display owns, which also writes the transcript.
+        """
+        super().__init__(level=logging.WARNING)
+        self._console: Console = console
+
+    @override
+    def emit(self, record: logging.LogRecord) -> None:
+        """Print the record when it is marked user-facing.
+
+        The message is arbitrary text - it can interpolate a filename or an
+        exception string - so it is rendered as literal text via ``Text``
+        rather than as an f-string rich would parse for markup. That parse
+        would eat a bracketed filename fragment or raise on invalid markup,
+        so this also follows the stdlib handler contract: a failure here is
+        reported through ``handleError`` rather than raised, since
+        ``Logger.callHandlers`` does not catch and a broken warning must
+        never take the run down with it.
+
+        Args:
+            record: Record offered by the logging framework.
+        """
+        if not getattr(record, USER_FACING, False):
+            return
+        try:
+            self._console.print(Text(record.getMessage(), style="yellow"))
+        except Exception:
+            self.handleError(record)

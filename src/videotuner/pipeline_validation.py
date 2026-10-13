@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from .encoding_utils import is_hdr_video
 from .media import VideoInfo
+from .utils import warn_user
 
 if TYPE_CHECKING:
     from .pipeline_cli import PipelineArgs
@@ -220,7 +221,8 @@ def validate_metric_sampling(
     """
     # Check if region fits within usable frames
     if usable_frames < region_frames:
-        log.warning(
+        warn_user(
+            log,
             "Usable frames (%d) less than %s region size (%d) - disabling %s",
             usable_frames,
             metric_name.upper(),
@@ -240,7 +242,8 @@ def validate_metric_sampling(
     total_metric_frames = num_samples * region_frames
 
     if num_samples < 1:
-        log.warning(
+        warn_user(
+            log,
             "No %s samples possible with current parameters - disabling %s",
             metric_name.upper(),
             metric_name.upper(),
@@ -344,7 +347,7 @@ def check_sources_compatible(
     were asked for.
 
     Differing active area after crop detection is deliberately absent - that is
-    reconciled by taking the most aggressive crop, not rejected.
+    reconciled by taking the smallest crop, not rejected.
 
     Args:
         sources: One entry per file, in playback order

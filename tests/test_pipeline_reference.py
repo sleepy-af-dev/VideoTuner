@@ -1,17 +1,19 @@
-"""Tests for pipeline reference module."""
+"""Tests for pipeline_reference, and for the reference no longer being a file."""
 
 from __future__ import annotations
 
+import dataclasses
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from videotuner.encoding_utils import SampledSource, UsableRange
+from videotuner import pipeline_reference
+from videotuner.pipeline import run_pipeline
 from videotuner.pipeline_cli import PipelineArgs
-from videotuner.pipeline_reference import (
-    MetricSamplingParams,
-    are_sampling_params_equal,
-)
+from videotuner.pipeline_reference import are_sampling_params_equal
+from videotuner.pipeline_types import IterationContext
 
 
 class TestAreSamplingParamsEqual:
@@ -128,65 +130,131 @@ class TestAreSamplingParamsEqual:
         assert are_sampling_params_equal(args) is True
 
 
-class TestMetricSamplingParams:
-    """How a metric samples the source a job reads, across one file or several."""
+def test_no_lossless_reference_is_generated() -> None:
+    # Both metrics select their reference frames from the source with the
+    # same script the encoder is fed, proven frame-identical in
+    # tests/test_frame_accuracy.py, so encoding a reference copy is work
+    # with no product.
+    #
+    # On its own this only says one name is absent: reference generation
+    # reintroduced under any other name passes it. The run below is what
+    # actually holds the line.
+    assert not hasattr(pipeline_reference, "generate_metric_reference")
 
-    @staticmethod
-    def _source(name: str, start: int, end: int) -> SampledSource:
-        return SampledSource(
-            path=Path(f"{name}.mkv"),
-            cache_file=Path(f"{name}.ffindex"),
-            usable_range=UsableRange(start=start, end=end, frame_count=end - start),
+
+def test_no_iteration_can_be_pointed_at_a_reference_file() -> None:
+    # The same shape of claim about the field a path would travel through,
+    # and the same limitation.
+    fields = {f.name for f in dataclasses.fields(IterationContext)}
+    assert "vmaf_ref_path" not in fields
+    assert "ssim2_ref_path" not in fields
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+VS_PYTHON = REPO_ROOT / "vapoursynth-portable" / "python.exe"
+VS_PLUGINS = REPO_ROOT / "vapoursynth-portable" / "vs-plugins"
+X265_BIN = REPO_ROOT / "tools" / "x265.exe"
+
+
+def _ffmpeg_lists(kind: str, needle: str) -> bool:
+    """Ask the ffmpeg on PATH whether it carries something this run needs.
+
+    Args:
+        kind: The listing to read, ``"encoders"`` or ``"filters"``.
+        needle: Name to look for in it.
+
+    Returns:
+        True when ffmpeg runs and its listing mentions the name.
+    """
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-hide_banner", f"-{kind}"],
+            capture_output=True,
+            text=True,
+            check=False,
         )
+    except FileNotFoundError:
+        return False
+    return needle in proc.stdout
 
-    def test_is_frozen(self) -> None:
-        params = MetricSamplingParams(
-            interval_frames=1600,
-            region_frames=20,
-            sources=(self._source("one", 0, 10000),),
-        )
-        with pytest.raises(AttributeError):
-            setattr(params, "interval_frames", 1)
 
-    def test_num_samples_for_one_file(self) -> None:
-        params = MetricSamplingParams(
-            interval_frames=100,
-            region_frames=50,
-            sources=(self._source("one", 0, 1000),),
-        )
-        # (1000 + 100 - 50) // 100 = 10
-        assert params.num_samples == 10
-        assert params.total_sample_frames == 500
+requires_a_real_run = pytest.mark.skipif(
+    not VS_PYTHON.exists()
+    or not VS_PLUGINS.exists()
+    or not X265_BIN.exists()
+    or shutil.which("mkvmerge") is None
+    or not _ffmpeg_lists("encoders", "libx265")
+    or not _ffmpeg_lists("filters", "libvmaf"),
+    reason="a real run needs VapourSynth, x265, mkvmerge and ffmpeg with libvmaf",
+)
 
-    def test_samples_are_counted_per_file_then_summed(self) -> None:
-        """Each file is sampled on its own, so short files still contribute."""
-        params = MetricSamplingParams(
-            interval_frames=100,
-            region_frames=50,
-            sources=(
-                self._source("one", 0, 1000),
-                self._source("two", 0, 1000),
-            ),
-        )
 
-        assert params.num_samples == 20
-        assert params.total_sample_frames == 1000
+@requires_a_real_run
+def test_a_run_writes_no_reference_and_still_scores_both_metrics(
+    tmp_path: Path,
+) -> None:
+    # The check the two above cannot make. Reference generation reintroduced
+    # under any name puts a file in the job folder and this fails, whatever
+    # the function is called; and demanding both scores from the same run
+    # rules out passing by having quietly dropped a metric instead.
+    source = tmp_path / "source.mkv"
+    _ = subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=640x360:rate=24:duration=8",
+            "-pix_fmt",
+            "yuv420p10le",
+            "-c:v",
+            "libx265",
+            "-x265-params",
+            "lossless=1:colorprim=bt709:transfer=bt709"
+            + ":colormatrix=bt709:repeat-headers=1",
+            str(source),
+        ],
+        capture_output=True,
+        check=True,
+    )
 
-    def test_a_file_shorter_than_the_interval_still_contributes(self) -> None:
-        params = MetricSamplingParams(
-            interval_frames=1600,
-            region_frames=20,
-            sources=(
-                self._source("long", 0, 10000),
-                self._source("short", 0, 500),
-            ),
-        )
+    workdir = tmp_path / "jobs"
+    result = run_pipeline(
+        PipelineArgs(
+            input=source,
+            workdir=workdir,
+            encoder="x265",
+            preset="ultrafast",
+            assessment_only=True,
+            crf_start_value=32.0,
+            # Both metrics sample identically, so one encode serves both and
+            # the run exercises the shared-sample path.
+            vmaf_interval_frames=48,
+            vmaf_region_frames=4,
+            ssim2_interval_frames=48,
+            ssim2_region_frames=4,
+            crop_detect=False,
+        ),
+        show_title=False,
+    )
 
-        assert (
-            params.num_samples
-            > MetricSamplingParams(
-                interval_frames=1600,
-                region_frames=20,
-                sources=(self._source("long", 0, 10000),),
-            ).num_samples
-        )
+    assert result.ok, result.status
+
+    written = sorted(
+        path.relative_to(workdir).as_posix()
+        for path in workdir.rglob("*")
+        if path.is_file()
+    )
+    # Every name the reference ever went by, plus the raw bitstreams it was
+    # muxed from, anywhere in the tree rather than in the folder it used to
+    # live in - a reference written somewhere else is still a reference.
+    assert [name for name in written if "reference" in name.lower()] == [], written
+    assert [
+        name for name in written if name.endswith((".hevc", ".265", ".h264"))
+    ] == [], written
+
+    assert result.scores.get("vmaf_mean") is not None, result.scores
+    assert result.scores.get("ssim2_mean") is not None, result.scores

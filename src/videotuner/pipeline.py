@@ -3,37 +3,43 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from datetime import datetime
 from itertools import count
 from pathlib import Path
+
+from rich.markup import escape
 
 from .budget_search import run_budget_search, select_within_budget
 from .constants import (
     CRF_SEARCH_MAX_ITERATIONS,
     METRIC_DECIMALS,
 )
-from .create_encodes import (
-    build_ffms2_index,
-    calculate_cropdetect_values,
-)
 from .crf_search import (
     CRFFloorError,
     CRFSearchState,
     QualityTarget,
 )
+from .cropdetect import calculate_cropdetect_values, cropdetect_sample_plan
 from .encoding_utils import (
     CropValues,
+    IndexerType,
     SampledSource,
     UsableRange,
+    build_source_index,
     combine_crop_values,
+    indexer_spec,
     is_hdr_video,
+    read_indexed_frame_count,
 )
 from .media import (
     InvalidVideoFileError,
+    VideoInfo,
     combine_video_info,
     get_frame_count,
     parse_video_info,
 )
+from .metric_colour import SSIM2_TONEMAP_BACKEND, colour_assumption_notes
 from .pipeline_cli import (
     PipelineArgs,
     build_arg_parser,
@@ -55,26 +61,22 @@ from .pipeline_multi_profile import (
     rank_profile_results,
     run_multi_profile_search,
 )
-from .pipeline_reference import (
-    MetricSamplingParams,
-    are_sampling_params_equal,
-    generate_metric_reference,
-)
+from .pipeline_reference import are_sampling_params_equal
 from .pipeline_types import (
     Budget,
     BudgetPoint,
     IterationContext,
     JobResult,
-    get_reference_dir,
 )
 from .pipeline_validation import (
+    AssessmentError,
     build_targets,
     check_sources_compatible,
     has_targets,
     validate_sampling_parameters,
 )
 from .profiles import Profile
-from .progress import PipelineDisplay, TranscriptFormatter
+from .progress import PipelineDisplay, TranscriptFormatter, UserWarningHandler
 from .ssimulacra2_assessment import SSIM2Result
 from .utils import (
     configure_logging,
@@ -85,8 +87,14 @@ from .utils import (
     resolve_run_folder,
     sanitize_filename,
     use_utf8_output,
+    warn_user,
 )
-from .vmaf_assessment import VMAFResult
+from .vmaf_assessment import (
+    VMAFResult,
+    resolve_vmaf_choice,
+    vmaf_v1_available,
+)
+from .vmaf_types import VmafFamily, VmafModelChoice
 
 
 def _budget_encoder(
@@ -189,6 +197,45 @@ def _report_within_budget(
     )
 
 
+def _with_counted_frames(
+    source: Path,
+    cache_file: Path,
+    indexer: IndexerType,
+    info: VideoInfo,
+    log: logging.Logger,
+) -> VideoInfo:
+    """Replace an estimated frame count with the one the index reports.
+
+    Args:
+        source: Video whose count was estimated.
+        cache_file: Its index, already built.
+        indexer: Source filter to open it with.
+        info: Probe carrying the estimate.
+        log: Logger for the difference, when there is one.
+
+    Returns:
+        ``info`` with the true count, or unchanged if it could not be read.
+    """
+    counted = read_indexed_frame_count(
+        source, cache_file, indexer=indexer, cwd=Path.cwd()
+    )
+    if counted is None or counted == info.frame_count:
+        return info
+
+    # Worth saying out loud: the estimate decides how many samples are planned,
+    # and an overshoot silently costs coverage when the trim clamps. A user who
+    # sees this knows why their sample count moved.
+    warn_user(
+        log,
+        "%s reports no frame count. Estimated %s frames from its rate and "
+        + "duration; the index holds %d. Using the index.",
+        source.name,
+        info.frame_count,
+        counted,
+    )
+    return replace(info, frame_count=counted, frame_count_estimated=False)
+
+
 def run_pipeline(
     args: PipelineArgs, *, show_title: bool = True, job_folder: Path | None = None
 ) -> JobResult:
@@ -206,6 +253,13 @@ def run_pipeline(
     pre_existing = set(map(id, root.handlers))
     try:
         return _run_pipeline_body(args, show_title=show_title, job_folder=job_folder)
+    except AssessmentError as e:
+        # Neither metric produced a score, so the search cannot go on. The job
+        # log already has the details; a traceback adds nothing to act on.
+        PipelineDisplay(show_title=False).console.print(
+            f"\n[bold red]Error:[/bold red] {escape(str(e))}\n"
+        )
+        return JobResult.failure(Path(args.input), "assessment failed")
     finally:
         for handler in list(root.handlers):
             if id(handler) not in pre_existing:
@@ -227,6 +281,14 @@ def _run_pipeline_body(
     crop_detect: bool = bool(args.crop_detect)
 
     display = PipelineDisplay(show_title=show_title)
+
+    # Warnings a user has to act on go to the terminal as well as the log.
+    # Attached here, right after the console exists, so it covers probing
+    # below as well as everything after. The file logger below attaches
+    # later, once the workdir is resolved, so a warning raised before that
+    # point reaches the terminal but not the job log - a narrower gap than
+    # the one this closes, and not one this handler can close on its own.
+    logging.getLogger().addHandler(UserWarningHandler(display.console))
 
     # Configure logging (file-only; console output is driven by the Rich UI)
     level = configure_logging(verbose=bool(args.verbose), quiet=bool(args.quiet))
@@ -260,7 +322,11 @@ def _run_pipeline_body(
     log.info("Probing input with ffprobe ...")
     ffprobe_bin: str = args.ffprobe_bin
     try:
-        infos = [parse_video_info(p, ffprobe_bin=ffprobe_bin) for p in source_paths]
+        # Reported rather than silent: logging is file-only, and every source
+        # costs an ffprobe plus a full MediaInfo scan, so this is several
+        # seconds of apparently dead terminal on a large file.
+        with display.stage(f"Probing {input_path.name}"):
+            infos = [parse_video_info(p, ffprobe_bin=ffprobe_bin) for p in source_paths]
     except InvalidVideoFileError as e:
         display.console.print(f"\n[bold red]Error:[/bold red] {e}\n")
         log.error("Invalid video file: %s", e)
@@ -355,10 +421,53 @@ def _run_pipeline_body(
     except OSError as e:
         log.warning("Failed to log file/job folder paths due to OSError: %s", e)
 
+    # Both VMAF and SSIMULACRA2 tonemap an HDR input with the same operator,
+    # since neither metric is defined on HDR. Named once: a single line covers
+    # whichever of them is enabled, or both.
+    tonemap_operator: str | None = None
+    if (args.vmaf or args.ssim2) and is_hdr_video(info.color_trc):
+        tonemap_operator = SSIM2_TONEMAP_BACKEND
+
+    # Once per run rather than once per CRF iteration: both assumptions
+    # follow from this probe and hold for every assessment that follows.
+    # Both metrics share the same colour chain, so either one enabled is
+    # enough for an assumed tag or mastering peak to shape its score.
+    if args.vmaf or args.ssim2:
+        for note in colour_assumption_notes(info):
+            warn_user(log, note)
+
+    # Settle the model generation once. The probe costs about 0.07s and must not
+    # run per CRF iteration; it is skipped entirely when its answer cannot
+    # change anything.
+    vmaf_choice: VmafModelChoice | None = None
+    vmaf_family = VmafFamily.V1
+    if args.vmaf:
+        needs_probe = args.vmaf_model is None and not args.v0_vmaf
+        vmaf_choice = resolve_vmaf_choice(
+            args.vmaf_model,
+            use_v0=args.v0_vmaf,
+            v1_available=vmaf_v1_available(args.ffmpeg_bin) if needs_probe else False,
+        )
+        vmaf_family = vmaf_choice.family
+        if vmaf_choice.fell_back:
+            # v1 scores are calibrated to the v0 scale, so an unnoticed fallback
+            # produces numbers that pass for v1 against a v1 target.
+            warn_user(
+                log,
+                "VMAF v1 models not found; scoring with the legacy v0 models. "
+                + "Scores are not comparable with v1. This needs libvmaf 3.2.0 or "
+                + "newer, which is not the same thing as a newer FFmpeg.",
+            )
+
     # Display active settings summary. The console tees this into the log, so
     # there is no second hand-written copy of it here.
     display_settings_summary(
-        display.console, args, multi_profile_display, input_path.name
+        display.console,
+        args,
+        multi_profile_display,
+        input_path.name,
+        tonemap_operator=tonemap_operator,
+        vmaf_choice=vmaf_choice,
     )
 
     # Validate HDR + x264 combination (x264 cannot carry HDR10 metadata)
@@ -416,32 +525,47 @@ def _run_pipeline_body(
         log.error("Reduce guard settings")
         return JobResult.failure(input_path, "guard bands leave no usable duration")
 
-    # Build FFMS2 index for source (shared across cropdetect and all encodes)
-    # This is done BEFORE cropdetect to avoid delays during crop detection
-    # Index is stored alongside the source file for persistence across job runs
-    cache_files = {p: p.parent / f"{p.stem}.ffindex" for p in source_paths}
+    # Build the source index once, shared across cropdetect and all encodes.
+    # Done BEFORE cropdetect to avoid delays during crop detection, and stored
+    # alongside the source file for persistence across job runs.
+    spec = indexer_spec(args.indexer)
+    cache_files = {p: p.parent / f"{p.stem}{spec.index_suffix}" for p in source_paths}
     if crop_detect or args.vmaf or args.ssim2:
         for source in source_paths:
             cache_file = cache_files[source]
             # Only build if index doesn't exist
             if not cache_file.exists():
                 with display.stage(
-                    f"Building FFMS2 Index ({source.name})",
-                    total=1,  # Placeholder - updated when ffmsindex reports frames
+                    f"Building {spec.display_name} Index ({source.name})",
+                    total=1,  # Placeholder - updated when the indexer reports frames
                     show_eta=True,
                     transient=True,  # Transient to avoid duplicate header line
                     show_done=True,
                 ) as index_stage:
-                    _ = build_ffms2_index(
+                    _ = build_source_index(
                         source_path=source,
                         cache_file=cache_file,
+                        indexer=args.indexer,
                         cwd=repo_root,
-                        line_handler=index_stage.make_ffmsindex_handler(),
+                        line_handler=index_stage.make_index_handler(),
                     )
             else:
                 display.console.print(
-                    f"[cyan]Using Existing FFMS2 Index[/cyan] ({source.name})"
+                    f"[cyan]Using Existing {spec.display_name} Index[/cyan] "
+                    + f"({source.name})"
                 )
+
+        # A source that reported no frame count was estimated as a rate times
+        # a duration, which no single rate describes for a variable frame rate
+        # file. The index is on disk now, so the real count is a cheap read
+        # away, and it is the number every sampling script will see.
+        infos = [
+            _with_counted_frames(source, cache_files[source], args.indexer, info, log)
+            if info.frame_count_estimated
+            else info
+            for source, info in zip(source_paths, infos, strict=True)
+        ]
+        info = combine_video_info(infos)
 
     log_section(log, "Analysis")
 
@@ -450,15 +574,23 @@ def _run_pipeline_body(
 
     if crop_detect:
         # Each file is measured on its own and the results combined, taking the
-        # most aggressive crop per edge: splicing needs matching dimensions, and
-        # cropping more can only remove border, never reinstate content.
+        # smallest crop per edge: splicing needs matching dimensions, and a file
+        # whose frames reach the edge is reporting content, not a bad
+        # measurement. Same direction frames combine within a file, so the split
+        # into two steps changes no answer.
         measured: list[CropValues] = []
         for source, source_info in zip(source_paths, infos, strict=True):
             source_frames = get_frame_count(source, source_info)
-            # Calculate expected sample count for progress bar
-            _skip = max(1, int(source_frames * 0.10))
-            _step = max(1, round(source_info.fps * args.cropdetect_interval))
-            expected_samples = len(range(_skip, source_frames - _skip, _step))
+            # One plan, used for both the progress total and the script, so
+            # the bar cannot describe a different set of frames from the one
+            # analysed.
+            plan = cropdetect_sample_plan(
+                start_frame=0,
+                num_frames=source_frames,
+                fps=source_info.fps,
+                interval=args.cropdetect_interval,
+            )
+            expected_samples = plan.count if plan is not None else 0
             log.info(
                 "Detecting crop in %s (%d frames, %d samples)...",
                 source.name,
@@ -481,19 +613,17 @@ def _run_pipeline_body(
                         start_frame=0,
                         num_frames=source_frames,
                         fps=source_info.fps,
-                        is_hdr=is_hdr_video(source_info.color_trc),
+                        info=source_info,
+                        cache_file=cache_files[source],
+                        indexer=args.indexer,
                         interval=args.cropdetect_interval,
                         ffmpeg_bin=args.ffmpeg_bin,
                         source_width=source_info.width or 0,
                         source_height=source_info.height or 0,
                         cwd=repo_root,
                         line_handler=cropdetect_stage.make_cropdetect_handler(),
-                        cropdetect_mode=args.cropdetect_mode,
                         cropdetect_limit=args.cropdetect_limit,
                         cropdetect_round=args.cropdetect_round,
-                        cropdetect_mv_threshold=args.cropdetect_mv_threshold,
-                        cropdetect_low=args.cropdetect_low,
-                        cropdetect_high=args.cropdetect_high,
                     )
                 )
 
@@ -592,113 +722,15 @@ def _run_pipeline_body(
         log.error("No metrics have valid samples - cannot proceed")
         return JobResult.failure(input_path, "no valid samples")
 
-    log_section(log, "Reference Generation")
-
-    # Always use x265 for lossless reference: both x264 (--qp 0) and x265
-    # (--lossless) produce visually identical output, but x265 handles HDR
-    # content which x264 cannot.
-    from .encoder_type import EncoderType
-
-    lossless_encoder = EncoderType.X265
-
-    # Create concatenated reference files for each metric
-    lossless_profile = Profile(
-        name="lossless",
-        description="Lossless reference extraction",
-        settings={"preset": "ultrafast"},
-        encoder=lossless_encoder,
-    )
-
-    vmaf_ref_path: Path | None = None
-    ssim2_ref_path: Path | None = None
-    reference_dir = get_reference_dir(workdir)
-
-    # Check if we can share samples between metrics (identical sampling parameters)
+    # Both metrics take their reference frames from the sampling script, the
+    # same one the encoder is fed, so the only question left here is whether
+    # they select the same frames and can therefore share one encode.
     sharing_samples = are_sampling_params_equal(args)
-
     if sharing_samples:
-        # Generate ONE shared reference file for both metrics
         log.info(
             "Using shared samples for VMAF and SSIM2 (identical sampling parameters)"
         )
         display.console.print("[cyan]Using shared samples for VMAF and SSIM2[/cyan]")
-
-        shared_sampling = MetricSamplingParams(
-            interval_frames=args.vmaf_interval_frames,  # Same as ssim2
-            region_frames=args.vmaf_region_frames,  # Same as ssim2
-            sources=tuple(sampled_sources),
-        )
-        shared_ref_path = generate_metric_reference(
-            metric_type="shared",
-            output_dir=reference_dir,
-            sampling_params=shared_sampling,
-            fps=info.fps,
-            lossless_profile=lossless_profile,
-            video_info=info,
-            mkvmerge_bin=args.mkvmerge_bin,
-            repo_root=repo_root,
-            temp_dir=temp_dir,
-            display=display,
-            log=log,
-            crop_detect=crop_detect,
-            crop_values=crop_values,
-        )
-        if shared_ref_path is None:
-            args.vmaf = False
-            args.ssim2 = False
-        else:
-            # Point both metrics to the same reference file
-            vmaf_ref_path = shared_ref_path
-            ssim2_ref_path = shared_ref_path
-    else:
-        # Generate separate references for each metric (different sampling parameters)
-        if args.vmaf:
-            vmaf_sampling = MetricSamplingParams(
-                interval_frames=args.vmaf_interval_frames,
-                region_frames=args.vmaf_region_frames,
-                sources=tuple(sampled_sources),
-            )
-            vmaf_ref_path = generate_metric_reference(
-                metric_type="vmaf",
-                output_dir=reference_dir,
-                sampling_params=vmaf_sampling,
-                fps=info.fps,
-                lossless_profile=lossless_profile,
-                video_info=info,
-                mkvmerge_bin=args.mkvmerge_bin,
-                repo_root=repo_root,
-                temp_dir=temp_dir,
-                display=display,
-                log=log,
-                crop_detect=crop_detect,
-                crop_values=crop_values,
-            )
-            if vmaf_ref_path is None:
-                args.vmaf = False
-
-        if args.ssim2:
-            ssim2_sampling = MetricSamplingParams(
-                interval_frames=args.ssim2_interval_frames,
-                region_frames=args.ssim2_region_frames,
-                sources=tuple(sampled_sources),
-            )
-            ssim2_ref_path = generate_metric_reference(
-                metric_type="ssim2",
-                output_dir=reference_dir,
-                sampling_params=ssim2_sampling,
-                fps=info.fps,
-                lossless_profile=lossless_profile,
-                video_info=info,
-                mkvmerge_bin=args.mkvmerge_bin,
-                repo_root=repo_root,
-                temp_dir=temp_dir,
-                display=display,
-                log=log,
-                crop_detect=crop_detect,
-                crop_values=crop_values,
-            )
-            if ssim2_ref_path is None:
-                args.ssim2 = False
 
     # Build targets (needed for any search module)
     has_quality_targets = has_targets(args)
@@ -751,13 +783,12 @@ def _run_pipeline_body(
             total_frames=total_frames,
             guard_start_frames=guard_start_frames,
             guard_end_frames=guard_end_frames,
-            vmaf_ref_path=vmaf_ref_path,
-            ssim2_ref_path=ssim2_ref_path,
             args=args,
             display=display,
             log=log,
             crop_values=crop_values,
             sharing_samples=sharing_samples,
+            vmaf_family=vmaf_family,
         )
 
         # Detect bitrate vs CRF mode
@@ -824,13 +855,12 @@ def _run_pipeline_body(
             total_frames=total_frames,
             guard_start_frames=guard_start_frames,
             guard_end_frames=guard_end_frames,
-            vmaf_ref_path=vmaf_ref_path,
-            ssim2_ref_path=ssim2_ref_path,
             args=args,
             display=display,
             log=log,
             crop_values=crop_values,
             sharing_samples=sharing_samples,
+            vmaf_family=vmaf_family,
         )
 
         budget_ctx = ctx
@@ -1042,13 +1072,12 @@ def _run_pipeline_body(
                 total_frames=total_frames,
                 guard_start_frames=guard_start_frames,
                 guard_end_frames=guard_end_frames,
-                vmaf_ref_path=vmaf_ref_path,
-                ssim2_ref_path=ssim2_ref_path,
                 args=args,
                 display=display,
                 log=log,
                 crop_values=crop_values,
                 sharing_samples=sharing_samples,
+                vmaf_family=vmaf_family,
             )
 
         # Run multi-profile search

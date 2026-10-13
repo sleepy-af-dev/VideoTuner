@@ -8,6 +8,7 @@ construction, and comprehensive argument validation.
 from __future__ import annotations
 
 import argparse
+import os
 from collections.abc import Iterable
 from dataclasses import MISSING, dataclass, fields
 from pathlib import Path
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from .constants import METRIC_DECIMALS
 from .encoder_type import EncoderType
+from .encoding_utils import IndexerType
 
 if TYPE_CHECKING:
     from .profiles import Profile
@@ -38,6 +40,7 @@ class PipelineArgs:
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
     mkvmerge_bin: str = "mkvmerge"
+    indexer: IndexerType = IndexerType.FFMS2
 
     encoder: str | None = None  # "x264" or "x265"; required with --preset
     profile: str | None = None
@@ -65,25 +68,19 @@ class PipelineArgs:
 
     vmaf: bool = True
     vmaf_model: str | None = None
-    vmaf_log: Path | None = None
-    tonemap: str = "auto"
+    v0_vmaf: bool = False
 
     guard_start_percent: float = 0.0
     guard_end_percent: float = 0.0
     guard_seconds: float = 0.0
 
     ssim2: bool = True
-    ssim2_log: Path | None = None
     vs_dir: Path | None = None
     vs_plugin_dir: Path | None = None
     crop_detect: bool = True
     cropdetect_interval: int = 30
-    cropdetect_mode: str = "black"
     cropdetect_limit: int | None = None
     cropdetect_round: int = 2
-    cropdetect_mv_threshold: int | None = None
-    cropdetect_low: float | None = None
-    cropdetect_high: float | None = None
     predicted_bitrate_warning_percent: float | None = None
     show_best_within_budget: bool = False
     continue_budget_search: bool = False
@@ -221,15 +218,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=_get_default("cropdetect_interval"),
         dest="cropdetect_interval",
-        help=f"Seconds between sampled frames for crop detection (default: {_get_default('cropdetect_interval')})",  # noqa: E501  # TODO(E501): shorten line
-    )
-    _ = cropdetect_group.add_argument(
-        "--cropdetect-mode",
-        type=str,
-        choices=["black", "mvedges"],
-        default=_get_default("cropdetect_mode"),
-        dest="cropdetect_mode",
-        help="Detection mode: black (pixel threshold) or mvedges (motion + edges)",
+        help=f"Ceiling on seconds between sampled frames for crop detection; lowered when it would sample fewer than five (default: {_get_default('cropdetect_interval')})",  # noqa: E501  # TODO(E501): shorten line
     )
     _ = cropdetect_group.add_argument(
         "--cropdetect-limit",
@@ -244,27 +233,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=_get_default("cropdetect_round"),
         dest="cropdetect_round",
         help=f"Crop dimension divisibility (default: {_get_default('cropdetect_round')}). Use 16 for best codec alignment.",  # noqa: E501  # TODO(E501): shorten line
-    )
-    _ = cropdetect_group.add_argument(
-        "--cropdetect-mv-threshold",
-        type=int,
-        default=_get_default("cropdetect_mv_threshold"),
-        dest="cropdetect_mv_threshold",
-        help="Motion vector threshold in pixels (default: FFmpeg's 8)",
-    )
-    _ = cropdetect_group.add_argument(
-        "--cropdetect-low",
-        type=float,
-        default=_get_default("cropdetect_low"),
-        dest="cropdetect_low",
-        help="Canny low threshold 0.0-1.0 (default: FFmpeg's ~0.02)",
-    )
-    _ = cropdetect_group.add_argument(
-        "--cropdetect-high",
-        type=float,
-        default=_get_default("cropdetect_high"),
-        dest="cropdetect_high",
-        help="Canny high threshold 0.0-1.0 (default: FFmpeg's ~0.06)",
     )
 
     # -------------------------------------------------------------------------
@@ -387,10 +355,25 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="VMAF model name or path (default: auto-select by resolution)",
     )
     _ = analysis_group.add_argument(
-        "--tonemap",
-        choices=["auto", "force", "off"],
-        default=_get_default("tonemap"),
-        help="HDR tonemapping: auto|force|off (default: auto)",
+        "--v0-vmaf",
+        action="store_true",
+        default=_get_default("v0_vmaf"),
+        help=(
+            "Score with the legacy v0 models, measuring at the encode bit depth"
+            " as earlier releases did, for comparison against them"
+        ),
+    )
+    _ = analysis_group.add_argument(
+        "--indexer",
+        type=IndexerType,
+        choices=list(IndexerType),
+        default=_get_default("indexer"),
+        help=(
+            "Source filter used to read and index video: ffms2|lsmash"
+            " (default: ffms2). Applies to every operation that builds an"
+            " index. Cropdetect and VMAF read through FFmpeg and index"
+            " nothing, so they are unaffected"
+        ),
     )
     p.set_defaults(vmaf=_get_default("vmaf"), ssim2=_get_default("ssim2"))
 
@@ -505,20 +488,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=_get_default("vs_plugin_dir"),
         help="VapourSynth plugin directory",
     )
-    _ = paths_group.add_argument(
-        "--vmaf-log",
-        type=Path,
-        metavar="PATH",
-        default=_get_default("vmaf_log"),
-        help="VMAF JSON log path (default: under workdir)",
-    )
-    _ = paths_group.add_argument(
-        "--ssim2-log",
-        type=Path,
-        metavar="PATH",
-        default=_get_default("ssim2_log"),
-        help="SSIMULACRA2 JSON log path (default: under workdir)",
-    )
 
     # -------------------------------------------------------------------------
     # Logging
@@ -537,7 +506,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         nargs="?",
         const="",
         default=_get_default("log_file"),
-        help="Write summary log to file (default: <workdir>/<name>.log)",
+        help="Write the job log to PATH (default: job.log in the run folder)",
     )
 
     return p
@@ -557,6 +526,15 @@ def parse_cli(argv: Iterable[str] | None = None) -> PipelineArgs:
     # it, so the two never have to be passed together.
     if getattr(parsed, "continue_budget_search", False):
         parsed.show_best_within_budget = True
+
+    # Indexing, encoding, VapourSynth and FFmpeg run from other folders, so every
+    # path the user gives is made absolute against the folder they ran from. A
+    # relative one resolved against the wrong folder: the input could not be
+    # opened, and a relative work folder or --vs-dir lost the metrics.
+    for name in ("input", "workdir", "vs_dir", "vs_plugin_dir"):
+        value = getattr(parsed, name, None)
+        if isinstance(value, Path):
+            setattr(parsed, name, Path(os.path.abspath(value)))
 
     return PipelineArgs(**vars(parsed))  # pyright: ignore[reportAny]
 
@@ -752,22 +730,6 @@ def validate_cropdetect_args(
     if args.cropdetect_limit is not None and not (0 <= args.cropdetect_limit <= 255):
         parser.error(
             f"--cropdetect-limit must be between 0 and 255 (got {args.cropdetect_limit})"  # noqa: E501  # TODO(E501): shorten line
-        )
-    if args.cropdetect_low is not None and not (0.0 <= args.cropdetect_low <= 1.0):
-        parser.error(
-            f"--cropdetect-low must be between 0.0 and 1.0 (got {args.cropdetect_low})"
-        )
-    if args.cropdetect_high is not None and not (0.0 <= args.cropdetect_high <= 1.0):
-        parser.error(
-            f"--cropdetect-high must be between 0.0 and 1.0 (got {args.cropdetect_high})"  # noqa: E501  # TODO(E501): shorten line
-        )
-    if (
-        args.cropdetect_low is not None
-        and args.cropdetect_high is not None
-        and args.cropdetect_low > args.cropdetect_high
-    ):
-        parser.error(
-            f"--cropdetect-low ({args.cropdetect_low}) must be <= --cropdetect-high ({args.cropdetect_high})"  # noqa: E501  # TODO(E501): shorten line
         )
 
 

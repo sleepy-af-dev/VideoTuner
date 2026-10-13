@@ -166,13 +166,10 @@ def build_global_x265_params(
         x265_params.extend(["--chromaloc", str(chroma_location)])
 
     # Preserve HDR mastering display metadata if present
-    if "master-display" not in skip and (
-        video_info.mastering_display_color_primaries
-        and video_info.mastering_display_luminance
-    ):
-        from .utils import parse_master_display_metadata
+    if "master-display" not in skip:
+        from .utils import master_display_arg
 
-        master_display = parse_master_display_metadata(
+        master_display = master_display_arg(
             video_info.mastering_display_color_primaries,
             video_info.mastering_display_luminance,
         )

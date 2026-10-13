@@ -17,6 +17,7 @@ from .pipeline_cli import PipelineArgs
 from .profiles import Profile
 from .progress import PipelineDisplay
 from .utils import ensure_dir
+from .vmaf_types import VmafFamily
 
 
 @dataclass
@@ -43,10 +44,6 @@ class IterationContext:
     guard_start_frames: int
     guard_end_frames: int
 
-    # Reference files (single concatenated file per metric)
-    vmaf_ref_path: Path | None
-    ssim2_ref_path: Path | None
-
     # Command-line args
     args: PipelineArgs
 
@@ -59,6 +56,10 @@ class IterationContext:
 
     # Sample sharing: True when VMAF and SSIM2 use identical sampling parameters
     sharing_samples: bool = False
+
+    # VMAF model generation, settled once before the run rather than per
+    # iteration, since it depends on a probe that must not repeat.
+    vmaf_family: VmafFamily = VmafFamily.V1
 
     @property
     def usable_frames(self) -> int:
@@ -175,19 +176,6 @@ def _profile_slug(profile: Profile) -> str:
         # Case-insensitive: Windows would treat "Temp" and "temp" as one folder.
         return f"{slug}_profile"
     return slug
-
-
-def get_reference_dir(workdir: Path) -> Path:
-    """Get path to reference files directory, creating if needed.
-
-    Args:
-        workdir: Working directory for the job
-
-    Returns:
-        Path to reference directory
-    """
-    ref_dir = workdir / "reference"
-    return ensure_dir(ref_dir)
 
 
 def get_profile_dir(workdir: Path, profile: Profile) -> Path:

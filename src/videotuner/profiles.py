@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, cast
 import yaml
 
 from .encoder_type import EncoderType
-from .utils import get_app_root
+from .utils import get_app_root, warn_user
 
 if TYPE_CHECKING:
     from .media import VideoFormat, VideoInfo
@@ -336,7 +336,8 @@ class Profile:
                         params.extend([f"--{key}", str(conditional_value)])
                 else:
                     # Unknown dict structure, skip with warning
-                    logger.warning(
+                    warn_user(
+                        logger,
                         "Skipping parameter '%s': unrecognized dict structure (expected 'hdr' and 'sdr' keys)",  # noqa: E501  # TODO(E501): shorten line
                         key,
                     )
@@ -468,7 +469,8 @@ class Profile:
                     elif conditional_value is not None:
                         params.extend([f"--{key}", str(conditional_value)])
                 else:
-                    logger.warning(
+                    warn_user(
+                        logger,
                         "Skipping parameter '%s': unrecognized dict structure (expected 'hdr' and 'sdr' keys)",  # noqa: E501  # TODO(E501): shorten line
                         key,
                     )

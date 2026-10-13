@@ -267,6 +267,28 @@ def configure_logging(*, verbose: bool = False, quiet: bool = False) -> int:
     return level
 
 
+#: Marks a log record whose message the user needs to see, not only the job
+#: log. An assumption, a fallback, or a scope reduction that changes what a
+#: run measures qualifies. A failure the user cannot act on, and an outcome
+#: the results tables already report, does not.
+USER_FACING = "user_facing"
+
+
+def warn_user(log: logging.Logger, message: str, *args: object) -> None:
+    """Log a warning and show it on the terminal.
+
+    ``UserWarningHandler`` prints every record this marks, so a caller cannot
+    report a fallback to the job log and forget the terminal. Formatting is
+    left to logging, so the arguments are the same as ``log.warning``.
+
+    Args:
+        log: Logger of the calling module, so the record keeps its origin.
+        message: Warning message, with ``%``-style placeholders.
+        *args: Values for those placeholders.
+    """
+    log.warning(message, *args, extra={USER_FACING: True})
+
+
 def log_section(log: logging.Logger, title: str) -> None:
     """Log a visual section separator with a title."""
     separator = LOG_SEPARATOR_CHAR * LOG_SEPARATOR_WIDTH
@@ -536,7 +558,7 @@ def parse_master_display_metadata(primaries_str: str, luminance_str: str) -> str
         lum_match = re.search(luminance_pattern, luminance_str)
 
         if not lum_match:
-            logger.warning("Could not parse luminance string: %s", luminance_str)
+            warn_user(logger, "Could not parse luminance string: %s", luminance_str)
             return None
 
         min_lum_raw = float(lum_match.group(1))
@@ -564,7 +586,8 @@ def parse_master_display_metadata(primaries_str: str, luminance_str: str) -> str
             coords = _parse_explicit_primaries(primaries_str)
 
         if coords is None:
-            logger.warning(
+            warn_user(
+                logger,
                 "Could not read mastering display primaries from '%s'. Named "
                 + "spaces: %s",
                 primaries_str,
@@ -581,6 +604,31 @@ def parse_master_display_metadata(primaries_str: str, luminance_str: str) -> str
     except Exception as e:
         logger.error("Failed to parse master display metadata: %s", e)
         return None
+
+
+def master_display_arg(
+    primaries_str: str | None, luminance_str: str | None
+) -> str | None:
+    """Build x265's ``--master-display`` argument, or nothing.
+
+    The single gate on whether the probe's mastering display metadata
+    survives into an encode: both probed fields must be present and the pair
+    must parse. A profile that names ``master-display`` in its own settings
+    supplies its own value instead, bypassing this gate.
+    A caller that needs to know whether the properties will reach a decoded
+    frame asks this rather than repeating the test.
+
+    Args:
+        primaries_str: Mastering display colour primaries from the probe.
+        luminance_str: Mastering display luminance from the probe.
+
+    Returns:
+        The formatted argument, or None when either field is absent or the
+        pair cannot be parsed.
+    """
+    if not primaries_str or not luminance_str:
+        return None
+    return parse_master_display_metadata(primaries_str, luminance_str)
 
 
 def use_utf8_output(*streams: TextIO) -> None:

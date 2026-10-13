@@ -89,12 +89,11 @@ VideoTuner uses periodic sampling to efficiently assess video quality without en
 2. **Automatic Crop Detection** (enabled by default): Analyzes the video to detect and remove letterboxing/pillarboxing before sampling
 
 3. **Sample Encoding**: Creates concatenated sample files using VapourSynth's `SelectEvery` filter for efficient frame extraction
-   - **Reference samples** are encoded losslessly to ensure 100% accuracy to the original source
    - **Distorted samples** are encoded with the test CRF/bitrate settings for quality comparison
-   - Lossless encoding avoids frame-accuracy issues that would occur with direct cutting (GOP boundaries, keyframe restrictions)
-   - **Note:** Lossless reference files can be large depending on sample count and source resolution
+   - **Reference samples** are not encoded at all: both metrics read the source through the same `SelectEvery` script the encoder is fed
+   - Selecting in VapourSynth avoids the frame-accuracy problems direct cutting brings (GOP boundaries, keyframe restrictions)
 
-4. **Quality Assessment**: Runs VMAF and/or SSIMULACRA2 comparing distorted samples against lossless references
+4. **Quality Assessment**: Runs VMAF and/or SSIMULACRA2 comparing distorted samples against the source frames they were encoded from
 
 ### CRF Search Algorithm
 
@@ -113,16 +112,19 @@ The CRF search uses interpolated binary search to efficiently find the optimal C
 
 **How it works:**
 
-1. **Early Pipeline Stage**: Runs immediately after building the FFMS2 index, before any encoding
-2. **Smart sampling**: Samples one frame every 30 seconds across the middle 80% of the video
+1. **Early Pipeline Stage**: Runs immediately after building the source index, before any encoding
+2. **Smart sampling**: Samples one frame every 30 seconds across the middle 80% of the
+   video, and never fewer than five frames, so a short source is not judged on one picture
 3. **Conservative cropping**: Uses the minimum (safest) crop values across all sampled frames to avoid accidentally cropping content
-4. **Consistent application**: The same crop values are applied to ALL encodes - reference clips, distorted clips, and across all phases
+4. **Consistent application**: The same crop values are applied to ALL encodes and to the frames both metrics read, across all phases
 
 **Detection method:**
 
-- Uses FFmpeg's `cropdetect` filter with per-sample timestamp seeking for fast detection
-- Supports two modes: `black` (default, pixel threshold) and `mvedges` (motion + edge detection)
-- HDR sources are automatically tonemapped to SDR before cropdetect for consistent behavior
+- Reads the source through the indexer `--indexer` selects and analyses the frames it
+  asks for by number, then hands them to FFmpeg's `cropdetect` filter
+- Finds bars by pixel threshold, tunable with `--cropdetect-limit`
+- HDR sources are tonemapped to SDR first, by the same operator VMAF and SSIMULACRA2
+  use, so a crop does not depend on what the machine can run
 - Detects letterboxing (black bars top/bottom) and pillarboxing (black bars left/right)
 - Reports final dimensions in the console: `Detecting Crop Done! (3840x1608)`
 
@@ -181,7 +183,11 @@ VideoTuner and all bundled dependencies are 64-bit Windows binaries. Linux and m
 
 Both installation methods require these external tools on PATH:
 
-- **FFmpeg** (with libvmaf and libplacebo) and **FFprobe**
+- **FFmpeg** (with libvmaf) and **FFprobe**. The VMAF v1 models
+  need **libvmaf 3.2.0** or newer, which is a property of the libvmaf your
+  FFmpeg links rather than of the FFmpeg version. VideoTuner probes for them at
+  startup and falls back to the legacy v0 models with a warning if they are
+  missing; v0 and v1 scores are not comparable
 - **MKVToolNix** `mkvmerge` (used to mux encoder output)
 
 ### Pre-built Release (Recommended)
@@ -200,8 +206,9 @@ Download the latest release from the [Releases page](https://github.com/sleepy-a
 | [x265](https://github.com/Patman86/x265-Mod-by-Patman)                       | 4.2+68+68      | HEVC encoder in `tools/x265.exe`                             |
 | [VapourSynth](https://github.com/vapoursynth/vapoursynth)                    | R79            | Portable environment in `vapoursynth-portable/`              |
 | [ffms2](https://github.com/FFMS/ffms2)                                       | 5.1.2 (3af2ef2) | Frame-accurate video indexing (`ffms2.dll`, `ffmsindex.exe`), built from source |
-| [LSMASHSource](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works) | 1310.0.0.0     | Video loading for SSIMULACRA2                                |
+| [LSMASHSource](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works) | 1310.0.0.0     | Alternative video indexing (`LSMASHSource.dll`, `LSMASHSource_indexing.exe`), selected with `--indexer lsmash` |
 | [vszip](https://github.com/dnjulek/vapoursynth-zip)                          | 22.1.0         | SSIMULACRA2 quality metric calculation                       |
+| [vs-tonemap](https://github.com/sleepy-af-dev/vs-tonemap)                    | 0.2.0          | Tonemapping for VMAF, SSIMULACRA2 and crop detection (BT.2390 tone curve, BT.2407 gamut mapping) |
 
 ### From Source
 
@@ -246,13 +253,23 @@ Create `vapoursynth-portable/vs-plugins/` and place the following plugins in it.
 | Plugin       | Version    | Download                                                                                                             | Extract                              |
 | ------------ | ---------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
 | ffms2        | 5.0        | [ffms2-5.0-msvc.7z](https://github.com/FFMS/ffms2/releases/tag/5.0)                                                  | `x64/ffms2.dll`, `x64/ffmsindex.exe` |
-| LSMASHSource | 1310.0.0.0 | [L-SMASH-Works-r1310.0.0.0.7z](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/releases/tag/1310.0.0.0) | `x64/LSMASHSource.dll`               |
+| LSMASHSource | 1310.0.0.0 | [L-SMASH-Works-r1310.0.0.0.7z](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/releases/tag/1310.0.0.0) | `x64/LSMASHSource.dll`, `x64/LSMASHSource_indexing.exe` |
 | vszip        | 22.1.0     | [vapoursynth_vszip-22.1.0-py3-none-win_amd64.whl](https://pypi.org/project/vapoursynth-vszip/22.1.0/#files)          | `vapoursynth/plugins/vszip/` → `vs-plugins/vszip/` |
+| vs-tonemap   | 0.2.0      | [vs-tonemap-v0.2.0.zip](https://github.com/sleepy-af-dev/vs-tonemap/releases/tag/v0.2.0)                             | `vs-tonemap/` → `vs-plugins/vs-tonemap/` |
 
 > **Note:** 5.0 is the newest ffms2 binary published, and the project has taken
 > commits since. Pre-built releases bundle an ffms2 built from a later commit, so
 > a manual setup using the archive above is on a slightly older ffms2 unless you
 > build it from source yourself.
+
+> **Note:** vs-tonemap installs as a whole directory, so the DLL, its `LICENSE`
+> and its `NOTICE` stay together. The DLL statically links libraries whose
+> licences ask a redistributor to carry their attribution, and the `NOTICE` is
+> that attribution.
+>
+> Skip it and HDR assessment stops working. Neither metric is defined on HDR,
+> so an HDR input is tonemapped before VMAF or SSIMULACRA2 scores it, and
+> without the plugin that step fails. SDR inputs are unaffected.
 
 #### 4. Install Encoders
 
@@ -369,11 +386,13 @@ videotuner ./folder --profile Film --vmaf-target 95 --as-one-source
 
 Each file is sampled on its own and the samples are joined. Every file keeps its own guard bands, so each intro and set of credits is skipped rather than only the first and last, and every file contributes samples regardless of length. Output is laid out exactly like a single-file run, in a folder named after the input folder.
 
-Files must agree on resolution, frame rate and HDR status. If any differ the run stops before encoding, listing every mismatch. Differing letterboxing is not a mismatch: the most aggressive crop measured across the files is applied to all of them, since joining requires matching dimensions.
+Files must agree on resolution, frame rate and HDR status. If any differ the run stops before encoding, listing every mismatch. Differing letterboxing is not a mismatch: joining requires matching dimensions, so the smallest crop measured across the files is applied to all of them. A file whose frames reach the edge is reporting content rather than a bad measurement, so it keeps every other file uncropped — which is what protects a source whose active area changes part way through.
 
 Given a single file rather than a folder, the flag is an error rather than a warning. `--carry-crf` has no effect alongside it, since there is only one job.
 
-**Note:** batch mode writes an `.ffindex` file next to each source video, the same as a single-file run. They are reused on later runs over the same folder, which is the largest available time saving when re-running a batch.
+**Note:** batch mode writes an index file next to each source video, the same as a single-file run. The name follows the indexer: `.ffindex` under the default `--indexer ffms2`, `.lwi` under `--indexer lsmash`. They are reused on later runs over the same folder, which is the largest available time saving when re-running a batch.
+
+Replacing a source file in place leaves an index that describes the old file, and the two indexers differ in what happens next: `ffms2.Source` stops with "The index does not match the source file", while `lsmas.LWLibavSource` rebuilds the index without saying so. Delete the index whenever you replace a source file.
 
 ### Quality Targets
 
@@ -394,6 +413,8 @@ Quality targets define the minimum acceptable scores. CRF search will find the h
 ```
 
 **Note:** At least one target is required unless using `--assessment-only` mode. Multiple targets can be combined - all must be met.
+
+**Repeat runs:** when a profile sets VBV, as every sample profile does, x265 and x264 do not always produce the same encode twice, because their VBV rate control depends on thread timing. Two runs on the same input can then report scores a few hundredths of a point apart, and a score that close to a target could move the chosen CRF by one step. Profiles whose VBV limits the bitrate, such as the streaming ones, vary more often. Without VBV, runs repeat exactly.
 
 ### Encoding Profiles
 
@@ -605,13 +626,9 @@ Run `videotuner --help` for complete options. Key options include:
 | Option                      | Default      | Description                                       |
 | --------------------------- | ------------ | ------------------------------------------------- |
 | `--no-cropdetect`           | -            | Disable automatic crop detection                  |
-| `--cropdetect-interval`     | `30`         | Seconds between sampled frames for crop detection |
-| `--cropdetect-mode`         | `black`      | Detection mode: `black` or `mvedges`              |
+| `--cropdetect-interval`     | `30`         | Ceiling on seconds between sampled frames for crop detection; lowered when it would sample fewer than five |
 | `--cropdetect-limit`        | FFmpeg 24    | Black pixel threshold 0-255                       |
 | `--cropdetect-round`        | `2`          | Crop dimension divisibility (FFmpeg default: 16)  |
-| `--cropdetect-mv-threshold` | FFmpeg 8     | Motion vector threshold in pixels                 |
-| `--cropdetect-low`          | FFmpeg ~0.02 | Canny low threshold 0.0-1.0                       |
-| `--cropdetect-high`         | FFmpeg ~0.06 | Canny high threshold 0.0-1.0                      |
 
 ### Target Options
 
@@ -648,8 +665,17 @@ Run `videotuner --help` for complete options. Key options include:
 | -------------- | ------- | ---------------------------------------------------------- |
 | `--no-vmaf`    | -       | Disable VMAF assessment                                    |
 | `--no-ssim2`   | -       | Disable SSIMULACRA2 assessment                             |
-| `--vmaf-model` | `auto`  | VMAF model name or path (auto-selects based on resolution) |
-| `--tonemap`    | `auto`  | HDR tonemapping: auto\|force\|off                          |
+| `--vmaf-model` | `auto`  | VMAF model name or path (auto-selects by display and viewing distance) |
+| `--v0-vmaf`    | `off`   | Score with the legacy v0 models, for comparison with earlier releases |
+| `--indexer`    | `ffms2` | Source filter that reads and indexes video: ffms2\|lsmash  |
+
+Both metrics always convert an HDR input to SDR before scoring it, because
+neither VMAF nor SSIMULACRA2 is defined on HDR. They use the same tonemapping
+operator, so an HDR score from one is comparable with the other's.
+
+`--indexer` applies to every operation that reads video: sample extraction for
+encoding, crop detection, VMAF and SSIMULACRA2. One run therefore reads video
+one way throughout.
 
 ### Guard Bands
 
@@ -711,9 +737,6 @@ One job is one source video processed end to end. Its output all lands in one fo
 
 ```text
 jobs/<input_name>_<timestamp>/
-├── reference/                                # Lossless reference samples
-│   ├── vmaf_reference_concatenated.mkv
-│   └── ssim2_reference_concatenated.mkv
 ├── <ProfileName>/                            # Everything produced for one profile
 │   ├── vmaf_crf_*.mkv                        # VMAF distorted at each CRF iteration
 │   ├── ssim2_crf_*.mkv                       # SSIM2 distorted at each CRF iteration
@@ -727,7 +750,7 @@ jobs/<input_name>_<timestamp>/
 
 - All encoded samples and assessment results are preserved across iterations for inspection
 - Each profile gets one folder holding its encodes and both metrics' results, so a multi-profile comparison is one folder per candidate rather than three
-- A profile named `reference` or `temp` would clash with the folders above, so it gets a `_profile` suffix
+- A profile named `temp` would clash with the folder above, so it gets a `_profile` suffix
 
 ### Batch folder
 
@@ -762,7 +785,7 @@ The full source path is always recorded in the job log, so a shortened name neve
 
 ### Logs
 
-The job log is a transcript: everything printed to the terminal during that job is written to it, so the log reads the way the run looked. Section banners and anything at warning level or above carry a timestamp; transcript lines do not, which keeps tables and panels readable.
+The job log is a transcript: everything printed to the terminal during that job is written to it, so the log reads the way the run looked. Section banners and anything at warning level or above carry a timestamp; transcript lines do not, which keeps tables and panels readable. A warning a user has to act on appears twice as a result: once timestamped as the warning record itself, and once bare as the transcript line the terminal also printed.
 
 `batch.log` holds batch-level events and the summary table only. Each job's detail stays in that job's own log, so the file you open after an overnight run is the short one.
 
@@ -833,7 +856,7 @@ The pipeline is organized into modules:
 - `pipeline_validation.py` - Assessment validation, target checking, and sampling validation
 - `pipeline_types.py` - Shared dataclasses and path management utilities
 - `pipeline_display.py` - Rich console display functions for settings and results
-- `pipeline_reference.py` - Lossless reference generation for quality metrics
+- `pipeline_reference.py` - Whether both metrics sample identically, and can therefore share one encode
 - `crf_search.py` - Interpolated binary search algorithm for CRF optimization
 
 ### Encoding & Profiles
@@ -848,7 +871,9 @@ The pipeline is organized into modules:
 ### Quality Assessment
 
 - `vmaf_assessment.py` - VMAF quality metric assessment and result parsing
+- `vmaf_script.py` - Builds the VapourSynth script that pipes the reference and distorted clips into VMAF as one stream
 - `ssimulacra2_assessment.py` - SSIMULACRA2 quality metric assessment and result parsing
+- `metric_colour.py` - Shared HDR→SDR colour conversion chain VMAF, SSIMULACRA2 and crop detection all read through
 
 ### Utilities
 

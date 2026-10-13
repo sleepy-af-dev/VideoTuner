@@ -67,6 +67,19 @@ VSZIP_URL = f"https://files.pythonhosted.org/packages/py3/v/vapoursynth-vszip/va
 VSZIP_WHEEL_SUBDIR = "vapoursynth/plugins/vszip/"
 VSZIP_DIR = "vszip"
 
+# vs-tonemap ships one zip per release with a .sha256 beside it. The checksum
+# below is pinned rather than fetched: the published .sha256 is served from the
+# same host as the zip, so it proves nothing against a compromised release and
+# exists for a human running `sha256sum -c`.
+VSTONEMAP_VERSION = "0.2.0"
+VSTONEMAP_URL = f"https://github.com/sleepy-af-dev/vs-tonemap/releases/download/v{VSTONEMAP_VERSION}/vs-tonemap-v{VSTONEMAP_VERSION}.zip"
+
+# The archive already contains a vs-tonemap/ directory holding the DLL, its
+# LICENSE and its NOTICE. The whole directory is installed: the plugin is MIT
+# but statically links Google Highway (Apache 2.0) and SLEEF, and Apache
+# section 4 asks a redistributor to carry the notice.
+VSTONEMAP_DIR = "vs-tonemap"
+
 # Nuitka works out which DLLs to bundle with Dependency Walker, which it fetches
 # at build time and runs without checking a single byte of what it receives. The
 # tool has had no release since 2006, and the host is outside this project's
@@ -85,6 +98,7 @@ CHECKSUMS = {
     "ffms2": "e867a3df7262865107df40f230f5b8e1455905eba9b8852e6f35b1227537caeb",
     "lsmash": "b4fd48e3cb97c9583e08e69a3dd49a6500dede3bbc054f0fb9cddd0f5448e6e1",
     "vszip": "1f5e6aa39ea72e610c1146c2d27f157bea507895555398c60347a65ee1745273",
+    "vstonemap": "fd0eb3c2b2cfff23f325dc1cbf93c1f613ea50f678c6106116e231effd3a5e82",
     "depends": "35db68a613874a2e8c1422eb0ea7861f825fc71717d46dabf1f249ce9634b4f1",
 }
 
@@ -310,6 +324,48 @@ def download_vszip(plugin_dir: Path) -> None:
             sys.exit(1)
 
 
+def download_vstonemap(plugin_dir: Path) -> None:
+    """Download vs-tonemap and install its plugin directory into plugin_dir."""
+    dest_dir = plugin_dir / VSTONEMAP_DIR
+    if dest_dir.exists():
+        print(f"  {VSTONEMAP_DIR}/ already exists, skipping download")
+        return
+
+    print(f"Downloading vs-tonemap {VSTONEMAP_VERSION}...")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive_path = Path(tmpdir) / "vs-tonemap.zip"
+
+        try:
+            _ = urllib.request.urlretrieve(VSTONEMAP_URL, archive_path)
+        except Exception as e:
+            print(f"ERROR: Failed to download vs-tonemap: {e}")
+            sys.exit(1)
+
+        verify_checksum(archive_path, CHECKSUMS["vstonemap"], "vs-tonemap")
+
+        # The archive carries the vs-tonemap/ directory itself, so extracting
+        # into plugin_dir produces plugin_dir/vs-tonemap/ with the DLL, LICENSE
+        # and NOTICE together.
+        try:
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                members = [
+                    n
+                    for n in zf.namelist()
+                    if n.startswith(f"{VSTONEMAP_DIR}/") and not n.endswith("/")
+                ]
+                if not members:
+                    print(f"ERROR: {VSTONEMAP_DIR}/ not found in vs-tonemap archive")
+                    sys.exit(1)
+
+                zf.extractall(plugin_dir, members=members)
+                print(f"  Extracted {len(members)} vs-tonemap files to {dest_dir}")
+
+        except zipfile.BadZipFile as e:
+            print(f"ERROR: Invalid vs-tonemap archive: {e}")
+            sys.exit(1)
+
+
 def _bsdtar() -> Path:
     """Locate the bsdtar that ships with Windows.
 
@@ -385,9 +441,8 @@ def install_ffms2_from(source_dir: Path, plugin_dir: Path) -> None:
 
 def download_ffms2(plugin_dir: Path) -> None:
     """Download and extract ffms2 plugin."""
-    dest_dll = plugin_dir / "ffms2.dll"
-    if dest_dll.exists():
-        print("  ffms2.dll already exists, skipping download")
+    if all((plugin_dir / name).exists() for name in FFMS2_FILES):
+        print("  ffms2 already exists, skipping download")
         return
 
     print(f"Downloading ffms2 {FFMS2_VERSION}...")
@@ -418,8 +473,9 @@ def download_ffms2(plugin_dir: Path) -> None:
 def download_lsmashsource(plugin_dir: Path) -> None:
     """Download and extract LSMASHSource plugin."""
     dest_dll = plugin_dir / "LSMASHSource.dll"
-    if dest_dll.exists():
-        print("  LSMASHSource.dll already exists, skipping download")
+    dest_indexer = plugin_dir / "LSMASHSource_indexing.exe"
+    if dest_dll.exists() and dest_indexer.exists():
+        print("  LSMASHSource already exists, skipping download")
         return
 
     print(f"Downloading LSMASHSource {LSMASH_VERSION}...")
@@ -435,13 +491,14 @@ def download_lsmashsource(plugin_dir: Path) -> None:
 
         verify_checksum(archive_path, CHECKSUMS["lsmash"], "LSMASHSource")
 
-        # Extract LSMASHSource.dll from x64 folder
+        # The indexer executable builds .lwi files up front with progress
+        # output, the way ffmsindex.exe does for ffms2.
         extract_from_7z(
             archive_path,
-            ["x64/LSMASHSource.dll"],
+            ["x64/LSMASHSource.dll", "x64/LSMASHSource_indexing.exe"],
             plugin_dir,
         )
-        print(f"  Extracted LSMASHSource.dll to {plugin_dir}")
+        print(f"  Extracted LSMASHSource files to {plugin_dir}")
 
 
 def download_x264(tools_dir: Path) -> None:
@@ -605,8 +662,10 @@ REQUIRED_VAPOURSYNTH = (
     "vapoursynth-portable/vs-plugins/ffms2.dll",
     "vapoursynth-portable/vs-plugins/ffmsindex.exe",
     "vapoursynth-portable/vs-plugins/LSMASHSource.dll",
+    "vapoursynth-portable/vs-plugins/LSMASHSource_indexing.exe",
     "vapoursynth-portable/vs-plugins/vszip/vszip.dll",
     "vapoursynth-portable/vs-plugins/vszip/manifest.vs",
+    "vapoursynth-portable/vs-plugins/vs-tonemap/vs-tonemap.dll",
 )
 
 REQUIRED_ENCODERS = (
@@ -673,6 +732,7 @@ def provision_dependencies(dest: Path, ffms2_dir: Path | None = None) -> None:
         download_ffms2(plugin_dir)
     download_lsmashsource(plugin_dir)
     download_vszip(plugin_dir)
+    download_vstonemap(plugin_dir)
 
     verify_provisioned(dest)
 

@@ -9,7 +9,8 @@ import pytest
 from videotuner import pipeline
 from videotuner.media import InvalidVideoFileError
 from videotuner.pipeline import main
-from videotuner.pipeline_cli import parse_cli
+from videotuner.pipeline_cli import build_arg_parser, parse_cli
+from videotuner.pipeline_validation import AssessmentError
 
 
 def _argv(target: Path) -> list[str]:
@@ -198,3 +199,70 @@ class TestAsOneSourceRouting:
         _ = main(argv)
 
         assert called == ["batch"]
+
+
+def test_the_tonemap_flag_is_gone() -> None:
+    # Both metrics always tonemap an HDR input, because neither is defined
+    # on HDR. A flag that cannot change that is a lie in --help.
+    parser = build_arg_parser()
+    with pytest.raises(SystemExit):
+        _ = parser.parse_args(["input.mkv", "--tonemap", "off"])
+
+
+def test_a_relative_workdir_is_made_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # VapourSynth runs from another folder, so a relative work folder resolved
+    # against the wrong place and both metrics failed. Single runs and batches
+    # both read this parsed value.
+    monkeypatch.chdir(tmp_path)
+    args = _parse("--workdir", "runs/../jobs")
+    assert args.workdir is not None
+    assert args.workdir == tmp_path / "jobs"
+    assert args.workdir.is_absolute()
+
+
+@pytest.mark.parametrize("flag", ["--vmaf-log", "--ssim2-log"])
+def test_the_metric_log_flags_are_gone(
+    flag: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Neither was ever read: the per-frame JSON always goes in the run folder.
+    # The CHANGELOG promises an error that names the flag.
+    parser = build_arg_parser()
+    with pytest.raises(SystemExit):
+        _ = parser.parse_args(["input.mkv", flag, "x.json"])
+    assert flag in _error_line(capsys.readouterr().err)
+
+
+def test_relative_input_and_vapoursynth_folders_are_made_absolute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Indexing, encoding and SSIMULACRA2 run from other folders, so relative
+    # paths resolved against the wrong one: a relative input could not be
+    # opened, and a relative --vs-dir lost SSIMULACRA2.
+    monkeypatch.chdir(tmp_path)
+    args = parse_cli(["clips/a.mkv", "--vs-dir", "vs", "--vs-plugin-dir", "vs/plugins"])
+    assert args.input == tmp_path / "clips" / "a.mkv"
+    assert args.vs_dir == tmp_path / "vs"
+    assert args.vs_plugin_dir == tmp_path / "vs" / "plugins"
+
+
+def test_log_file_help_names_the_real_default() -> None:
+    # The run writes job.log in its run folder; the help once promised a file
+    # named after the input.
+    text = build_arg_parser().format_help()
+    assert "job.log" in text
+    assert "<name>.log" not in text
+
+
+def test_a_run_with_no_scores_ends_with_an_error_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # When neither metric produces a score the search cannot go on. The user
+    # needs the reason and a failing exit code, not a Python traceback.
+    def no_scores(*_args: object, **_kwargs: object) -> object:
+        raise AssessmentError("Assessment failed: no scores")
+
+    monkeypatch.setattr(pipeline, "_run_pipeline_body", no_scores)
+    assert main(["input.mkv", "--preset", "slow", "--vmaf-target", "95"]) == 1
+    assert "Assessment failed: no scores" in capsys.readouterr().out

@@ -10,11 +10,13 @@ import tempfile
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from io import TextIOWrapper
 from pathlib import Path
 from typing import IO
 
 from .encoder_type import EncoderType
+from .utils import ensure_dir, run_capture, warn_user
 
 # Directory name for bundled VapourSynth portable installation
 VAPOURSYNTH_PORTABLE_DIR = "vapoursynth-portable"
@@ -51,7 +53,7 @@ class SampledSource:
 
     Attributes:
         path: Source video path
-        cache_file: FFMS2 index for that source
+        cache_file: Index for that source, built by whichever indexer ran
         usable_range: Frames left after this file's own guard bands
     """
 
@@ -63,10 +65,21 @@ class SampledSource:
 def combine_crop_values(values: Sequence[CropValues]) -> CropValues:
     """Reconcile crops measured on files that make up one source.
 
-    Splicing requires every clip to share dimensions, so the most aggressive
-    crop wins on each edge independently. The result may therefore be a crop no
-    single file measured, which is the safe direction: it can only remove more
-    border, never reinstate content another file cropped away.
+    Splicing requires every clip to share dimensions, so one crop must serve
+    them all. The smallest wins on each edge independently, which is the same
+    direction frames combine within a single file: crop only what every
+    analysed frame of every file agrees is black.
+
+    Taking the smallest is associative, so measuring per file and then
+    combining gives the same answer as one pass over every frame of every
+    file. The two-step split is an implementation detail rather than a second
+    rule.
+
+    The alternative, taking the largest, cuts picture on a source whose active
+    area changes part way through. A film with taller sequences has bars in
+    one file and none in another; the file that reaches the edge is reporting
+    content, not a bad measurement, and overruling it crops that footage away.
+    Leaving bars on the rest is recoverable. Cutting picture is not.
 
     Args:
         values: Crop measured for each file, in any order
@@ -77,10 +90,10 @@ def combine_crop_values(values: Sequence[CropValues]) -> CropValues:
     if not values:
         return CropValues(left=0, right=0, top=0, bottom=0)
     return CropValues(
-        left=max(v.left for v in values),
-        right=max(v.right for v in values),
-        top=max(v.top for v in values),
-        bottom=max(v.bottom for v in values),
+        left=min(v.left for v in values),
+        right=min(v.right for v in values),
+        top=min(v.top for v in values),
+        bottom=min(v.bottom for v in values),
     )
 
 
@@ -259,8 +272,6 @@ def create_temp_encode_paths(
     ext = encoder_type.bitstream_extension
 
     if temp_dir:
-        from .utils import ensure_dir
-
         _ = ensure_dir(temp_dir)
         vpy_path = temp_dir / f"{name}.vpy"
         bitstream_path = temp_dir / f"{name}{ext}"
@@ -275,6 +286,246 @@ def create_temp_encode_paths(
             bitstream_path = Path(tmp.name)
 
     return vpy_path, bitstream_path
+
+
+class IndexerType(StrEnum):
+    """Which source filter reads and indexes a video file."""
+
+    FFMS2 = "ffms2"
+    LSMASH = "lsmash"
+
+
+@dataclass(frozen=True)
+class IndexerSpec:
+    """How one indexer is called, what it names its index, and what builds it.
+
+    Attributes:
+        source_call: Format string for the VapourSynth source-filter call,
+            taking ``source`` and ``cache`` fields.
+        index_suffix: Extension for the index file. The two differ, so
+            switching indexers cannot collide.
+        indexer_exe: Executable that builds an index up front, with progress.
+        plugin_dll: Plugin the source filter lives in.
+        display_name: Name shown to a user, as distinct from the enum value,
+            which is the ``--indexer`` CLI token.
+    """
+
+    source_call: str
+    index_suffix: str
+    indexer_exe: str
+    plugin_dll: str
+    display_name: str
+
+    def source_expr(self, source_path: str, cache_file: str) -> str:
+        """Build the VapourSynth expression that loads a file.
+
+        Args:
+            source_path: Absolute path to the video file.
+            cache_file: Absolute path to its index.
+
+        Returns:
+            A VapourSynth source-filter call.
+        """
+        return self.source_call.format(source=source_path, cache=cache_file)
+
+
+_INDEXERS: dict[IndexerType, IndexerSpec] = {
+    IndexerType.FFMS2: IndexerSpec(
+        source_call='core.ffms2.Source(r"{source}", cachefile=r"{cache}")',
+        index_suffix=".ffindex",
+        indexer_exe="ffmsindex.exe",
+        plugin_dll="ffms2.dll",
+        display_name="FFMS2",
+    ),
+    IndexerType.LSMASH: IndexerSpec(
+        source_call=(
+            'core.lsmas.LWLibavSource(source=r"{source}", cachefile=r"{cache}")'
+        ),
+        index_suffix=".lwi",
+        indexer_exe="LSMASHSource_indexing.exe",
+        plugin_dll="LSMASHSource.dll",
+        display_name="LSMASHSource",
+    ),
+}
+
+
+def indexer_spec(indexer: IndexerType) -> IndexerSpec:
+    """Look up how an indexer is called and indexed.
+
+    Args:
+        indexer: The selected indexer.
+
+    Returns:
+        Its specification.
+    """
+    return _INDEXERS[indexer]
+
+
+def distorted_index_path(dis_path: Path, indexer: IndexerType) -> Path:
+    """Index path for one distorted encode, shared by both metrics.
+
+    In shared-sampling mode VMAF and SSIMULACRA2 score the same file, so two
+    names for its index would index it twice and a ten-iteration search would
+    pay that ten times over.
+
+    The index sits beside the encode rather than in a temp directory, which
+    keeps it unique for free: multi-profile mode writes one encode per profile
+    under the same stem, and a name derived only from that stem would point
+    two different files at one index. ffms2 rejects a mismatched index outright
+    rather than rebuilding it, and that failure is swallowed into a dropped
+    metric. Source indexes are named the same way, beside what they describe.
+
+    Args:
+        dis_path: The distorted encode.
+        indexer: Selected source filter, whose suffix names the file.
+
+    Returns:
+        The index path for that encode under that indexer.
+    """
+    return dis_path.with_suffix(indexer_spec(indexer).index_suffix)
+
+
+def read_indexed_frame_count(
+    source_path: Path,
+    cache_file: Path,
+    *,
+    indexer: IndexerType,
+    cwd: Path | None = None,
+) -> int | None:
+    """Count a source's frames by opening it through the indexer.
+
+    ``estimate_frame_count`` multiplies a frame rate by a duration, which no
+    single rate describes for a variable frame rate file, so its answer can
+    run past the end of the clip. Every script that samples the source loads
+    it through this same source filter, so the length reported here is the
+    one the sampler will actually see rather than a closer approximation of
+    it.
+
+    The index is normally already on disk by the time this is called, which
+    is what makes it cheap: the source filter reuses it instead of scanning
+    the file again.
+
+    Args:
+        source_path: Video to count.
+        cache_file: Index file for it, built or reused by the source filter.
+        indexer: Source filter to open it with.
+        cwd: Working directory, for locating ``vapoursynth-portable``.
+
+    Returns:
+        The frame count, or None if the clip could not be opened. A frame
+        count must never end a run, so every failure returns None and leaves
+        the caller to keep whatever it already had.
+    """
+    log = logging.getLogger(__name__)
+    vs_env = VapourSynthEnv.from_cwd(cwd)
+    spec = indexer_spec(indexer)
+
+    source_expr = spec.source_expr(
+        str(resolve_absolute_path(source_path, cwd)), str(cache_file)
+    )
+    script = (
+        "import vapoursynth as vs\n"
+        "core = vs.core\n"
+        f"clip = {source_expr}\n"
+        'print("FRAMES:%d" % len(clip))\n'
+    )
+
+    try:
+        with tempfile.TemporaryDirectory(prefix=".vt_count_") as temp_dir:
+            vpy_path = Path(temp_dir) / "count.vpy"
+            write_vpy_script(vpy_path, script)
+            output = run_capture(
+                [str(vs_env.vs_dir / "python.exe"), str(vpy_path)],
+                cwd=cwd,
+                env=vs_env.build_env(),
+            )
+    except Exception as e:
+        log.debug("Could not count frames through %s: %s", spec.display_name, e)
+        return None
+
+    for line in output.splitlines():
+        if line.startswith("FRAMES:"):
+            return int(line[7:])
+
+    log.debug("%s reported no frame count for %s", spec.display_name, source_path.name)
+    return None
+
+
+def build_source_index(
+    source_path: Path,
+    cache_file: Path,
+    *,
+    indexer: IndexerType,
+    cwd: Path | None = None,
+    line_handler: Callable[[str], bool] | None = None,
+) -> bool:
+    """Build a source index up front, so encodes and assessment share one.
+
+    The index is built ahead of time purely for the progress display: the
+    source filter builds its own silently if this is skipped.
+
+    Args:
+        source_path: Path to the source video file
+        cache_file: Path where the index file should be created
+        indexer: Which indexer to run
+        cwd: Working directory (for locating vapoursynth-portable)
+        line_handler: Optional callback for progress parsing
+
+    Returns:
+        True if indexing succeeded, False if the executable is missing or failed
+
+    Raises:
+        RuntimeError: If indexing fails critically
+    """
+    log = logging.getLogger(__name__)
+
+    # If index already exists, skip
+    if cache_file.exists():
+        log.debug("Index already exists: %s", cache_file)
+        return True
+
+    spec = indexer_spec(indexer)
+    vs_env = VapourSynthEnv.from_cwd(cwd)
+    indexer_exe = vs_env.vs_plugin_dir / spec.indexer_exe
+
+    if not indexer_exe.exists():
+        log.debug(
+            "%s not found, %s will build its index automatically (no progress display)",
+            spec.indexer_exe,
+            spec.display_name,
+        )
+        return False
+
+    # Ensure cache directory exists
+    _ = ensure_dir(cache_file.parent)
+
+    # Build absolute path for source
+    abs_source_path = resolve_absolute_path(source_path, cwd)
+
+    index_args = [str(indexer_exe), str(abs_source_path), str(cache_file)]
+
+    try:
+        log.info("Building %s index for source...", spec.display_name)
+        _ = run_capture(
+            index_args,
+            cwd=cwd,
+            line_callback=line_handler,
+        )
+        log.info("%s index created successfully", spec.display_name)
+        return True
+    except Exception as e:
+        other = next(member for member in IndexerType if member is not indexer)
+        warn_user(
+            log,
+            "%s failed, the index will be built automatically: %s. "
+            + "If this input cannot be read at all, try --indexer %s",
+            spec.indexer_exe,
+            e,
+            other.value,
+        )
+        if cache_file.exists():
+            cache_file.unlink()  # Remove partial index
+        return False
 
 
 @dataclass(frozen=True)
@@ -294,6 +545,7 @@ class VapourSynthEnv:
     vs_plugin_dir: Path
     vsscript_dll: Path
     ffms2_dll: Path
+    lsmash_dll: Path
     vspipe_bin: Path
 
     @classmethod
@@ -322,6 +574,7 @@ class VapourSynthEnv:
             vs_plugin_dir=vs_plugin_dir,
             vsscript_dll=package_dir / "vsscript.dll",
             ffms2_dll=vs_plugin_dir / "ffms2.dll",
+            lsmash_dll=vs_plugin_dir / "LSMASHSource.dll",
             vspipe_bin=package_dir / "vspipe.exe",
         )
 
@@ -358,7 +611,8 @@ class VapourSynthEnv:
         """Validate that required VapourSynth files exist.
 
         Raises:
-            FileNotFoundError: If vsscript.dll or ffms2.dll is missing.
+            FileNotFoundError: If vsscript.dll, ffms2.dll, or LSMASHSource.dll
+                is missing.
         """
         if not self.vsscript_dll.exists():
             raise FileNotFoundError(
@@ -366,6 +620,10 @@ class VapourSynthEnv:
             )
         if not self.ffms2_dll.exists():
             raise FileNotFoundError(f"FFMS2 plugin not found at: {self.ffms2_dll}")
+        if not self.lsmash_dll.exists():
+            raise FileNotFoundError(
+                f"LSMASHSource plugin not found at: {self.lsmash_dll}"
+            )
         if not self.vspipe_bin.exists():
             raise FileNotFoundError(f"vspipe not found at: {self.vspipe_bin}")
 
@@ -447,7 +705,8 @@ class EncoderPaths:
         """Validate that all required encoder files exist.
 
         Raises:
-            FileNotFoundError: If encoder binary, vsscript.dll, or ffms2.dll is missing.
+            FileNotFoundError: If encoder binary, vsscript.dll, ffms2.dll, or
+                LSMASHSource.dll is missing.
         """
         if not self.encoder_bin.exists():
             raise FileNotFoundError(
@@ -567,6 +826,8 @@ def build_sampling_vpy_script(
     fps: float,
     cwd: Path | None = None,
     crop_values: CropValues | None = None,
+    *,
+    indexer: IndexerType,
 ) -> str:
     """Build VapourSynth script for periodic frame sampling.
 
@@ -587,6 +848,7 @@ def build_sampling_vpy_script(
         fps: Video framerate
         cwd: Working directory for path resolution
         crop_values: Optional crop values to apply
+        indexer: Source filter to load each file with.
 
     Returns:
         VapourSynth script content as string
@@ -609,7 +871,9 @@ def build_sampling_vpy_script(
         abs_cache_file = resolve_absolute_path(source.cache_file, cwd)
         name = f"sampled{index}"
         names.append(name)
-        load = f'core.ffms2.Source(r"{abs_source_path}", cachefile=r"{abs_cache_file}")'
+        load = indexer_spec(indexer).source_expr(
+            str(abs_source_path), str(abs_cache_file)
+        )
         trim = f"[{source.usable_range.start}:{source.usable_range.end}]"
         vpy_lines += [
             f"clip{index} = {load}",
@@ -772,6 +1036,7 @@ def run_vspipe_encode(
     vs_env: dict[str, str],
     cwd: Path | None,
     line_handler: Callable[[str], bool] | None,
+    stop: threading.Event | None = None,
 ) -> str:
     """Run vspipe | encoder encoding pipeline.
 
@@ -784,6 +1049,10 @@ def run_vspipe_encode(
         vs_env: Environment with VapourSynth paths
         cwd: Working directory
         line_handler: Optional callback for progress lines
+        stop: Optional event the line handler may set to end the run early.
+            Both processes are then killed and their exit statuses ignored,
+            since the caller already has what it needed. Callers that pass
+            nothing behave exactly as before.
 
     Returns:
         Combined process output string
@@ -845,6 +1114,14 @@ def run_vspipe_encode(
                         _ = line_handler(line)
                     except Exception:
                         log.debug("Progress callback error", exc_info=True)
+                if stop is not None and stop.is_set():
+                    # Killing both closes their pipes, so the other two
+                    # reader threads reach end of stream and their joins
+                    # return. Two threads can arrive here at once; a second
+                    # terminate() on a dead process is a no-op.
+                    vspipe_proc.terminate()
+                    encoder_proc.terminate()
+                    break
         finally:
             _ = wrapper.detach()
 
@@ -870,6 +1147,11 @@ def run_vspipe_encode(
 
     encoder_ret = encoder_proc.wait()
     vspipe_ret = vspipe_proc.wait()
+
+    if stop is not None and stop.is_set():
+        # Both processes were killed on purpose. Their exit statuses record
+        # that they were killed, not that the work failed.
+        return "\n".join(captured)
 
     if encoder_ret != 0 or vspipe_ret != 0:
         encoder_output = "\n".join(captured) if captured else ""

@@ -92,6 +92,7 @@ dmypy.json
 
 # Project-specific
 jobs/
+*.ffindex
 *.lwi
 profiles.yaml
 

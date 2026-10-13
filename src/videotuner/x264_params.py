@@ -11,6 +11,7 @@ import logging
 
 from .encoding_utils import MATRIX_FOR_PRIMARIES, is_hdr_video
 from .media import VideoInfo, get_bit_depth_from_pix_fmt
+from .utils import warn_user
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,8 @@ def build_global_x264_params(
     if "output-depth" not in skip:
         output_depth = get_bit_depth_from_pix_fmt(video_info.pix_fmt)
         if output_depth > 10:
-            logger.warning(
+            warn_user(
+                logger,
                 "x264 does not support %d-bit encoding, capping to 10-bit",
                 output_depth,
             )

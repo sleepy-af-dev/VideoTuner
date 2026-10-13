@@ -7,6 +7,8 @@ from pathlib import Path
 
 from rich.console import Console
 
+from videotuner.encoding_utils import IndexerType
+from videotuner.metric_colour import SSIM2_TONEMAP_BACKEND
 from videotuner.pipeline_cli import (
     DEFAULT_CRF_INTERVAL,
     DEFAULT_CRF_START_VALUE,
@@ -15,9 +17,11 @@ from videotuner.pipeline_cli import (
 from videotuner.pipeline_display import (
     check_and_display_bitrate_warning,
     display_ignored_args_warnings,
+    display_settings_summary,
     format_bitrate_percentage,
 )
 from videotuner.pipeline_types import MultiProfileResult
+from videotuner.vmaf_types import VmafFamily, VmafModelChoice
 
 
 def strip_ansi(text: str) -> str:
@@ -611,3 +615,90 @@ class TestIgnoredArgsWarning:
         assert "Streaming 1080p" in output
         assert "Streaming 720p" in output
         assert "Streaming 480p" in output
+
+
+class TestSettingsSummaryReporting:
+    """The run header should name what the pipeline actually chose."""
+
+    def test_names_the_tonemap_operator(self) -> None:
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(console, args, tonemap_operator=SSIM2_TONEMAP_BACKEND)
+
+        output = strip_ansi(buffer.getvalue())
+        assert f"Tonemapping: {SSIM2_TONEMAP_BACKEND}" in output
+
+    def test_omits_the_line_when_nothing_will_tonemap(self) -> None:
+        """An SDR source never tonemaps, so naming an operator would be noise."""
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(console, args, tonemap_operator=None)
+
+        assert "Tonemapping" not in strip_ansi(buffer.getvalue())
+
+    def test_names_the_vmaf_model_generation(self) -> None:
+        """The exact model depends on each comparison's resolution, but the
+        generation is settled before the run starts, and it is the generation
+        that decides whether a score means anything next to an old one."""
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(
+            console,
+            args,
+            vmaf_choice=VmafModelChoice(family=VmafFamily.V1),
+        )
+
+        assert "VMAF models: v1" in strip_ansi(buffer.getvalue())
+
+    def test_marks_a_fallback_rather_than_just_naming_v0(self) -> None:
+        """v0 by choice and v0 by fallback produce identical numbers, so the
+        header has to distinguish them."""
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(
+            console,
+            args,
+            vmaf_choice=VmafModelChoice(family=VmafFamily.V0, fell_back=True),
+        )
+
+        out = strip_ansi(buffer.getvalue())
+        assert "v0" in out
+        assert "fallback" in out.lower()
+
+    def test_names_an_explicitly_requested_model(self) -> None:
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(
+            console,
+            args,
+            vmaf_choice=VmafModelChoice(
+                family=VmafFamily.V1, explicit_model="vmaf_v1.0.16_5d0h"
+            ),
+        )
+
+        assert "vmaf_v1.0.16_5d0h" in strip_ansi(buffer.getvalue())
+
+    def test_names_a_non_default_indexer(self) -> None:
+        """Every frame in the run is read through it, so an archived run folder
+        has to say which one, and by the name a user sees rather than the CLI
+        token."""
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"), indexer=IndexerType.LSMASH)
+
+        display_settings_summary(console, args)
+
+        assert "Indexer: LSMASHSource" in strip_ansi(buffer.getvalue())
+
+    def test_omits_the_indexer_when_it_is_the_default(self) -> None:
+        """The header reports what differs from the defaults, nothing else."""
+        console, buffer = _make_console()
+        args = PipelineArgs(input=Path("clip.mkv"))
+
+        display_settings_summary(console, args)
+
+        assert "Indexer" not in strip_ansi(buffer.getvalue())

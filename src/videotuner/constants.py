@@ -53,6 +53,30 @@ VMAF_THREAD_CPU_FRACTION: float = 0.5
 # Maximum threads for VMAF calculation
 VMAF_MAX_THREADS: int = 16
 
+# Frame rate at or above which the high frame rate model variant is chosen.
+# 47 separates 47.952/48/50/59.94/60 from 24/25/30 without landing on any of them.
+VMAF_HFR_FPS_THRESHOLD: float = 47.0
+
+# =============================================================================
+# SSIMULACRA2 Assessment Constants
+# =============================================================================
+
+# Peak luminance of the SDR display the conversion is anchored to, in cd/m2.
+# It is zimg's and vs-tonemap's `nominal_luminance`: the absolute luminance a
+# code value of 1.0 stands for on the SDR side, and 100 cd/m2 is the reference
+# SDR display. It is not the tone curve's destination peak, which BT.2390 takes
+# separately as `dst_max` and defaults to 203 cd/m2, BT.2408 reference white.
+SSIM2_NOMINAL_LUMINANCE: int = 100
+
+# Mastering display peak assumed for a PQ input that declares none, in cd/m2.
+# BT.2390's tone curve needs the peak the content was graded for, and a PQ
+# input carrying no mastering display gives it none, so vs-tonemap raises
+# rather than guessing. 1000 cd/m2 is the reference display both BT.2100 and
+# BT.2408 are written around, and the value vs-tonemap itself defaults its HLG
+# peak to. BT.2408 also names 10000, the PQ container ceiling, but that is what
+# the signal can hold rather than what any display is graded for.
+SSIM2_ASSUMED_MASTERING_PEAK: int = 1000
+
 # =============================================================================
 # Resolution Constants
 # =============================================================================
@@ -141,8 +165,18 @@ PATH_FILENAME_MARGIN: int = 60
 # Directories a job creates for its own use. Profile directories sit beside
 # them, so whichever name is longer bounds how deep a job folder can be, and
 # a profile named after one of these is renamed to keep them apart.
-RESERVED_JOB_SUBDIRS: frozenset[str] = frozenset({"reference", "temp"})
+RESERVED_JOB_SUBDIRS: frozenset[str] = frozenset({"temp"})
 
 # A job folder shortened below this stops being recognisable, so the batch
 # folder gives up characters instead.
 JOB_FOLDER_MIN_CHARS: int = 40
+
+# =============================================================================
+# CropDetect
+# =============================================================================
+
+# Fewest frames crop detection will judge a source on. The sample step is
+# lowered to reach this on a short source, where a 30-second interval would
+# otherwise yield one or two frames. One frame is not a measurement: a single
+# dark or bright picture would set the crop for every encode that follows.
+CROPDETECT_MIN_SAMPLES: int = 5

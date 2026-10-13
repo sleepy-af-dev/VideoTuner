@@ -414,6 +414,99 @@ class TestVmafLogPathLength:
         assert not list(tmp_path.glob(".vt_vmaf_*"))
 
 
+_HDR_INFO = VideoInfo(
+    fps=24.0,
+    duration=1.0,
+    width=3840,
+    height=2160,
+    color_trc="smpte2084",
+    color_primaries="bt2020",
+    color_space="bt2020nc",
+)
+
+
+class TestCombinedPass:
+    """In the combined pass each request in flight holds both clips as float
+    frames for SSIMULACRA2, so it caps requests where the separate VMAF pipe
+    does not, and it hands back SSIMULACRA2's per-frame scores."""
+
+    @staticmethod
+    def _run(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        cpus: int,
+        scores: list[float] | None,
+        written: str | None = "0:80.0\n",
+    ) -> list[str]:
+        """Run run_vmaf with a stubbed pipe; return the vspipe arguments."""
+        captured: dict[str, list[str]] = {}
+
+        def fake_run_vspipe_encode(vspipe_args: list[str], **_kwargs: object) -> str:
+            captured["args"] = vspipe_args
+            if written is not None:
+                # Stand in for the combined script writing beside itself.
+                scores_file = Path(vspipe_args[-2]).with_name("ssim2.txt")
+                _ = scores_file.write_text(written, encoding="utf-8")
+            return ""
+
+        def fake_cpu_count() -> int:
+            return cpus
+
+        monkeypatch.setattr(
+            vmaf_assessment, "run_vspipe_encode", fake_run_vspipe_encode
+        )
+        monkeypatch.setattr(vmaf_assessment, "get_cpu_count", fake_cpu_count)
+        _ = run_vmaf(
+            ffmpeg_bin="ffmpeg",
+            ref_script=_SAMPLING,
+            dis_path=tmp_path / "dis.mkv",
+            ref_info=_HDR_INFO,
+            dis_info=_HDR_INFO,
+            log_path=tmp_path / "vmaf.json",
+            cwd=tmp_path,
+            indexer=IndexerType.FFMS2,
+            vs_env=VapourSynthEnv.from_cwd(tmp_path),
+            ssim2_scores=scores,
+        )
+        return captured["args"]
+
+    def test_the_separate_pipe_is_not_capped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        args = self._run(tmp_path, monkeypatch, cpus=32, scores=None)
+        assert "-r" not in args
+
+    def test_the_combined_pass_caps_requests_at_sixteen(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        args = self._run(tmp_path, monkeypatch, cpus=32, scores=[])
+        assert args[1:3] == ["-r", "16"]
+
+    def test_the_cap_never_exceeds_the_cpu_count(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # vspipe's default is one request per logical CPU. Asking for 16 on
+        # an 8-CPU machine would put more frames in flight than no cap.
+        args = self._run(tmp_path, monkeypatch, cpus=8, scores=[])
+        assert args[1:3] == ["-r", "8"]
+
+    def test_scores_come_back_in_frame_order(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scores: list[float] = []
+        _ = self._run(
+            tmp_path, monkeypatch, cpus=8, scores=scores, written="1:70.0\n0:80.0\n"
+        )
+        assert scores == [80.0, 70.0]
+
+    def test_a_combined_pass_that_wrote_no_scores_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with pytest.raises(RuntimeError, match="no SSIMULACRA2 scores"):
+            _ = self._run(tmp_path, monkeypatch, cpus=8, scores=[], written=None)
+
+
 def _fake_captured_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict[str, str]:

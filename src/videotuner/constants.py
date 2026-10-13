@@ -53,6 +53,13 @@ VMAF_THREAD_CPU_FRACTION: float = 0.5
 # Maximum threads for VMAF calculation
 VMAF_MAX_THREADS: int = 16
 
+# Concurrent frame requests for the pass that scores VMAF and SSIMULACRA2
+# together. Measured on 4K PQ and HLG input samples at 32 logical CPUs:
+# uncapped, the pass peaked about 9 GiB above the two separate passes; 16
+# removed about 6.5 GiB of that for under 1 s per assessment. At 16 logical
+# CPUs or fewer the cap equals vspipe's default and changes nothing.
+COMBINED_PASS_MAX_REQUESTS: int = 16
+
 # Frame rate at or above which the high frame rate model variant is chosen.
 # 47 separates 47.952/48/50/59.94/60 from 24/25/30 without landing on any of them.
 VMAF_HFR_FPS_THRESHOLD: float = 47.0

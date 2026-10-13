@@ -386,7 +386,6 @@ class TestVmafLogPathLength:
             cwd=tmp_path,
             indexer=IndexerType.FFMS2,
             vs_env=VapourSynthEnv.from_cwd(tmp_path),
-            temp_dir=tmp_path,
         )
         return captured["log_path"]
 
@@ -455,7 +454,6 @@ class TestRunVmafScalesToTheReference:
             cwd=tmp_path,
             indexer=IndexerType.FFMS2,
             vs_env=VapourSynthEnv.from_cwd(tmp_path),
-            temp_dir=tmp_path,
         )
 
         assert "scale=3840:2160:flags=bicubic" in captured["graph"]
@@ -477,8 +475,6 @@ class TestRunVmafKeepsTheSharedDistortedIndex:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _ = _fake_captured_graph(monkeypatch)
-        temp_dir = tmp_path / "temp"
-        temp_dir.mkdir()
         dis_path = tmp_path / "shared_distorted_crf28.0_iter1.mkv"
         dis_cache = distorted_index_path(dis_path, IndexerType.FFMS2)
         # Stand in for an index this run's own indexing step just built.
@@ -494,7 +490,6 @@ class TestRunVmafKeepsTheSharedDistortedIndex:
             cwd=tmp_path,
             indexer=IndexerType.FFMS2,
             vs_env=VapourSynthEnv.from_cwd(tmp_path),
-            temp_dir=temp_dir,
         )
 
         assert dis_cache.exists(), (
@@ -508,8 +503,6 @@ class TestRunVmafKeepsTheSharedDistortedIndex:
         # derives, or each metric builds its own under a different name and
         # the sharing is nominal.
         _ = _fake_captured_graph(monkeypatch)
-        temp_dir = tmp_path / "temp"
-        temp_dir.mkdir()
         dis_path = tmp_path / "shared_distorted_crf28.0_iter1.mkv"
 
         _ = run_vmaf(
@@ -522,7 +515,6 @@ class TestRunVmafKeepsTheSharedDistortedIndex:
             cwd=tmp_path,
             indexer=IndexerType.FFMS2,
             vs_env=VapourSynthEnv.from_cwd(tmp_path),
-            temp_dir=temp_dir,
         )
 
         expected = distorted_index_path(dis_path, IndexerType.FFMS2)

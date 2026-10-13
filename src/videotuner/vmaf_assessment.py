@@ -568,7 +568,6 @@ def run_vmaf(
     *,
     indexer: IndexerType,
     vs_env: VapourSynthEnv,
-    temp_dir: Path,
 ) -> VMAFResult:
     log = logging.getLogger(__name__)
 
@@ -872,7 +871,6 @@ def assess_with_vmaf(
     family: VmafFamily = VmafFamily.V1,
     indexer: IndexerType,
     vs_env: VapourSynthEnv,
-    temp_dir: Path,
 ) -> VMAFResult:
     """High-level helper that probes the encode and runs VMAF.
 
@@ -897,7 +895,6 @@ def assess_with_vmaf(
         family=family,
         indexer=indexer,
         vs_env=vs_env,
-        temp_dir=temp_dir,
     )
 
 
@@ -917,7 +914,6 @@ def assess_vmaf_concatenated(
     iteration: int,
     indexer: IndexerType,
     vs_env: VapourSynthEnv,
-    temp_dir: Path,
     family: VmafFamily = VmafFamily.V1,
 ) -> list[VMAFResult]:
     """Run VMAF assessment on the sampled source and a distorted encode.
@@ -940,8 +936,6 @@ def assess_vmaf_concatenated(
         iteration: Current iteration number
         indexer: Source filter to load the distorted encode with.
         vs_env: VapourSynth environment configuration.
-        temp_dir: Directory for intermediate files, where the distorted
-            encode's index is written.
 
     Returns:
         List containing single VMAFResult for the concatenated comparison
@@ -972,7 +966,6 @@ def assess_vmaf_concatenated(
             family=family,
             indexer=indexer,
             vs_env=vs_env,
-            temp_dir=temp_dir,
         )
 
     log.info(

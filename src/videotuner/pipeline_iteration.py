@@ -174,7 +174,6 @@ def run_vmaf_assessment(
             iteration=iteration,
             indexer=ctx.args.indexer,
             vs_env=vs_env,
-            temp_dir=ctx.temp_dir,
             family=ctx.vmaf_family,
         )
     except Exception as e:

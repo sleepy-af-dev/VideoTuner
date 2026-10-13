@@ -1123,7 +1123,7 @@ class TestRunVspipeEncodeStop:
             sys.executable,
             "-c",
             f"import sys\nfor i in range({count}):\n"
-            "    sys.stdout.write(f'{i}\\n')\n    sys.stdout.flush()\n",
+            + "    sys.stdout.write(f'{i}\\n')\n    sys.stdout.flush()\n",
         ]
 
     @staticmethod
@@ -1132,7 +1132,7 @@ class TestRunVspipeEncodeStop:
             sys.executable,
             "-c",
             "import sys\nfor line in sys.stdin:\n"
-            "    sys.stderr.write(line)\n    sys.stderr.flush()\n",
+            + "    sys.stderr.write(line)\n    sys.stderr.flush()\n",
         ]
 
     def test_a_set_event_returns_instead_of_raising(self) -> None:

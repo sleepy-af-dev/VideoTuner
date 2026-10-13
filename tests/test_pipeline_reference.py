@@ -214,7 +214,7 @@ def test_a_run_writes_no_reference_and_still_scores_both_metrics(
             "libx265",
             "-x265-params",
             "lossless=1:colorprim=bt709:transfer=bt709"
-            ":colormatrix=bt709:repeat-headers=1",
+            + ":colormatrix=bt709:repeat-headers=1",
             str(source),
         ],
         capture_output=True,

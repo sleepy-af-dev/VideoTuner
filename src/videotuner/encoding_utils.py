@@ -518,7 +518,7 @@ def build_source_index(
         warn_user(
             log,
             "%s failed, the index will be built automatically: %s. "
-            "If this input cannot be read at all, try --indexer %s",
+            + "If this input cannot be read at all, try --indexer %s",
             spec.indexer_exe,
             e,
             other.value,

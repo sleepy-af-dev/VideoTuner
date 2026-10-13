@@ -112,7 +112,7 @@ def test_the_script_is_valid_python(info: VideoInfo) -> None:
     # every other test and fail only at runtime. SDR, PQ, HLG and the
     # assumed-peak PQ variant each take a different path through
     # colour_preamble, so every one needs compiling.
-    compile(_script(info), "vmaf.vpy", "exec")
+    _ = compile(_script(info), "vmaf.vpy", "exec")
 
 
 def test_the_reference_is_output_zero_and_distorted_is_output_one() -> None:

@@ -228,7 +228,7 @@ def _with_counted_frames(
     warn_user(
         log,
         "%s reports no frame count. Estimated %s frames from its rate and "
-        "duration; the index holds %d. Using the index.",
+        + "duration; the index holds %d. Using the index.",
         source.name,
         info.frame_count,
         counted,
@@ -455,8 +455,8 @@ def _run_pipeline_body(
             warn_user(
                 log,
                 "VMAF v1 models not found; scoring with the legacy v0 models. "
-                "Scores are not comparable with v1. This needs libvmaf 3.2.0 or "
-                "newer, which is not the same thing as a newer FFmpeg.",
+                + "Scores are not comparable with v1. This needs libvmaf 3.2.0 or "
+                + "newer, which is not the same thing as a newer FFmpeg.",
             )
 
     # Display active settings summary. The console tees this into the log, so
@@ -552,7 +552,7 @@ def _run_pipeline_body(
             else:
                 display.console.print(
                     f"[cyan]Using Existing {spec.display_name} Index[/cyan] "
-                    f"({source.name})"
+                    + f"({source.name})"
                 )
 
         # A source that reported no frame count was estimated as a rate times

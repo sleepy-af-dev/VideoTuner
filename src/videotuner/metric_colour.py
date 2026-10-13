@@ -353,10 +353,10 @@ def colour_assumption_notes(info: VideoInfo) -> list[str]:
         assumed = "BT.709" if mode is LinearisationMode.SDR else "BT.2020"
         notes.append(
             f"Input declares no {', '.join(absent)}; assuming {assumed} for "
-            "VMAF, SSIMULACRA2 and crop detection. Scores stay comparable "
-            "between encodes of this input, but not against a differently "
-            "tagged one, and a wrong guess also shifts where crop detection "
-            "ends the black bars, changing every encode's dimensions."
+            + "VMAF, SSIMULACRA2 and crop detection. Scores stay comparable "
+            + "between encodes of this input, but not against a differently "
+            + "tagged one, and a wrong guess also shifts where crop detection "
+            + "ends the black bars, changing every encode's dimensions."
         )
 
     # HLG needs no equivalent: tonemap.HLG defaults its own peak and writes
@@ -364,12 +364,12 @@ def colour_assumption_notes(info: VideoInfo) -> list[str]:
     if mode is LinearisationMode.PQ and missing_mastering_display(info):
         notes.append(
             "Input declares no mastering display; assuming a "
-            f"{SSIM2_ASSUMED_MASTERING_PEAK} cd/m2 peak for VMAF, "
-            "SSIMULACRA2 and crop detection. Scores stay comparable "
-            "between encodes of this input, but not against one that "
-            "declares its own peak, and a wrong peak also shifts where "
-            "crop detection ends the black bars, changing every encode's "
-            "dimensions."
+            + f"{SSIM2_ASSUMED_MASTERING_PEAK} cd/m2 peak for VMAF, "
+            + "SSIMULACRA2 and crop detection. Scores stay comparable "
+            + "between encodes of this input, but not against one that "
+            + "declares its own peak, and a wrong peak also shifts where "
+            + "crop detection ends the black bars, changing every encode's "
+            + "dimensions."
         )
 
     return notes

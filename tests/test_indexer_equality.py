@@ -54,16 +54,16 @@ def _make_clip(tmp_path: Path) -> Path:
     script = tmp_path / "make.vpy"
     _ = script.write_text(
         "import vapoursynth as vs\n"
-        "core = vs.core\n"
-        "frames = [core.std.BlankClip(format=vs.YUV420P10, width=320,\n"
-        "                             height=240, length=1,\n"
-        "                             color=[64 + i * 36, 512 + i * 8,\n"
-        "                                    512 - i * 8])\n"
-        "          for i in range(24)]\n"
-        "clip = core.std.Splice(frames)\n"
-        "clip = core.std.SetFrameProps(clip, _Matrix=1, _Transfer=1,\n"
-        "                              _Primaries=1, _Range=0)\n"
-        "clip.set_output()\n",
+        + "core = vs.core\n"
+        + "frames = [core.std.BlankClip(format=vs.YUV420P10, width=320,\n"
+        + "                             height=240, length=1,\n"
+        + "                             color=[64 + i * 36, 512 + i * 8,\n"
+        + "                                    512 - i * 8])\n"
+        + "          for i in range(24)]\n"
+        + "clip = core.std.Splice(frames)\n"
+        + "clip = core.std.SetFrameProps(clip, _Matrix=1, _Transfer=1,\n"
+        + "                              _Primaries=1, _Range=0)\n"
+        + "clip.set_output()\n",
         encoding="utf-8",
     )
     out = tmp_path / "clip.mkv"
@@ -114,21 +114,21 @@ def test_both_indexers_decode_the_same_frames(tmp_path: Path) -> None:
     script = tmp_path / "compare.vpy"
     _ = script.write_text(
         "import vapoursynth as vs\n"
-        "core = vs.core\n"
-        f"{loads}\n"
-        'assert len(a) == len(b), "frame counts differ"\n'
-        'assert a.format.id == b.format.id, "formats differ"\n'
-        "pa, pb = a.get_frame(0).props, b.get_frame(0).props\n"
-        f"for k in {COMPARED_PROPS!r}:\n"
-        '    assert pa.get(k) == pb.get(k), k + " differs"\n'
-        'diff = core.std.Expr([a, b], "x y - abs")\n'
-        "worst = 0.0\n"
-        "for i in (0, len(a) // 2, len(a) - 1):\n"
-        "    for p in range(diff.format.num_planes):\n"
-        "        s = core.std.PlaneStats(diff, plane=p)"
-        ".get_frame(i).props\n"
-        '        worst = max(worst, float(s["PlaneStatsMax"]))\n'
-        'print("WORST:%r" % worst)\n',
+        + "core = vs.core\n"
+        + f"{loads}\n"
+        + 'assert len(a) == len(b), "frame counts differ"\n'
+        + 'assert a.format.id == b.format.id, "formats differ"\n'
+        + "pa, pb = a.get_frame(0).props, b.get_frame(0).props\n"
+        + f"for k in {COMPARED_PROPS!r}:\n"
+        + '    assert pa.get(k) == pb.get(k), k + " differs"\n'
+        + 'diff = core.std.Expr([a, b], "x y - abs")\n'
+        + "worst = 0.0\n"
+        + "for i in (0, len(a) // 2, len(a) - 1):\n"
+        + "    for p in range(diff.format.num_planes):\n"
+        + "        s = core.std.PlaneStats(diff, plane=p)"
+        + ".get_frame(i).props\n"
+        + '        worst = max(worst, float(s["PlaneStatsMax"]))\n'
+        + 'print("WORST:%r" % worst)\n',
         encoding="utf-8",
     )
 

@@ -191,7 +191,7 @@ class TestScript:
     def test_the_script_is_valid_python(self, info: VideoInfo) -> None:
         # The script is a formatted string, so a syntax error passes every
         # other test and fails only at runtime.
-        compile(_script(info), "cropdetect.vpy", "exec")
+        _ = compile(_script(info), "cropdetect.vpy", "exec")
 
     @pytest.mark.parametrize(
         "info",
@@ -306,8 +306,8 @@ class TestCropAccumulation:
     @staticmethod
     def _lines(*crops: str) -> list[str]:
         return [
-            f"[Parsed_cropdetect_0 @ 0x0] x1:0 x2:0 y1:0 y2:0 w:0 h:0 "
-            f"x:0 y:0 pts:0 t:0.0 limit:0.094118 {c}"
+            "[Parsed_cropdetect_0 @ 0x0] x1:0 x2:0 y1:0 y2:0 w:0 h:0 "
+            + f"x:0 y:0 pts:0 t:0.0 limit:0.094118 {c}"
             for c in crops
         ]
 

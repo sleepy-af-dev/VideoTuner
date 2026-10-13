@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -18,7 +18,7 @@ from videotuner.encoding_utils import (
 )
 from videotuner.media import VideoInfo
 from videotuner.metric_colour import (
-    _FALLBACK_VALUES,
+    _FALLBACK_VALUES,  # pyright: ignore[reportPrivateUsage]
     ColourTarget,
     LinearisationMode,
     colour_assumption_notes,
@@ -27,7 +27,10 @@ from videotuner.metric_colour import (
     missing_colour_tags,
     missing_mastering_display,
 )
-from videotuner.ssimulacra2_assessment import _build_ssim2_script, _run_vszip_assessment
+from videotuner.ssimulacra2_assessment import (
+    _build_ssim2_script,  # pyright: ignore[reportPrivateUsage]
+    _run_vszip_assessment,  # pyright: ignore[reportPrivateUsage]
+)
 
 
 @pytest.mark.parametrize(
@@ -213,28 +216,28 @@ _CASES: dict[str, tuple[LinearisationMode, str, tuple[float, float, float], bool
     "sdr": (
         LinearisationMode.SDR,
         "clip = core.std.BlankClip(format=vs.RGB24, width=64, height=64, "
-        "length=1, color=[128, 128, 128])\n"
-        "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=1, "
-        "_Primaries=1, _Range=0)",
+        + "length=1, color=[128, 128, 128])\n"
+        + "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=1, "
+        + "_Primaries=1, _Range=0)",
         (0.200013, 0.200013, 0.200013),
         False,
     ),
     "pq": (
         LinearisationMode.PQ,
         "clip = core.std.BlankClip(format=vs.RGB48, width=64, height=64, "
-        "length=1, color=[32768, 32768, 32768])\n"
-        "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=16, "
-        "_Primaries=9, _Range=0, MasteringDisplayMaxLuminance=1000.0, "
-        "MasteringDisplayMinLuminance=0.0001)",
+        + "length=1, color=[32768, 32768, 32768])\n"
+        + "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=16, "
+        + "_Primaries=9, _Range=0, MasteringDisplayMaxLuminance=1000.0, "
+        + "MasteringDisplayMinLuminance=0.0001)",
         (0.504053, 0.504053, 0.504053),
         False,
     ),
     "hlg": (
         LinearisationMode.HLG,
         "clip = core.std.BlankClip(format=vs.RGB48, width=64, height=64, "
-        "length=1, color=[32768, 32768, 32768])\n"
-        "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=18, "
-        "_Primaries=9, _Range=0)",
+        + "length=1, color=[32768, 32768, 32768])\n"
+        + "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=18, "
+        + "_Primaries=9, _Range=0)",
         (0.263935, 0.263935, 0.263935),
         False,
     ),
@@ -252,9 +255,9 @@ _CASES: dict[str, tuple[LinearisationMode, str, tuple[float, float, float], bool
     "hlg-saturated-blue": (
         LinearisationMode.HLG,
         "clip = core.std.BlankClip(format=vs.RGB48, width=64, height=64, "
-        "length=1, color=[0, 0, 65535])\n"
-        "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=18, "
-        "_Primaries=9, _Range=1)",
+        + "length=1, color=[0, 0, 65535])\n"
+        + "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=18, "
+        + "_Primaries=9, _Range=1)",
         (0.062000, 0.112774, 1.000000),
         False,
     ),
@@ -267,9 +270,9 @@ _CASES: dict[str, tuple[LinearisationMode, str, tuple[float, float, float], bool
     "pq-no-mastering-display": (
         LinearisationMode.PQ,
         "clip = core.std.BlankClip(format=vs.RGB48, width=64, height=64, "
-        "length=1, color=[32768, 32768, 32768])\n"
-        "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=16, "
-        "_Primaries=9, _Range=0)",
+        + "length=1, color=[32768, 32768, 32768])\n"
+        + "clip = core.std.SetFrameProps(clip, _Matrix=0, _Transfer=16, "
+        + "_Primaries=9, _Range=0)",
         (0.504143, 0.504143, 0.504143),
         True,
     ),
@@ -280,25 +283,35 @@ def test_every_conversion_has_an_executing_case() -> None:
     assert {mode for mode, _, _, _ in _CASES.values()} == set(LinearisationMode)
 
 
-def _run_chain(tmp_path: Path, case: str) -> dict[str, Any]:
+@dataclass
+class _Chain:
+    """What the emitted chain produced for one frame."""
+
+    format: str = ""
+    props: dict[str, int] = field(default_factory=dict)
+    absent: dict[str, bool] = field(default_factory=dict)
+    values: list[float] = field(default_factory=list)
+
+
+def _run_chain(tmp_path: Path, case: str) -> _Chain:
     """Execute the emitted chain under the portable VapourSynth."""
     mode, construction, _, mastering_missing = _CASES[case]
     script = tmp_path / "chain.vpy"
     _ = script.write_text(
         "import vapoursynth as vs\n"
-        "core = vs.core\n\n"
-        f"{colour_preamble(mode, missing=[], mastering_missing=mastering_missing)}\n"
-        f"{construction}\n"
-        "out = prepare(clip)\n"
-        "f = out.get_frame(0)\n"
-        'print("FORMAT:" + out.format.name)\n'
-        'for k in ("_Matrix", "_Transfer", "_Primaries", "_Range"):\n'
-        '    print("PROP:" + k + "=" + str(int(f.props[k])))\n'
-        'for k in ("MasteringDisplayMaxLuminance", "MasteringDisplayMinLuminance"):\n'
-        '    print("ABSENT:" + k + "=" + str(k not in f.props))\n'
-        "for p in range(3):\n"
-        "    s = core.std.PlaneStats(out, plane=p).get_frame(0).props\n"
-        '    print("VALUE:%.6f" % float(s["PlaneStatsAverage"]))\n',
+        + "core = vs.core\n\n"
+        + f"{colour_preamble(mode, missing=[], mastering_missing=mastering_missing)}\n"
+        + f"{construction}\n"
+        + "out = prepare(clip)\n"
+        + "f = out.get_frame(0)\n"
+        + 'print("FORMAT:" + out.format.name)\n'
+        + 'for k in ("_Matrix", "_Transfer", "_Primaries", "_Range"):\n'
+        + '    print("PROP:" + k + "=" + str(int(f.props[k])))\n'
+        + 'for k in ("MasteringDisplayMaxLuminance", "MasteringDisplayMinLuminance"):\n'
+        + '    print("ABSENT:" + k + "=" + str(k not in f.props))\n'
+        + "for p in range(3):\n"
+        + "    s = core.std.PlaneStats(out, plane=p).get_frame(0).props\n"
+        + '    print("VALUE:%.6f" % float(s["PlaneStatsAverage"]))\n',
         encoding="utf-8",
     )
 
@@ -312,18 +325,18 @@ def _run_chain(tmp_path: Path, case: str) -> dict[str, Any]:
     )
     assert proc.returncode == 0, f"chain failed:\n{proc.stderr}"
 
-    out: dict[str, Any] = {"values": []}
+    out = _Chain()
     for line in proc.stdout.splitlines():
         if line.startswith("FORMAT:"):
-            out["format"] = line[7:]
+            out.format = line[7:]
         elif line.startswith("PROP:"):
             key, _, value = line[5:].partition("=")
-            out[key] = int(value)
+            out.props[key] = int(value)
         elif line.startswith("ABSENT:"):
             key, _, value = line[7:].partition("=")
-            out[f"absent_{key}"] = value == "True"
+            out.absent[key] = value == "True"
         elif line.startswith("VALUE:"):
-            out["values"].append(float(line[6:]))
+            out.values.append(float(line[6:]))
     return out
 
 
@@ -332,11 +345,11 @@ def _run_chain(tmp_path: Path, case: str) -> dict[str, Any]:
 def test_chain_emits_linear_rgbs_in_bt709_primaries(tmp_path: Path, case: str) -> None:
     got = _run_chain(tmp_path, case)
 
-    assert got["format"] == "RGBS"
-    assert got["_Matrix"] == 0  # RGB
-    assert got["_Transfer"] == 8  # linear
-    assert got["_Primaries"] == 1  # BT.709
-    assert got["_Range"] == 1  # full
+    assert got.format == "RGBS"
+    assert got.props["_Matrix"] == 0  # RGB
+    assert got.props["_Transfer"] == 8  # linear
+    assert got.props["_Primaries"] == 1  # BT.709
+    assert got.props["_Range"] == 1  # full
 
 
 @requires_vapoursynth
@@ -345,8 +358,8 @@ def test_chain_produces_the_measured_linear_value(tmp_path: Path, case: str) -> 
     _, _, expected, _ = _CASES[case]
     got = _run_chain(tmp_path, case)
 
-    assert got["values"] == pytest.approx(expected, abs=1e-4)
-    for channel in got["values"]:
+    assert got.values == pytest.approx(expected, abs=1e-4)
+    for channel in got.values:
         assert 0.0 <= channel <= 1.0
 
 
@@ -356,8 +369,8 @@ def test_tonemapping_consumes_the_mastering_display_metadata(tmp_path: Path) -> 
     # the tone curve did not run.
     got = _run_chain(tmp_path, "pq")
 
-    assert got["absent_MasteringDisplayMaxLuminance"] is True
-    assert got["absent_MasteringDisplayMinLuminance"] is True
+    assert got.absent["MasteringDisplayMaxLuminance"] is True
+    assert got.absent["MasteringDisplayMinLuminance"] is True
 
 
 @requires_vapoursynth
@@ -372,10 +385,10 @@ def test_pq_without_a_mastering_display_fails_without_the_assumption(
     script = tmp_path / "chain.vpy"
     _ = script.write_text(
         "import vapoursynth as vs\n"
-        "core = vs.core\n\n"
-        f"{colour_preamble(mode, missing=[])}\n"
-        f"{construction}\n"
-        "prepare(clip).get_frame(0)\n",
+        + "core = vs.core\n\n"
+        + f"{colour_preamble(mode, missing=[])}\n"
+        + f"{construction}\n"
+        + "prepare(clip).get_frame(0)\n",
         encoding="utf-8",
     )
 
@@ -431,7 +444,7 @@ def test_the_ssim2_script_is_valid_python(mode: LinearisationMode) -> None:
     # A formatted string with the sampling script pasted into it, so a syntax
     # error in either half would pass every other test here and fail only
     # once VapourSynth ran it.
-    compile(_script(mode), "ssim2.vpy", "exec")
+    _ = compile(_script(mode), "ssim2.vpy", "exec")
 
 
 def test_both_clips_go_through_the_chain() -> None:
@@ -549,7 +562,7 @@ def _write_pq_pair(tmp_path: Path) -> tuple[Path, Path]:
                 "libx265",
                 "-x265-params",
                 f"{rate}:colorprim=bt2020:transfer=smpte2084"
-                ":colormatrix=bt2020nc:repeat-headers=1",
+                + ":colormatrix=bt2020nc:repeat-headers=1",
                 str(out),
             ],
             capture_output=True,
@@ -768,17 +781,17 @@ def test_the_vmaf_chain_emits_limited_range_bt709_yuv(
     )
     _ = script.write_text(
         "import vapoursynth as vs\n"
-        "core = vs.core\n\n"
-        f"{preamble}\n"
-        f"{construction}\n"
-        "out = prepare(clip)\n"
-        "f = out.get_frame(0)\n"
-        'print("FORMAT:" + out.format.name)\n'
-        'for k in ("_Matrix", "_Transfer", "_Range"):\n'
-        '    print("PROP:" + k + "=" + str(int(f.props[k])))\n'
-        "for p in range(3):\n"
-        "    s = core.std.PlaneStats(out, plane=p).get_frame(0).props\n"
-        '    print("VALUE:%.6f" % float(s["PlaneStatsAverage"]))\n',
+        + "core = vs.core\n\n"
+        + f"{preamble}\n"
+        + f"{construction}\n"
+        + "out = prepare(clip)\n"
+        + "f = out.get_frame(0)\n"
+        + 'print("FORMAT:" + out.format.name)\n'
+        + 'for k in ("_Matrix", "_Transfer", "_Range"):\n'
+        + '    print("PROP:" + k + "=" + str(int(f.props[k])))\n'
+        + "for p in range(3):\n"
+        + "    s = core.std.PlaneStats(out, plane=p).get_frame(0).props\n"
+        + '    print("VALUE:%.6f" % float(s["PlaneStatsAverage"]))\n',
         encoding="utf-8",
     )
 

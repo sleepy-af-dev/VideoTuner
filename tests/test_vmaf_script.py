@@ -16,7 +16,13 @@ from videotuner.encoding_utils import (
     write_vpy_script,
 )
 from videotuner.media import VideoInfo
-from videotuner.vmaf_script import build_vmaf_vpy_script
+from videotuner.metric_colour import (
+    ColourTarget,
+    LinearisationMode,
+    colour_preamble,
+    vmaf_encode_source,
+)
+from videotuner.vmaf_script import build_vmaf_vpy_script, read_ssim2_scores
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VS_DIR = REPO_ROOT / "vapoursynth-portable"
@@ -178,6 +184,120 @@ def test_the_script_targets_vmaf_not_ssim2() -> None:
     # HDR still carries VMAF's own encode back to SDR, which SSIMULACRA2
     # never emits.
     assert "vs.YUV420P10" in _script(_PQ)
+
+
+_SCORES = Path("scores") / "ssim2.txt"
+
+
+def _combined(
+    info: VideoInfo,
+    indexer: IndexerType = IndexerType.FFMS2,
+    scores: Path = _SCORES,
+) -> str:
+    return build_vmaf_vpy_script(
+        ref_script=_sampling(indexer),
+        dis_path=Path("dis.mkv"),
+        dis_cache=Path("dis.ffindex"),
+        indexer=indexer,
+        info=info,
+        ssim2_scores=scores,
+    )
+
+
+@pytest.mark.parametrize(
+    "info", [_PQ, _HLG, _PQ_NO_MASTERING], ids=["pq", "hlg", "pq_no_mastering"]
+)
+def test_the_combined_script_is_valid_python(info: VideoInfo) -> None:
+    _ = compile(_combined(info), "vmaf.vpy", "exec")
+
+
+def test_the_combined_script_prepares_both_clips_for_ssim2() -> None:
+    # SSIMULACRA2 scores linear light, so prepare() is its chain, not VMAF's.
+    src = _combined(_PQ)
+    assert colour_preamble(LinearisationMode.PQ, missing=[]) in src
+    assert "ref = prepare(sampled)" in src
+    assert "ssim2 = ref.vszip.SSIMULACRA2(dis)" in src
+
+
+def test_vmaf_takes_the_same_frames_encoded_back() -> None:
+    src = _combined(_PQ)
+    assert vmaf_encode_source() in src
+    assert "vref = encode_for_vmaf(ref)" in src
+    assert "encode_for_vmaf(dis).set_output(1)" in src
+    # VMAF's own chain is not emitted beside it: one prepare, one tonemap.
+    vmaf_chain = colour_preamble(
+        LinearisationMode.PQ, missing=[], target=ColourTarget.VMAF
+    )
+    assert vmaf_chain not in src
+    assert src.count("core.tonemap.BT2390(") == 1
+
+
+def test_the_score_callback_rides_on_output_zero() -> None:
+    # Output 0 is what ffmpeg pulls frame by frame, so wrapping it is what
+    # makes every SSIMULACRA2 frame get computed and written.
+    src = _combined(_PQ)
+    assert (
+        "vref = core.std.ModifyFrame(vref, clips=[vref, ssim2], "
+        + "selector=_record_ssim2)"
+    ) in src
+    assert "vref.set_output(0)" in src
+    assert src.index("ModifyFrame(") < src.index("vref.set_output(0)")
+
+
+def test_an_awkward_scores_path_still_gives_valid_python() -> None:
+    # The scores file sits under the repository root, whose path can hold
+    # an apostrophe, a space or non-ASCII characters.
+    scores = Path("C:/it's a dir/wärme") / "ssim2.txt"
+    src = _combined(_PQ, scores=scores)
+    _ = compile(src, "vmaf.vpy", "exec")
+    assert repr(str(scores)) in src
+
+
+def test_the_combined_script_loads_through_the_selected_indexer() -> None:
+    assert "core.ffms2.Source(" in _combined(_PQ, IndexerType.FFMS2)
+    lsmash = _combined(_PQ, IndexerType.LSMASH)
+    assert "core.lsmas.LWLibavSource(" in lsmash
+    assert "core.ffms2.Source(" not in lsmash
+
+
+def test_an_sdr_input_cannot_take_the_combined_pass() -> None:
+    # An SDR clip goes to VMAF unconverted. Deriving its VMAF frames from
+    # SSIMULACRA2's would change the VMAF score with no error.
+    with pytest.raises(ValueError, match="HDR"):
+        _ = _combined(_SDR)
+
+
+def test_without_a_scores_file_the_script_scores_vmaf_alone() -> None:
+    src = _script(_PQ)
+    assert "vszip" not in src
+    assert "ModifyFrame" not in src
+
+
+def test_scores_are_read_in_frame_order(tmp_path: Path) -> None:
+    # Frames are requested concurrently, so lines arrive out of order.
+    path = tmp_path / "ssim2.txt"
+    _ = path.write_text("2:70.5\n0:80.25\n1:75.0\n", encoding="utf-8")
+    assert read_ssim2_scores(path) == [80.25, 75.0, 70.5]
+
+
+def test_a_frame_written_twice_counts_once(tmp_path: Path) -> None:
+    # A frame evicted from the cache and requested again is written again,
+    # with the same score.
+    path = tmp_path / "ssim2.txt"
+    _ = path.write_text("0:80.25\n1:75.0\n1:75.0\n", encoding="utf-8")
+    assert read_ssim2_scores(path) == [80.25, 75.0]
+
+
+def test_a_score_survives_exactly(tmp_path: Path) -> None:
+    value = 83.664199143915
+    path = tmp_path / "ssim2.txt"
+    _ = path.write_text(f"0:{value!r}\n", encoding="utf-8")
+    assert read_ssim2_scores(path) == [value]
+
+
+def test_a_missing_scores_file_is_an_error(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="no SSIMULACRA2 scores"):
+        _ = read_ssim2_scores(tmp_path / "ssim2.txt")
 
 
 requires_vapoursynth = pytest.mark.skipif(

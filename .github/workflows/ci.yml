@@ -8,6 +8,14 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # A PR's caches are visible to that PR alone, so a new PR's first run can only
+  # restore what main saved. Dependabot's auto-merges use github.token, which
+  # starts no workflows, so main can go a week without a run. Its vcpkg cache is
+  # then evicted, or keyed to a runner image that has been replaced, and every
+  # new PR compiles FFmpeg in full. A daily run keeps main's cache in use and
+  # rebuilds it within a day of an image bump. Off the hour, when queues peak.
+  schedule:
+    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:

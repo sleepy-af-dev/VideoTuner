@@ -19,7 +19,7 @@ from videotuner.pipeline_types import JobResult
 
 
 @pytest.fixture(autouse=True)
-def _stub_probe(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
+def _stub_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     """The pre-scan probes every file with ffprobe; these tests are about the
     batch loop's bookkeeping, not about probing.
 

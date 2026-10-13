@@ -1,5 +1,6 @@
 """Tests for pipeline iteration module."""
 
+import logging
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,7 +9,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from videotuner import encoding_utils
+from videotuner import (
+    encoding_utils,
+    pipeline_iteration,
+    ssimulacra2_assessment,
+    vmaf_assessment,
+)
+from videotuner.encoder_type import EncoderType
 from videotuner.encoding_utils import CropValues, SampledSource, UsableRange
 from videotuner.media import VideoInfo
 from videotuner.pipeline_cli import PipelineArgs
@@ -18,8 +25,13 @@ from videotuner.pipeline_iteration import (
     calculate_metric_params,
     extract_scores,
     reference_video_info,
+    run_assessments,
+    run_combined_assessment,
 )
 from videotuner.pipeline_types import IterationContext
+from videotuner.profiles import Profile
+from videotuner.ssimulacra2_assessment import SSIM2Result
+from videotuner.vmaf_assessment import VMAFResult
 
 
 class TestMetricSampleParams:
@@ -303,3 +315,184 @@ class TestReferenceVideoInfo:
         info = reference_video_info(ctx)
 
         assert info == replace(ctx.info, width=3800)
+
+
+_HDR = VideoInfo(
+    fps=24.0,
+    duration=10.0,
+    width=3840,
+    height=2160,
+    color_trc="smpte2084",
+    color_primaries="bt2020",
+    color_space="bt2020nc",
+)
+_SDR = VideoInfo(fps=24.0, duration=10.0, width=3840, height=2160, color_trc="bt709")
+_VMAF = VMAFResult(mean=95.0, harmonic_mean=94.0, minimum=90.0, p1_low=91.0)
+_SSIM2 = SSIM2Result(
+    mean=80.0, median=80.0, p5_low=70.0, p95_high=90.0, std_dev=1.0, count=20
+)
+_ENCODE = Path("shared.mkv")
+
+
+def _routing_ctx(
+    *,
+    info: VideoInfo,
+    sharing: bool = True,
+    vmaf: bool = True,
+    ssim2: bool = True,
+) -> IterationContext:
+    """A context carrying only what run_assessments reads."""
+    return cast(
+        IterationContext,
+        cast(
+            object,
+            SimpleNamespace(
+                info=info,
+                sharing_samples=sharing,
+                args=PipelineArgs(input=Path("test.mkv"), vmaf=vmaf, ssim2=ssim2),
+                log=logging.getLogger("test_routing"),
+            ),
+        ),
+    )
+
+
+class TestAssessmentRouting:
+    """HDR with shared samples scores both metrics in one pass. Everything
+    else, and any failure of that pass, takes the two separate passes."""
+
+    @pytest.fixture
+    def calls(self, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        calls: list[str] = []
+
+        def combined(
+            _ctx: IterationContext, _path: Path, _iteration: int
+        ) -> tuple[list[VMAFResult], list[SSIM2Result]]:
+            calls.append("combined")
+            return [_VMAF], [_SSIM2]
+
+        def vmaf(
+            _ctx: IterationContext, _path: Path, _iteration: int
+        ) -> list[VMAFResult]:
+            calls.append("vmaf")
+            return [_VMAF]
+
+        def ssim2(
+            _ctx: IterationContext, _path: Path, _iteration: int
+        ) -> list[SSIM2Result]:
+            calls.append("ssim2")
+            return [_SSIM2]
+
+        monkeypatch.setattr(pipeline_iteration, "run_combined_assessment", combined)
+        monkeypatch.setattr(pipeline_iteration, "run_vmaf_assessment", vmaf)
+        monkeypatch.setattr(pipeline_iteration, "run_ssim2_assessment", ssim2)
+        return calls
+
+    def test_hdr_with_shared_samples_takes_one_pass(self, calls: list[str]) -> None:
+        got = run_assessments(_routing_ctx(info=_HDR), _ENCODE, _ENCODE, 1)
+        assert calls == ["combined"]
+        assert got == ([_VMAF], [_SSIM2])
+
+    def test_sdr_takes_the_separate_passes(self, calls: list[str]) -> None:
+        _ = run_assessments(_routing_ctx(info=_SDR), _ENCODE, _ENCODE, 1)
+        assert calls == ["vmaf", "ssim2"]
+
+    def test_different_sampling_takes_the_separate_passes(
+        self, calls: list[str]
+    ) -> None:
+        ctx = _routing_ctx(info=_HDR, sharing=False)
+        _ = run_assessments(ctx, Path("vmaf.mkv"), Path("ssim2.mkv"), 1)
+        assert calls == ["vmaf", "ssim2"]
+
+    def test_one_metric_takes_its_own_pass(self, calls: list[str]) -> None:
+        ctx = _routing_ctx(info=_HDR, ssim2=False)
+        got = run_assessments(ctx, _ENCODE, None, 1)
+        assert calls == ["vmaf"]
+        assert got == ([_VMAF], [])
+
+    def test_a_failed_pass_falls_back_and_says_so(
+        self,
+        calls: list[str],
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        def broken(
+            _ctx: IterationContext, _path: Path, _iteration: int
+        ) -> tuple[list[VMAFResult], list[SSIM2Result]]:
+            calls.append("combined")
+            raise RuntimeError("pipe broke")
+
+        monkeypatch.setattr(pipeline_iteration, "run_combined_assessment", broken)
+
+        got = run_assessments(_routing_ctx(info=_HDR), _ENCODE, _ENCODE, 2)
+
+        assert calls == ["combined", "vmaf", "ssim2"]
+        assert got == ([_VMAF], [_SSIM2])
+        assert "iteration 2" in caplog.text
+        assert "scoring each separately: pipe broke" in caplog.text
+
+
+_PROFILE = Profile(
+    name="Example Profile (x265)",
+    description="Example",
+    settings={},
+    encoder=EncoderType.X265,
+)
+
+
+class TestCombinedAssessment:
+    """The combined pass checks that SSIMULACRA2 scored every frame, since a
+    short list would summarise fewer frames than VMAF scored."""
+
+    @staticmethod
+    def _run(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, frames: int
+    ) -> tuple[list[VMAFResult], list[SSIM2Result]]:
+        def no_index(**_kwargs: object) -> None:
+            return None
+
+        def fake_assess(**kwargs: object) -> list[VMAFResult]:
+            scores = cast(list[float], kwargs["ssim2_scores"])
+            scores.extend([80.0] * frames)
+            return [_VMAF]
+
+        def params(_ctx: IterationContext, _metric: str) -> MetricSampleParams:
+            return _PARAMS  # total_frames=20
+
+        def script(_ctx: IterationContext, _params: MetricSampleParams) -> str:
+            return "sampled = <selected>"
+
+        monkeypatch.setattr(ssimulacra2_assessment, "build_distorted_index", no_index)
+        monkeypatch.setattr(vmaf_assessment, "assess_vmaf_concatenated", fake_assess)
+        monkeypatch.setattr(pipeline_iteration, "calculate_metric_params", params)
+        monkeypatch.setattr(pipeline_iteration, "build_reference_script", script)
+        ctx = cast(
+            IterationContext,
+            cast(
+                object,
+                SimpleNamespace(
+                    args=PipelineArgs(input=Path("test.mkv"), crop_detect=False),
+                    info=_HDR,
+                    crop_values=None,
+                    repo_root=tmp_path,
+                    workdir=tmp_path,
+                    selected_profile=_PROFILE,
+                    display=None,
+                    log=logging.getLogger("test_combined"),
+                    vmaf_family=None,
+                ),
+            ),
+        )
+        return run_combined_assessment(ctx, tmp_path / "shared.mkv", 1)
+
+    def test_every_frame_scored_gives_both_results(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        vmaf, ssim2 = self._run(tmp_path, monkeypatch, frames=20)
+        assert vmaf == [_VMAF]
+        assert ssim2[0].count == 20
+
+    def test_a_missing_frame_fails_the_pass(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with pytest.raises(RuntimeError, match="19 of 20"):
+            _ = self._run(tmp_path, monkeypatch, frames=19)

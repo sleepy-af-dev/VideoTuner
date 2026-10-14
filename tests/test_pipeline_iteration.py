@@ -505,6 +505,16 @@ class TestCombinedAssessment:
         assert len(vmaf[0].frame_scores) == 24
         assert ssim2[0].count == 24
 
+    def test_a_vmaf_pass_with_no_frame_scores_is_left_to_validation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # libvmaf writing no log gives a NaN result with no frame scores, as
+        # in the separate pass. That is VMAF's failure, not a combined-pass
+        # one: validate_assessment_results reports it, as it did in 0.7.0.
+        vmaf, ssim2 = self._run(tmp_path, monkeypatch, frames=20, vmaf_frames=0)
+        assert vmaf[0].frame_scores == ()
+        assert ssim2[0].count == 20
+
     def test_a_missing_frame_fails_the_pass(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

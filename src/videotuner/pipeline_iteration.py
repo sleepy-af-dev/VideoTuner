@@ -302,9 +302,10 @@ def run_combined_assessment(
     # The frames VMAF scored in this pass are the count to match.
     # metric_params.total_frames only estimates it: it misses a partial
     # region at the end of the usable range, and a multi-file input is
-    # sampled file by file.
+    # sampled file by file. When libvmaf wrote no log there is nothing to
+    # match, and VMAF's NaN result goes to validation as in the separate pass.
     vmaf_frames = len(vmaf_results[0].frame_scores)
-    if len(scores) != vmaf_frames:
+    if vmaf_frames and len(scores) != vmaf_frames:
         raise RuntimeError(f"SSIMULACRA2 scored {len(scores)} of {vmaf_frames} frames")
     ssim2_results = ssim2_from_scores(
         scores,

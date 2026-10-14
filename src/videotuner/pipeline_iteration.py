@@ -299,10 +299,13 @@ def run_combined_assessment(
         family=ctx.vmaf_family,
         ssim2_scores=scores,
     )
-    if len(scores) != metric_params.total_frames:
-        raise RuntimeError(
-            f"SSIMULACRA2 scored {len(scores)} of {metric_params.total_frames} frames"
-        )
+    # The frames VMAF scored in this pass are the count to match.
+    # metric_params.total_frames only estimates it: it misses a partial
+    # region at the end of the usable range, and a multi-file input is
+    # sampled file by file.
+    vmaf_frames = len(vmaf_results[0].frame_scores)
+    if len(scores) != vmaf_frames:
+        raise RuntimeError(f"SSIMULACRA2 scored {len(scores)} of {vmaf_frames} frames")
     ssim2_results = ssim2_from_scores(
         scores,
         workdir=ctx.workdir,

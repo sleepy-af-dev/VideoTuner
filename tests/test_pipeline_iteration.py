@@ -440,12 +440,16 @@ _PROFILE = Profile(
 
 
 class TestCombinedAssessment:
-    """The combined pass checks that SSIMULACRA2 scored every frame, since a
-    short list would summarise fewer frames than VMAF scored."""
+    """The combined pass checks that SSIMULACRA2 scored every frame VMAF
+    scored, since a short list would summarise fewer frames."""
 
     @staticmethod
     def _run(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, frames: int
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        frames: int,
+        vmaf_frames: int = 20,
     ) -> tuple[list[VMAFResult], list[SSIM2Result]]:
         def no_index(**_kwargs: object) -> None:
             return None
@@ -453,7 +457,7 @@ class TestCombinedAssessment:
         def fake_assess(**kwargs: object) -> list[VMAFResult]:
             scores = cast(list[float], kwargs["ssim2_scores"])
             scores.extend([80.0] * frames)
-            return [_VMAF]
+            return [replace(_VMAF, frame_scores=(95.0,) * vmaf_frames)]
 
         def params(_ctx: IterationContext, _metric: str) -> MetricSampleParams:
             return _PARAMS  # total_frames=20
@@ -488,8 +492,18 @@ class TestCombinedAssessment:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         vmaf, ssim2 = self._run(tmp_path, monkeypatch, frames=20)
-        assert vmaf == [_VMAF]
+        assert len(vmaf[0].frame_scores) == 20
         assert ssim2[0].count == 20
+
+    def test_more_frames_than_the_sample_estimate_still_pass(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # calculate_metric_params estimates 20 frames, but a partial region at
+        # the end of the usable range, or a multi-file input sampled file by
+        # file, yields more. What both metrics actually scored is the truth.
+        vmaf, ssim2 = self._run(tmp_path, monkeypatch, frames=24, vmaf_frames=24)
+        assert len(vmaf[0].frame_scores) == 24
+        assert ssim2[0].count == 24
 
     def test_a_missing_frame_fails_the_pass(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

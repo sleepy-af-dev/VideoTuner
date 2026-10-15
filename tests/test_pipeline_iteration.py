@@ -351,6 +351,7 @@ def _routing_ctx(
                 sharing_samples=sharing,
                 args=PipelineArgs(input=Path("test.mkv"), vmaf=vmaf, ssim2=ssim2),
                 log=logging.getLogger("test_routing"),
+                combined_pass_failed=False,
             ),
         ),
     )
@@ -428,7 +429,27 @@ class TestAssessmentRouting:
         assert calls == ["combined", "vmaf", "ssim2"]
         assert got == ([_VMAF], [_SSIM2])
         assert "iteration 2" in caplog.text
-        assert "scoring each separately: pipe broke" in caplog.text
+        assert "scoring each metric separately for the rest of this run" in caplog.text
+        assert "pipe broke" in caplog.text
+
+    def test_after_a_failed_pass_the_run_stops_trying_it(
+        self, calls: list[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A fault that repeats would otherwise cost a wasted pass and a
+        # warning in every iteration.
+        def broken(
+            _ctx: IterationContext, _path: Path, _iteration: int
+        ) -> tuple[list[VMAFResult], list[SSIM2Result]]:
+            calls.append("combined")
+            raise RuntimeError("pipe broke")
+
+        monkeypatch.setattr(pipeline_iteration, "run_combined_assessment", broken)
+        ctx = _routing_ctx(info=_HDR)
+
+        _ = run_assessments(ctx, _ENCODE, _ENCODE, 1)
+        _ = run_assessments(ctx, _ENCODE, _ENCODE, 2)
+
+        assert calls == ["combined", "vmaf", "ssim2", "vmaf", "ssim2"]
 
 
 _PROFILE = Profile(

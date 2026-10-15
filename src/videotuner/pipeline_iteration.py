@@ -327,8 +327,8 @@ def run_assessments(
 
     An HDR input whose metrics share samples is scored in one pass, so each
     frame is tonemapped once for both. Everything else takes a pass per
-    metric, as does an iteration whose combined pass failed: each metric
-    then fails or succeeds on its own.
+    metric, as does the rest of a run once its combined pass has failed:
+    each metric then fails or succeeds on its own.
 
     Args:
         ctx: Pipeline iteration context
@@ -348,14 +348,16 @@ def run_assessments(
         and ctx.args.ssim2
         and vmaf_path is not None
         and needs_tonemap(ctx.info)
+        and not ctx.combined_pass_failed
     ):
         try:
             return run_combined_assessment(ctx, vmaf_path, iteration)
         except Exception as e:
+            ctx.combined_pass_failed = True
             warn_user(
                 ctx.log,
                 "Combined VMAF and SSIMULACRA2 assessment failed (iteration %d), "
-                + "scoring each separately: %s",
+                + "scoring each metric separately for the rest of this run: %s",
                 iteration,
                 e,
             )

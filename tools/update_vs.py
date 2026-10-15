@@ -8,6 +8,8 @@ from, so a re-run replaces a part whose pins changed and leaves the rest alone.
 
 Building ffms2 needs PowerShell 7, git and Visual Studio Build Tools. Without
 them, follow the manual setup in README.md, which uses the ffms2 5.0 release.
+The build also runs `vcpkg integrate install`, which points the user-wide
+MSBuild vcpkg integration at this build's vcpkg.
 """
 
 from __future__ import annotations

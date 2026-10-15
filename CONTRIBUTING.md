@@ -51,11 +51,13 @@ This project has a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you 
    - git
    - Visual Studio Build Tools, with MSBuild and the v143 toolset
 
-   If one is missing, the script says which and stops before it changes anything. You can set up by hand instead with [From Source](README.md#from-source) in the README, which uses the older ffms2 5.0 release.
+   If `pwsh`, git or MSBuild is missing, the script says which and stops before it changes anything. It does not check for the v143 toolset: without it, the build fails at its last step, after FFmpeg has compiled. You can set up by hand instead with [From Source](README.md#from-source) in the README, which uses the older ffms2 5.0 release.
 
    The first run compiles FFmpeg for ffms2. On one machine with 32 logical CPUs this took about 17 minutes and used about 2.7 GB under `tools/ffms2-build/`; expect yours to differ. Later runs reuse that build.
 
-   Run it again after you pull a change to `build.py` or `build-ffms2.ps1`. A new pin in `build.py` reinstalls VapourSynth, its plugins and the encoders, and removes anything you added to `vapoursynth-portable/` by hand. A change to `build-ffms2.ps1` rebuilds ffms2. If nothing changed, it does nothing.
+   The build also runs `vcpkg integrate install`, which points Visual Studio's user-wide vcpkg integration at `tools/ffms2-build/work/vcpkg`. If you use vcpkg in other projects, run `vcpkg integrate install` from your own vcpkg afterwards to point it back.
+
+   Run it again after you pull a change to `build.py` or `build-ffms2.ps1`. On an existing tree, the first run reinstalls VapourSynth, its plugins and the encoders, and so does any later run after a pin in `build.py` changes. A reinstall removes anything you added to `vapoursynth-portable/` by hand. A change to `build-ffms2.ps1` rebuilds ffms2. If nothing changed, it does nothing.
 
 ## Development Workflow
 

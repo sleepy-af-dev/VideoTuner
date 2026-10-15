@@ -211,6 +211,7 @@ def test_missing_tool_stops_before_anything_changes(
     assert (tmp_path / "tools" / "x264.exe").exists()
 
 
+@pytest.mark.parametrize("downloads", ["stale", "current"])
 @pytest.mark.parametrize(
     "error",
     [
@@ -218,11 +219,13 @@ def test_missing_tool_stops_before_anything_changes(
         pytest.param(KeyboardInterrupt(), id="interrupted"),
     ],
 )
-def test_failed_or_interrupted_provisioning_writes_no_stamp(
-    tmp_path: Path, fakes: Fakes, error: BaseException
+def test_failed_or_interrupted_provisioning_leaves_no_stamp(
+    tmp_path: Path, fakes: Fakes, error: BaseException, downloads: Stamp
 ) -> None:
-    """Review focus: the next run resets instead of trusting a half tree."""
-    make_tree(tmp_path, ffms2="current", downloads="stale")
+    """Review focus: the next run resets instead of trusting a half tree, even
+    when the stamp matched before the run and only a hand-deleted part was
+    being downloaded again."""
+    make_tree(tmp_path, ffms2="current", downloads=downloads)
     fakes.provision_error = error
 
     with pytest.raises(type(error)):

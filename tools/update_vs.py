@@ -158,8 +158,10 @@ def provision(root: Path, ffms2_out: Path) -> None:
                 shutil.rmtree(path)
             else:
                 path.unlink(missing_ok=True)
+    # Cleared before and written after, so a failed or interrupted run starts
+    # clean next time, even one that was only replacing a hand-deleted part
+    stamp.unlink(missing_ok=True)
     provision_dependencies(root, ffms2_out)
-    # Written last, so a failed or interrupted run starts clean next time
     _ = stamp.write_text(fingerprint)
 
 

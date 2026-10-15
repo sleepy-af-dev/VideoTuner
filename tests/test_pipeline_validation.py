@@ -292,7 +292,7 @@ class TestValidateMetricSampling:
         """Test that validation returns valid when frames are sufficient."""
         log = logging.getLogger("test")
         result = validate_metric_sampling(
-            usable_frames=10000,
+            usable_lengths=[10000],
             total_frames=12000,
             interval_frames=1000,
             region_frames=500,
@@ -309,10 +309,10 @@ class TestValidateMetricSampling:
         """Test that validation returns invalid when region frames exceed usable frames."""  # noqa: E501  # TODO(E501): shorten line
         log = logging.getLogger("test")
         result = validate_metric_sampling(
-            usable_frames=100,
+            usable_lengths=[100],
             total_frames=1000,
             interval_frames=1000,
-            region_frames=500,  # More than usable_frames
+            region_frames=500,  # More than the usable frames
             metric_name="vmaf",
             log=log,
         )
@@ -323,28 +323,28 @@ class TestValidateMetricSampling:
         assert "region size" in result.reason
 
     def test_returns_valid_with_large_interval(self):
-        """Test that at least one sample is possible when usable_frames >= region_frames."""  # noqa: E501  # TODO(E501): shorten line
+        """Test that one sample is possible when usable frames >= region frames."""
         log = logging.getLogger("test")
         result = validate_metric_sampling(
-            usable_frames=500,
+            usable_lengths=[500],
             total_frames=1000,
             interval_frames=10000,  # Large interval still yields 1 sample
             region_frames=100,
             metric_name="ssim2",
             log=log,
         )
-        # Formula: (usable + interval - region) // interval = (500 + 10000 - 100) // 10000 = 1  # noqa: E501  # TODO(E501): shorten line
         assert result.is_valid is True
         assert result.num_samples == 1
+        assert result.total_frames == 100
 
     def test_calculates_correct_coverage(self):
         """Test that coverage percentage is calculated correctly."""
         log = logging.getLogger("test")
         # With 10000 total frames, 5 samples of 500 frames = 2500 frames = 25%
         result = validate_metric_sampling(
-            usable_frames=8000,  # 8000 usable out of 10000
+            usable_lengths=[8000],  # 8000 usable out of 10000
             total_frames=10000,
-            interval_frames=1600,  # (8000 + 1600 - 500) // 1600 = 9100 // 1600 = 5 samples  # noqa: E501  # TODO(E501): shorten line
+            interval_frames=1600,  # 8000 // 1600 = 5 full samples
             region_frames=500,
             metric_name="vmaf",
             log=log,
@@ -375,8 +375,7 @@ class TestValidateSamplingParameters:
         vmaf_valid, ssim2_valid = validate_sampling_parameters(
             args=args,
             total_frames=10000,
-            guard_start_frames=500,
-            guard_end_frames=500,
+            usable_lengths=[9000],
             log=log,
         )
         assert vmaf_valid is True
@@ -397,8 +396,7 @@ class TestValidateSamplingParameters:
         vmaf_valid, ssim2_valid = validate_sampling_parameters(
             args=args,
             total_frames=10000,
-            guard_start_frames=500,
-            guard_end_frames=500,
+            usable_lengths=[9000],
             log=log,
         )
         assert vmaf_valid is False
@@ -419,8 +417,7 @@ class TestValidateSamplingParameters:
         vmaf_valid, ssim2_valid = validate_sampling_parameters(
             args=args,
             total_frames=10000,
-            guard_start_frames=500,
-            guard_end_frames=500,
+            usable_lengths=[9000],
             log=log,
         )
         assert vmaf_valid is True
@@ -441,8 +438,7 @@ class TestValidateSamplingParameters:
         vmaf_valid, ssim2_valid = validate_sampling_parameters(
             args=args,
             total_frames=10000,
-            guard_start_frames=500,
-            guard_end_frames=500,
+            usable_lengths=[9000],
             log=log,
         )
         assert vmaf_valid is False  # Was already disabled
@@ -464,8 +460,7 @@ class TestValidateSamplingParameters:
         vmaf_valid, ssim2_valid = validate_sampling_parameters(
             args=args,
             total_frames=10000,
-            guard_start_frames=4000,
-            guard_end_frames=4000,
+            usable_lengths=[2000],
             log=log,
         )
         # 2000 usable frames can still fit 500-frame regions

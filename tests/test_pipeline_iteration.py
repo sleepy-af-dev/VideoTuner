@@ -41,13 +41,11 @@ class TestMetricSampleParams:
         """Test that MetricSampleParams can be created with all fields."""
         params = MetricSampleParams(
             metric_type="vmaf",
-            num_samples=5,
             total_frames=2500,
             interval_frames=1000,
             region_frames=500,
         )
         assert params.metric_type == "vmaf"
-        assert params.num_samples == 5
         assert params.total_frames == 2500
         assert params.interval_frames == 1000
         assert params.region_frames == 500
@@ -56,13 +54,27 @@ class TestMetricSampleParams:
         """Test that MetricSampleParams is immutable."""
         params = MetricSampleParams(
             metric_type="ssim2",
-            num_samples=3,
             total_frames=1500,
             interval_frames=500,
             region_frames=500,
         )
         with pytest.raises(AttributeError):
-            setattr(params, "num_samples", 10)
+            setattr(params, "total_frames", 10)
+
+
+def _sources_ctx(lengths: list[int], args: PipelineArgs) -> IterationContext:
+    """A context holding one source for each usable length, and the args."""
+    sources = [
+        SampledSource(
+            path=Path(f"part{i}.mkv"),
+            cache_file=Path(f"part{i}.ffindex"),
+            usable_range=UsableRange(start=0, end=length, frame_count=length),
+        )
+        for i, length in enumerate(lengths)
+    ]
+    return cast(
+        IterationContext, cast(object, SimpleNamespace(sources=sources, args=args))
+    )
 
 
 class TestCalculateMetricParams:
@@ -75,20 +87,14 @@ class TestCalculateMetricParams:
             vmaf_interval_frames=1000,
             vmaf_region_frames=500,
         )
-        # Use cast since calculate_metric_params only needs usable_frames and args
-        ctx = cast(
-            IterationContext,
-            cast(object, SimpleNamespace(usable_frames=9000, args=args)),
-        )
+        ctx = _sources_ctx([9000], args)
 
         params = calculate_metric_params(ctx, "vmaf")
 
         assert params.metric_type == "vmaf"
         assert params.interval_frames == 1000
         assert params.region_frames == 500
-        # num_samples = (9000 + 1000 - 500) // 1000 = 9500 // 1000 = 9
-        assert params.num_samples == 9
-        # total_frames = 9 * 500 = 4500
+        # 9 full regions of 500
         assert params.total_frames == 4500
 
     def test_calculates_ssim2_params(self):
@@ -98,19 +104,14 @@ class TestCalculateMetricParams:
             ssim2_interval_frames=2000,
             ssim2_region_frames=300,
         )
-        ctx = cast(
-            IterationContext,
-            cast(object, SimpleNamespace(usable_frames=9000, args=args)),
-        )
+        ctx = _sources_ctx([9000], args)
 
         params = calculate_metric_params(ctx, "ssim2")
 
         assert params.metric_type == "ssim2"
         assert params.interval_frames == 2000
         assert params.region_frames == 300
-        # num_samples = (9000 + 2000 - 300) // 2000 = 10700 // 2000 = 5
-        assert params.num_samples == 5
-        # total_frames = 5 * 300 = 1500
+        # 4 full regions of 300, and 1000 frames left hold a fifth
         assert params.total_frames == 1500
 
     def test_handles_small_usable_frames(self):
@@ -120,16 +121,23 @@ class TestCalculateMetricParams:
             vmaf_interval_frames=500,
             vmaf_region_frames=300,
         )
-        ctx = cast(
-            IterationContext,
-            cast(object, SimpleNamespace(usable_frames=400, args=args)),
-        )
+        ctx = _sources_ctx([400], args)
 
         params = calculate_metric_params(ctx, "vmaf")
 
-        # num_samples = (400 + 500 - 300) // 500 = 600 // 500 = 1
-        assert params.num_samples == 1
         assert params.total_frames == 300
+
+    def test_counts_every_source(self):
+        """Each file is sampled on its own, so each one adds its regions."""
+        args = PipelineArgs(
+            input=Path("test.mkv"),
+            vmaf_interval_frames=1000,
+            vmaf_region_frames=100,
+        )
+
+        params = calculate_metric_params(_sources_ctx([500, 500], args), "vmaf")
+
+        assert params.total_frames == 200
 
 
 class TestExtractScores:
@@ -217,7 +225,6 @@ _SOURCE = SampledSource(
 
 _PARAMS = MetricSampleParams(
     metric_type="vmaf",
-    num_samples=10,
     total_frames=20,
     interval_frames=24,
     region_frames=2,
@@ -519,9 +526,8 @@ class TestCombinedAssessment:
     def test_more_frames_than_the_sample_estimate_still_pass(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # calculate_metric_params estimates 20 frames, but a partial region at
-        # the end of the usable range, or a multi-file input sampled file by
-        # file, yields more. What both metrics actually scored is the truth.
+        # metric_params says 20 frames, but the pass is checked against what
+        # both metrics actually scored, not against a computed total.
         vmaf, ssim2 = self._run(tmp_path, monkeypatch, frames=24, vmaf_frames=24)
         assert len(vmaf[0].frame_scores) == 24
         assert ssim2[0].count == 24

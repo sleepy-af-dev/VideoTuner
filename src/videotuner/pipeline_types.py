@@ -66,11 +66,6 @@ class IterationContext:
     # every iteration.
     combined_pass_failed: bool = False
 
-    @property
-    def usable_frames(self) -> int:
-        """Number of frames available for sampling (excluding guard bands)."""
-        return self.total_frames - self.guard_start_frames - self.guard_end_frames
-
 
 @dataclass(frozen=True)
 class JobResult:

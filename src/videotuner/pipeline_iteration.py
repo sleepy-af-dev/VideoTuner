@@ -38,7 +38,6 @@ class MetricSampleParams:
     """Calculated sampling parameters for a metric."""
 
     metric_type: Literal["vmaf", "ssim2"]
-    num_samples: int
     total_frames: int
     interval_frames: int
     region_frames: int
@@ -48,7 +47,7 @@ def calculate_metric_params(
     ctx: IterationContext,
     metric_type: Literal["vmaf", "ssim2"],
 ) -> MetricSampleParams:
-    """Calculate sample counts and frame totals for a metric.
+    """Calculate the sampling parameters and frame total for a metric.
 
     Args:
         ctx: Pipeline iteration context
@@ -57,6 +56,8 @@ def calculate_metric_params(
     Returns:
         MetricSampleParams with calculated values
     """
+    from .encoding_utils import calculate_sample_count
+
     if metric_type == "vmaf":
         interval_frames = ctx.args.vmaf_interval_frames
         region_frames = ctx.args.vmaf_region_frames
@@ -64,14 +65,14 @@ def calculate_metric_params(
         interval_frames = ctx.args.ssim2_interval_frames
         region_frames = ctx.args.ssim2_region_frames
 
-    num_samples = (
-        ctx.usable_frames + interval_frames - region_frames
-    ) // interval_frames
-    total_frames = num_samples * region_frames
+    _, total_frames = calculate_sample_count(
+        [s.usable_range.frame_count for s in ctx.sources],
+        interval_frames,
+        region_frames,
+    )
 
     return MetricSampleParams(
         metric_type=metric_type,
-        num_samples=num_samples,
         total_frames=total_frames,
         interval_frames=interval_frames,
         region_frames=region_frames,
@@ -299,10 +300,9 @@ def run_combined_assessment(
         family=ctx.vmaf_family,
         ssim2_scores=scores,
     )
-    # The frames VMAF scored in this pass are the count to match.
-    # metric_params.total_frames only estimates it: it misses a partial
-    # region at the end of the usable range, and a multi-file input is
-    # sampled file by file. When libvmaf wrote no log there is nothing to
+    # The frames VMAF scored in this pass are the count to match: they are
+    # measured, where metric_params.total_frames is computed from the
+    # sampling parameters. When libvmaf wrote no log there is nothing to
     # match, and VMAF's NaN result goes to validation as in the separate pass.
     vmaf_frames = len(vmaf_results[0].frame_scores)
     if vmaf_frames and len(scores) != vmaf_frames:

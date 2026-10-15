@@ -802,20 +802,28 @@ def calculate_usable_range(params: SamplingParams) -> UsableRange:
 
 
 def calculate_sample_count(
-    usable_frames: int, interval_frames: int, region_frames: int
+    usable_lengths: Sequence[int], interval_frames: int, region_frames: int
 ) -> tuple[int, int]:
-    """Calculate number of samples and total sampled frames.
+    """Count the samples and frames the sampling script yields.
+
+    Mirrors ``build_sampling_vpy_script``: each file is sampled on its own,
+    and SelectEvery keeps a final region that the end of the usable range
+    cuts short, so that region counts as a sample.
 
     Args:
-        usable_frames: Number of frames available for sampling
+        usable_lengths: Usable frames of each file, in playback order
         interval_frames: Sample every N frames
         region_frames: Consecutive frames per sample
 
     Returns:
         Tuple of (num_samples, total_sampled_frames)
     """
-    num_samples = (usable_frames + interval_frames - region_frames) // interval_frames
-    total_sampled_frames = num_samples * region_frames
+    num_samples = sum(-(-length // interval_frames) for length in usable_lengths)
+    total_sampled_frames = sum(
+        (length // interval_frames) * region_frames
+        + min(region_frames, length % interval_frames)
+        for length in usable_lengths
+    )
     return num_samples, total_sampled_frames
 
 

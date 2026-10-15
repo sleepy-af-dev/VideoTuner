@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .encoding_utils import is_hdr_video
+from .encoding_utils import calculate_sample_count, is_hdr_video
 from .media import VideoInfo
 from .utils import warn_user
 
@@ -196,7 +196,7 @@ def check_scores_meet_targets(
 
 
 def validate_metric_sampling(
-    usable_frames: int,
+    usable_lengths: Sequence[int],
     total_frames: int,
     interval_frames: int,
     region_frames: int,
@@ -209,7 +209,7 @@ def validate_metric_sampling(
     the resulting sample count and coverage.
 
     Args:
-        usable_frames: Frames available after guard bands
+        usable_lengths: Frames left after each file's own guard bands
         total_frames: Total frames in the video
         interval_frames: Frames between sample starts
         region_frames: Frames per sample region
@@ -220,6 +220,7 @@ def validate_metric_sampling(
         SamplingValidation with validity status and computed metrics
     """
     # Check if region fits within usable frames
+    usable_frames = sum(usable_lengths)
     if usable_frames < region_frames:
         warn_user(
             log,
@@ -237,9 +238,9 @@ def validate_metric_sampling(
             reason=f"Usable frames ({usable_frames}) less than region size ({region_frames})",  # noqa: E501  # TODO(E501): shorten line
         )
 
-    # Calculate number of samples and total frames
-    num_samples = (usable_frames + interval_frames - region_frames) // interval_frames
-    total_metric_frames = num_samples * region_frames
+    num_samples, total_metric_frames = calculate_sample_count(
+        usable_lengths, interval_frames, region_frames
+    )
 
     if num_samples < 1:
         warn_user(
@@ -258,7 +259,7 @@ def validate_metric_sampling(
 
     coverage_percent = (total_metric_frames / total_frames) * 100
     log.info(
-        "%s periodic sampling: %d samples × %d frames = %d total frames (%.1f%% coverage)",  # noqa: E501  # TODO(E501): shorten line
+        "%s periodic sampling: %d samples of up to %d frames = %d total frames (%.1f%% coverage)",  # noqa: E501  # TODO(E501): shorten line
         metric_name.upper(),
         num_samples,
         region_frames,
@@ -277,8 +278,7 @@ def validate_metric_sampling(
 def validate_sampling_parameters(
     args: PipelineArgs,
     total_frames: int,
-    guard_start_frames: int,
-    guard_end_frames: int,
+    usable_lengths: Sequence[int],
     log: logging.Logger,
 ) -> tuple[bool, bool]:
     """Validate sampling parameters for both VMAF and SSIM2 metrics.
@@ -289,22 +289,19 @@ def validate_sampling_parameters(
     Args:
         args: Pipeline arguments containing metric flags and sampling params
         total_frames: Total frames in the video
-        guard_start_frames: Frames excluded at start
-        guard_end_frames: Frames excluded at end
+        usable_lengths: Frames left after each file's own guard bands
         log: Logger instance
 
     Returns:
         Tuple of (vmaf_valid, ssim2_valid) indicating which metrics are valid
     """
-    usable_frames = total_frames - guard_start_frames - guard_end_frames
-
     vmaf_valid = args.vmaf
     ssim2_valid = args.ssim2
 
     # Validate VMAF sampling
     if args.vmaf:
         validation = validate_metric_sampling(
-            usable_frames=usable_frames,
+            usable_lengths=usable_lengths,
             total_frames=total_frames,
             interval_frames=args.vmaf_interval_frames,
             region_frames=args.vmaf_region_frames,
@@ -316,7 +313,7 @@ def validate_sampling_parameters(
     # Validate SSIM2 sampling
     if args.ssim2:
         validation = validate_metric_sampling(
-            usable_frames=usable_frames,
+            usable_lengths=usable_lengths,
             total_frames=total_frames,
             interval_frames=args.ssim2_interval_frames,
             region_frames=args.ssim2_region_frames,

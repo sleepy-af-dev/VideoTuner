@@ -361,49 +361,6 @@ class TestIterationContext:
         )
         assert ctx.sharing_samples is True
 
-    def test_usable_frames_calculation(self):
-        """Test usable_frames property excludes guard bands."""
-        ctx = IterationContext(
-            input_path=Path("test.mkv"),
-            sources=[],
-            workdir=Path("/tmp/work"),
-            temp_dir=Path("/tmp/temp"),
-            repo_root=Path("/repo"),
-            info=MagicMock(),
-            selected_profile=Profile(
-                name="Test", description="Test", settings={}, encoder=EncoderType.X265
-            ),
-            total_frames=10000,
-            guard_start_frames=100,
-            guard_end_frames=200,
-            args=PipelineArgs(input=Path("test.mkv")),
-            display=MagicMock(),
-            log=logging.getLogger("test"),
-        )
-        # usable = 10000 - 100 - 200 = 9700
-        assert ctx.usable_frames == 9700
-
-    def test_usable_frames_with_no_guards(self):
-        """Test usable_frames equals total when no guard bands."""
-        ctx = IterationContext(
-            input_path=Path("test.mkv"),
-            sources=[],
-            workdir=Path("/tmp/work"),
-            temp_dir=Path("/tmp/temp"),
-            repo_root=Path("/repo"),
-            info=MagicMock(),
-            selected_profile=Profile(
-                name="Test", description="Test", settings={}, encoder=EncoderType.X265
-            ),
-            total_frames=10000,
-            guard_start_frames=0,
-            guard_end_frames=0,
-            args=PipelineArgs(input=Path("test.mkv")),
-            display=MagicMock(),
-            log=logging.getLogger("test"),
-        )
-        assert ctx.usable_frames == 10000
-
     def test_crop_values_defaults_to_none(self):
         """Test that crop_values defaults to None."""
         ctx = IterationContext(

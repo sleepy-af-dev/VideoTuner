@@ -26,6 +26,7 @@ from videotuner.encoding_utils import (
     build_vspipe_command,
     build_x264_command,
     build_x265_command,
+    calculate_sample_count,
     calculate_usable_frames,
     combine_crop_values,
     create_temp_encode_paths,
@@ -672,6 +673,25 @@ class TestCalculateUsableFrames:
             guard_end_frames=50,
         )
         assert result == 1
+
+
+class TestCalculateSampleCount:
+    """Counts must match what each file's SelectEvery yields."""
+
+    def test_full_regions_only(self):
+        assert calculate_sample_count([3000], 1000, 100) == (3, 300)
+
+    def test_partial_final_region_is_counted(self):
+        # The end of the usable range cuts the fourth region to 40 frames
+        assert calculate_sample_count([3040], 1000, 100) == (4, 340)
+
+    def test_remainder_past_region_gives_full_region(self):
+        assert calculate_sample_count([3500], 1000, 100) == (4, 400)
+
+    def test_each_file_is_sampled_on_its_own(self):
+        # Joined, 1000 frames would give one region. Each file starts its
+        # own grid, so each gives one.
+        assert calculate_sample_count([500, 500], 1000, 100) == (2, 200)
 
 
 class TestBuildX265Command:

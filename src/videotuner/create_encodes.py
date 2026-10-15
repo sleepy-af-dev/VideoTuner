@@ -148,9 +148,8 @@ def encode_concatenated_reference(
     write_vpy_script(vpy_path, vpy_content)
 
     # Log encoding info
-    usable_frames = sum(s.usable_range.frame_count for s in sources)
     num_samples, total_sampled_frames = calculate_sample_count(
-        usable_frames, interval_frames, region_frames
+        [s.usable_range.frame_count for s in sources], interval_frames, region_frames
     )
     label_prefix = f"{metric_label} " if metric_label else ""
     log.info(
@@ -293,9 +292,8 @@ def encode_concatenated_distorted(
     write_vpy_script(vpy_path, vpy_content)
 
     # Log encoding info
-    usable_frames = sum(s.usable_range.frame_count for s in sources)
     num_samples, total_sampled_frames = calculate_sample_count(
-        usable_frames, interval_frames, region_frames
+        [s.usable_range.frame_count for s in sources], interval_frames, region_frames
     )
     label_prefix = f"{metric_label} " if metric_label else ""
     log.info(
@@ -478,9 +476,8 @@ def encode_concatenated_bitrate(
     write_vpy_script(vpy_path, vpy_content)
 
     # Log encoding info
-    usable_frames = sum(s.usable_range.frame_count for s in sources)
     num_samples, total_sampled_frames = calculate_sample_count(
-        usable_frames, interval_frames, region_frames
+        [s.usable_range.frame_count for s in sources], interval_frames, region_frames
     )
     label_prefix = f"{metric_label} " if metric_label else ""
     log.info(

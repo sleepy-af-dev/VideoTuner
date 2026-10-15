@@ -710,8 +710,7 @@ def _run_pipeline_body(
     vmaf_valid, ssim2_valid = validate_sampling_parameters(
         args=args,
         total_frames=total_frames,
-        guard_start_frames=guard_start_frames,
-        guard_end_frames=guard_end_frames,
+        usable_lengths=[s.usable_range.frame_count for s in sampled_sources],
         log=log,
     )
     args.vmaf = vmaf_valid

@@ -838,7 +838,7 @@ This creates a release folder in `dist/VideoTuner-vX.X.X/` with the compiled exe
 pytest
 
 # Type checking
-basedpyright src tests
+basedpyright src tests tools/update_vs.py
 
 # Linting and formatting
 ruff check .

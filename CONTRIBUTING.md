@@ -74,7 +74,7 @@ pytest -v -x              # Verbose output, stop on first failure
 The project uses basedpyright for type checking:
 
 ```bash
-basedpyright src tests
+basedpyright src tests tools/update_vs.py
 ```
 
 ### Linting and Formatting
@@ -137,10 +137,10 @@ Before creating an issue:
 3. **Verify your changes:**
 
    ```bash
-   pytest                    # All tests pass
-   basedpyright src tests    # No type errors
-   ruff check .              # No linting issues
-   ruff format .             # Code is formatted
+   pytest                                     # All tests pass
+   basedpyright src tests tools/update_vs.py  # No type errors
+   ruff check .                               # No linting issues
+   ruff format .                              # Code is formatted
    ```
 
 4. **Commit your changes:**

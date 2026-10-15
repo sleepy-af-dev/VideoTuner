@@ -260,6 +260,17 @@ def test_the_combined_script_loads_through_the_selected_indexer() -> None:
     assert "core.ffms2.Source(" not in lsmash
 
 
+_HLG_UNTAGGED = VideoInfo(fps=24.0, duration=1.0, color_trc="arib-std-b67")
+
+
+def test_the_combined_script_writes_the_same_fallback_tags() -> None:
+    # A partially tagged HDR input gets its missing tags from the same
+    # colour_preamble call the separate SSIMULACRA2 pass makes: BT.2020 for
+    # an HDR input, never BT.709.
+    src = _combined(_HLG_UNTAGGED)
+    assert "core.std.SetFrameProps(clip, _Primaries=9, _Matrix=9)" in src
+
+
 def test_an_sdr_input_cannot_take_the_combined_pass() -> None:
     # An SDR clip goes to VMAF unconverted. Deriving its VMAF frames from
     # SSIMULACRA2's would change the VMAF score with no error.

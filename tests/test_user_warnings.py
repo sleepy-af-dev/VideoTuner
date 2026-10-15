@@ -37,7 +37,11 @@ USER_FACING_WARNINGS = {
     ("pipeline_iteration.py", "VMAF assessment failed", 1),
     # Longer than the others, since the combined pass's message below also
     # contains "SSIMULACRA2 assessment failed".
-    ("pipeline_iteration.py", "SSIMULACRA2 assessment failed (iteration %d), cont", 1),
+    (
+        "pipeline_iteration.py",
+        "SSIMULACRA2 assessment failed (iteration %d), continuing without it",
+        1,
+    ),
     ("pipeline_iteration.py", "Combined VMAF and SSIMULACRA2 assessment failed", 1),
     ("pipeline_validation.py", "Usable frames", 1),
     ("pipeline_validation.py", "No %s samples possible", 1),

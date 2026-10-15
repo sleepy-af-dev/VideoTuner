@@ -45,7 +45,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen --extra dev
-      - run: uv run basedpyright src tests
+      - run: uv run basedpyright src tests tools/update_vs.py
 
   test:
     runs-on: windows-latest

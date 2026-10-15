@@ -39,26 +39,23 @@ This project has a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you 
    pip install -e ".[dev]"
    ```
 
-3. **Set up VapourSynth portable environment:**
+3. **Provision VapourSynth, its plugins and the encoders:**
 
-   Download `Install-Portable-VapourSynth-R73.ps1` from [VapourSynth R73 releases](https://github.com/vapoursynth/vapoursynth/releases/tag/R73) and run from the repository root:
-
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File Install-Portable-VapourSynth-R73.ps1 -TargetFolder vapoursynth-portable
+   ```bash
+   uv run python tools/update_vs.py
    ```
 
-4. **Download required VapourSynth plugins:**
+   This installs `vapoursynth-portable/` with its plugins, and `x264.exe` and `x265.exe` in `tools/`, at the versions `build.py` pins for a release. ffms2 has published no binary since 5.0, so the script builds the same ffms2 a release bundles, using `.github/scripts/build-ffms2.ps1`. That build needs:
 
-   Download and place in `vapoursynth-portable/vs-plugins/`:
-   - **ffms2** 5.0: Download `ffms2-5.0-msvc.7z` from [ffms2 releases](https://github.com/FFMS/ffms2/releases/tag/5.0), extract `x64/ffms2.dll` and `x64/ffmsindex.exe`
-   - **LSMASHSource** 1266.0.0.0: Download `L-SMASH-Works-r1266.0.0.0.7z` from [L-SMASH-Works releases](https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works/releases/tag/1266.0.0.0), extract `x64/LSMASHSource.dll`
-   - **vszip** R13: Download `vapoursynth-zip-r13-windows-x86_64.zip` from [vapoursynth-zip releases](https://github.com/dnjulek/vapoursynth-zip/releases/tag/R13), extract `vszip.dll`
+   - PowerShell 7 (`pwsh`)
+   - git
+   - Visual Studio Build Tools, with MSBuild and the v143 toolset
 
-5. **Download encoders:**
+   If one is missing, the script says which and stops before it changes anything. You can set up by hand instead with [From Source](README.md#from-source) in the README, which uses the older ffms2 5.0 release.
 
-   Download and place in `tools/`:
-   - **x264** 0.165.3223+26: Download from [x264-Mod-by-Patman releases](https://github.com/Patman86/x264-Mod-by-Patman/releases/tag/0.165.3223%2B26), extract `x264.exe` to `tools/x264.exe`
-   - **x265** 4.1+223+43: Download from [x265-Mod-by-Patman releases](https://github.com/Patman86/x265-Mod-by-Patman/releases/tag/4.1%2B223%2B43), extract `x265.exe` to `tools/x265.exe`
+   The first run compiles FFmpeg for ffms2. On one machine with 32 logical CPUs this took about 17 minutes and used about 2.7 GB under `tools/ffms2-build/`; expect yours to differ. Later runs reuse that build.
+
+   Run it again after you pull a change to `build.py` or `build-ffms2.ps1`. A new pin in `build.py` reinstalls VapourSynth, its plugins and the encoders, and removes anything you added to `vapoursynth-portable/` by hand. A change to `build-ffms2.ps1` rebuilds ffms2. If nothing changed, it does nothing.
 
 ## Development Workflow
 

@@ -212,7 +212,9 @@ Download the latest release from the [Releases page](https://github.com/sleepy-a
 
 ### From Source
 
-Requires **Python 3.13+**. All dependencies must be installed manually.
+Requires **Python 3.13+**.
+
+After step 1, `uv run python tools/update_vs.py` does steps 2 to 4 in one go and builds the ffms2 a release bundles; [CONTRIBUTING.md](CONTRIBUTING.md#development-setup) lists what it needs. The steps below do the same by hand, with the ffms2 5.0 release.
 
 #### 1. Install Python Package
 
@@ -827,7 +829,7 @@ This creates a release folder in `dist/VideoTuner-vX.X.X/` with the compiled exe
 
 **Note:** Building requires a C compiler (Visual Studio Build Tools on Windows).
 
-**ffms2 differs between a local build and a released one.** The release workflow builds ffms2 from a pinned commit and passes it to `build.py --ffms2-dir`; run on its own, `build.py` falls back to downloading 5.0. To match a release locally, run `.github/scripts/build-ffms2.ps1` first and pass its output directory.
+**ffms2 differs between a local build and a released one.** The release workflow builds ffms2 from a pinned commit and passes it to `build.py --ffms2-dir`; run on its own, `build.py` falls back to downloading 5.0. To match a release locally, run `tools/update_vs.py` first, which builds ffms2 into `tools/ffms2-build/out`, then pass that directory: `python build.py --ffms2-dir tools/ffms2-build/out`.
 
 ### Development Commands
 
@@ -836,7 +838,7 @@ This creates a release folder in `dist/VideoTuner-vX.X.X/` with the compiled exe
 pytest
 
 # Type checking
-basedpyright src tests
+basedpyright src tests tools/update_vs.py
 
 # Linting and formatting
 ruff check .

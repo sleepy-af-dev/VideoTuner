@@ -104,7 +104,8 @@ CLAUDE.md
 .claude/
 
 # Dependencies downloaded at build time or by user
-tools/
+tools/*
+!tools/update_vs.py
 vapoursynth-portable/
 
 # Nuitka build artifacts (output goes to dist/ which is already excluded above)

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- HDR runs are faster. When VMAF and SSIMULACRA2 sample the same frames, which is the default, each HDR frame is now tonemapped once per iteration for both metrics instead of once for each, and both scores come out exactly as before. Median wall clock per CRF search iteration against 0.7.0, same targets: PQ 8.7% and HLG 10.6% faster on 32 logical CPUs; held to 4 physical cores, one sample each, PQ 7.9% and HLG 11.9% faster. The shared pass keeps at most 16 frames in flight, fewer on a machine with fewer logical CPUs. Peak memory for a 4K PQ input sample is 19.3 GiB against 0.7.0's 16.5 GiB on 32 logical CPUs, and 11.8 GiB against 8.9 GiB on 4 physical cores, the larger of two runs each, measured as the peak committed memory of VideoTuner and every process it started. 0.7.0's own notes give 16.3 GiB for the same measurement, because repeat runs of one version vary by up to 0.7 GiB. SDR runs, and runs whose metrics sample different frames, are unchanged
+
 ## [0.7.0] - 2026-10-13
 
 ### Changed

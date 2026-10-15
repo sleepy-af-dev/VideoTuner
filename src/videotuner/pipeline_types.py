@@ -61,6 +61,11 @@ class IterationContext:
     # iteration, since it depends on a probe that must not repeat.
     vmaf_family: VmafFamily = VmafFamily.V1
 
+    # Set when the pass that scores both metrics together fails, so the rest
+    # of the run scores them separately instead of failing the same way in
+    # every iteration.
+    combined_pass_failed: bool = False
+
     @property
     def usable_frames(self) -> int:
         """Number of frames available for sampling (excluding guard bands)."""

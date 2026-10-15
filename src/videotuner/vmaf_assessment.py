@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from .constants import (
+    COMBINED_PASS_MAX_REQUESTS,
     MIN_CROP_FRACTION,
     RESOLUTION_CONFIDENCE_THRESHOLD,
     RESOLUTION_RELATIVE_TOLERANCE,
@@ -40,7 +41,7 @@ from .media import (
 from .metric_colour import linearisation_mode
 from .tool_parsers import get_float
 from .utils import make_relative_path, warn_user
-from .vmaf_script import build_vmaf_vpy_script
+from .vmaf_script import build_vmaf_vpy_script, read_ssim2_scores
 from .vmaf_types import VmafFamily, VmafModelChoice
 
 if TYPE_CHECKING:
@@ -568,6 +569,7 @@ def run_vmaf(
     *,
     indexer: IndexerType,
     vs_env: VapourSynthEnv,
+    ssim2_scores: list[float] | None = None,
 ) -> VMAFResult:
     log = logging.getLogger(__name__)
 
@@ -678,6 +680,9 @@ def run_vmaf(
     # other metric's index with it. The source indexes the reference reads
     # belong to the job and are built before any encoding.
     vpy_path = Path(tmp_log_dir) / "vmaf.vpy"
+    # In the combined pass, SSIMULACRA2's scores leave through a file beside
+    # the script, inside the folder already kept short for libvmaf's log.
+    scores_path = Path(tmp_log_dir) / "ssim2.txt"
     dis_cache = distorted_index_path(dis_path, indexer)
     log.info("VMAF colour conversion: %s", linearisation_mode(ref_info.color_trc).value)
     write_vpy_script(
@@ -688,6 +693,7 @@ def run_vmaf(
             dis_cache=dis_cache,
             indexer=indexer,
             info=ref_info,
+            ssim2_scores=scores_path if ssim2_scores is not None else None,
         ),
     )
     vspipe_args = [
@@ -697,6 +703,12 @@ def run_vmaf(
         str(resolve_absolute_path(vpy_path, cwd)),
         "-",
     ]
+    if ssim2_scores is not None:
+        # Each request in flight holds both clips as full-resolution float
+        # frames for SSIMULACRA2, so the combined pass caps them. The CPU
+        # count keeps it at or below vspipe's default of one per CPU.
+        requests = min(get_cpu_count(), COMBINED_PASS_MAX_REQUESTS)
+        vspipe_args[1:1] = ["-r", str(requests)]
 
     cmd = [
         ffmpeg_bin,
@@ -748,6 +760,8 @@ def run_vmaf(
                     + "libvmaf it links."
                 ) from e
             raise
+        if ssim2_scores is not None:
+            ssim2_scores.extend(read_ssim2_scores(scores_path))
         if tmp_log.exists():
             _ = shutil.move(str(tmp_log), str(log_path))
         else:
@@ -871,6 +885,7 @@ def assess_with_vmaf(
     family: VmafFamily = VmafFamily.V1,
     indexer: IndexerType,
     vs_env: VapourSynthEnv,
+    ssim2_scores: list[float] | None = None,
 ) -> VMAFResult:
     """High-level helper that probes the encode and runs VMAF.
 
@@ -878,6 +893,9 @@ def assess_with_vmaf(
     If model_spec is None, automatically selects the appropriate model based on
     the distorted video's resolution. The reference is described by ``ref_info``
     rather than probed, since it is the sampled source and never a file.
+
+    With ``ssim2_scores``, SSIMULACRA2 is scored in the same pass and its
+    per-frame scores are appended to that list.
     """  # noqa: E501  # TODO(E501): shorten line
     dis_info = parse_video_info(
         dis_path, ffprobe_bin=ffprobe_bin, log_hdr_metadata=False
@@ -895,6 +913,7 @@ def assess_with_vmaf(
         family=family,
         indexer=indexer,
         vs_env=vs_env,
+        ssim2_scores=ssim2_scores,
     )
 
 
@@ -915,6 +934,7 @@ def assess_vmaf_concatenated(
     indexer: IndexerType,
     vs_env: VapourSynthEnv,
     family: VmafFamily = VmafFamily.V1,
+    ssim2_scores: list[float] | None = None,
 ) -> list[VMAFResult]:
     """Run VMAF assessment on the sampled source and a distorted encode.
 
@@ -936,6 +956,8 @@ def assess_vmaf_concatenated(
         iteration: Current iteration number
         indexer: Source filter to load the distorted encode with.
         vs_env: VapourSynth environment configuration.
+        ssim2_scores: When given, SSIMULACRA2 is scored in the same pass and
+            its per-frame scores are appended here.
 
     Returns:
         List containing single VMAFResult for the concatenated comparison
@@ -946,8 +968,13 @@ def assess_vmaf_concatenated(
         get_profile_dir(workdir, profile) / f"vmaf_concatenated_iter{iteration}.json"
     )
 
+    label = (
+        "Running VMAF assessment"
+        if ssim2_scores is None
+        else "Running VMAF and SSIMULACRA2 assessment"
+    )
     with display.stage(
-        "Running VMAF assessment",
+        label,
         total=reference_frames,
         show_eta=True,
         transient=True,
@@ -966,6 +993,7 @@ def assess_vmaf_concatenated(
             family=family,
             indexer=indexer,
             vs_env=vs_env,
+            ssim2_scores=ssim2_scores,
         )
 
     log.info(

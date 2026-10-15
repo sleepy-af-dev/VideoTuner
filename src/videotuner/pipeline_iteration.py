@@ -239,6 +239,140 @@ def run_ssim2_assessment(
         return []
 
 
+def run_combined_assessment(
+    ctx: IterationContext,
+    distorted_path: Path,
+    iteration: int,
+) -> tuple[list[VMAFResult], list[SSIM2Result]]:
+    """Score VMAF and SSIMULACRA2 from one tonemapping pass.
+
+    Only for an HDR input whose metrics share samples, where both chains
+    share the whole tonemapping front. Unlike the separate passes, this does
+    not catch its own failure: the caller falls back to them.
+
+    Args:
+        ctx: Pipeline iteration context
+        distorted_path: Path to the shared distorted encode
+        iteration: Iteration number for logging
+
+    Returns:
+        The VMAF and SSIMULACRA2 results, one element each.
+
+    Raises:
+        RuntimeError: If the pass fails or SSIMULACRA2 misses a frame.
+    """
+    from .encoding_utils import VapourSynthEnv
+    from .ssimulacra2_assessment import build_distorted_index, ssim2_from_scores
+    from .vmaf_assessment import assess_vmaf_concatenated
+
+    vs_env = VapourSynthEnv.from_args(
+        ctx.args.vs_dir, ctx.args.vs_plugin_dir, ctx.repo_root
+    )
+    # The metrics share samples, so VMAF's parameters are SSIMULACRA2's.
+    metric_params = calculate_metric_params(ctx, "vmaf")
+
+    build_distorted_index(
+        distorted_path=distorted_path,
+        indexer=ctx.args.indexer,
+        display=ctx.display,
+        repo_root=ctx.repo_root,
+    )
+    ctx.log.info("Scoring VMAF and SSIMULACRA2 from one tonemapping pass")
+
+    scores: list[float] = []
+    vmaf_results = assess_vmaf_concatenated(
+        reference_script=build_reference_script(ctx, metric_params),
+        reference_info=reference_video_info(ctx),
+        reference_frames=metric_params.total_frames,
+        distorted_path=distorted_path,
+        workdir=ctx.workdir,
+        repo_root=ctx.repo_root,
+        profile=ctx.selected_profile,
+        ffmpeg_bin=ctx.args.ffmpeg_bin,
+        ffprobe_bin=ctx.args.ffprobe_bin,
+        vmaf_model=ctx.args.vmaf_model,
+        display=ctx.display,
+        log=ctx.log,
+        iteration=iteration,
+        indexer=ctx.args.indexer,
+        vs_env=vs_env,
+        family=ctx.vmaf_family,
+        ssim2_scores=scores,
+    )
+    # The frames VMAF scored in this pass are the count to match.
+    # metric_params.total_frames only estimates it: it misses a partial
+    # region at the end of the usable range, and a multi-file input is
+    # sampled file by file. When libvmaf wrote no log there is nothing to
+    # match, and VMAF's NaN result goes to validation as in the separate pass.
+    vmaf_frames = len(vmaf_results[0].frame_scores)
+    if vmaf_frames and len(scores) != vmaf_frames:
+        raise RuntimeError(f"SSIMULACRA2 scored {len(scores)} of {vmaf_frames} frames")
+    ssim2_results = ssim2_from_scores(
+        scores,
+        workdir=ctx.workdir,
+        profile=ctx.selected_profile,
+        iteration=iteration,
+        log=ctx.log,
+    )
+    return vmaf_results, ssim2_results
+
+
+def run_assessments(
+    ctx: IterationContext,
+    vmaf_path: Path | None,
+    ssim2_path: Path | None,
+    iteration: int,
+) -> tuple[list[VMAFResult], list[SSIM2Result]]:
+    """Score one iteration's encodes with every metric still on.
+
+    An HDR input whose metrics share samples is scored in one pass, so each
+    frame is tonemapped once for both. Everything else takes a pass per
+    metric, as does the rest of a run once its combined pass has failed:
+    each metric then fails or succeeds on its own.
+
+    Args:
+        ctx: Pipeline iteration context
+        vmaf_path: VMAF's distorted encode, or None if it failed
+        ssim2_path: SSIMULACRA2's distorted encode, or None if it failed
+        iteration: Iteration number for logging
+
+    Returns:
+        The VMAF and SSIMULACRA2 results; a list is empty for a metric that
+        is off or failed.
+    """
+    from .vmaf_assessment import needs_tonemap
+
+    if (
+        ctx.sharing_samples
+        and ctx.args.vmaf
+        and ctx.args.ssim2
+        and vmaf_path is not None
+        and needs_tonemap(ctx.info)
+        and not ctx.combined_pass_failed
+    ):
+        try:
+            return run_combined_assessment(ctx, vmaf_path, iteration)
+        except Exception as e:
+            ctx.combined_pass_failed = True
+            warn_user(
+                ctx.log,
+                "Combined VMAF and SSIMULACRA2 assessment failed (iteration %d), "
+                + "scoring each metric separately for the rest of this run: %s",
+                iteration,
+                e,
+            )
+
+    vmaf_results: list[VMAFResult] = []
+    if ctx.args.vmaf and vmaf_path:
+        vmaf_results = run_vmaf_assessment(ctx, vmaf_path, iteration)
+
+    ssim2_results: list[SSIM2Result] = []
+    if ctx.args.ssim2 and ssim2_path:
+        ssim2_results = run_ssim2_assessment(ctx, ssim2_path, iteration)
+
+    return vmaf_results, ssim2_results
+
+
 def extract_scores(
     vmaf_results: list[VMAFResult],
     ssim2_results: list[SSIM2Result],
@@ -542,14 +676,9 @@ def run_single_crf_iteration(
 
     log_section(ctx.log, f"Assessment (CRF {crf:.1f})")
 
-    # Run assessments using shared helpers
-    vmaf_results: list[VMAFResult] = []
-    if ctx.args.vmaf and vmaf_distorted_path:
-        vmaf_results = run_vmaf_assessment(ctx, vmaf_distorted_path, iteration)
-
-    ssim2_results: list[SSIM2Result] = []
-    if ctx.args.ssim2 and ssim2_distorted_path:
-        ssim2_results = run_ssim2_assessment(ctx, ssim2_distorted_path, iteration)
+    vmaf_results, ssim2_results = run_assessments(
+        ctx, vmaf_distorted_path, ssim2_distorted_path, iteration
+    )
 
     # Validate assessment results
     validate_assessment_results(
@@ -793,17 +922,13 @@ def run_single_bitrate_iteration(
     # Run assessments using shared helpers
     log_section(ctx.log, "Quality Assessment")
 
-    vmaf_results: list[VMAFResult] = []
-    if ctx.args.vmaf and vmaf_distorted_path:
-        vmaf_results = run_vmaf_assessment(ctx, vmaf_distorted_path, iteration)
-        if vmaf_results:
-            ctx.log.info("VMAF assessment complete")
-
-    ssim2_results: list[SSIM2Result] = []
-    if ctx.args.ssim2 and ssim2_distorted_path:
-        ssim2_results = run_ssim2_assessment(ctx, ssim2_distorted_path, iteration)
-        if ssim2_results:
-            ctx.log.info("SSIM2 assessment complete")
+    vmaf_results, ssim2_results = run_assessments(
+        ctx, vmaf_distorted_path, ssim2_distorted_path, iteration
+    )
+    if vmaf_results:
+        ctx.log.info("VMAF assessment complete")
+    if ssim2_results:
+        ctx.log.info("SSIM2 assessment complete")
 
     # Extract scores and calculate predicted bitrate
     scores = extract_scores(vmaf_results, ssim2_results)

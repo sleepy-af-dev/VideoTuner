@@ -14,7 +14,9 @@ from videotuner.encoding_utils import (
     UsableRange,
     VapourSynthEnv,
     build_sampling_vpy_script,
+    distorted_index_path,
     indexer_spec,
+    write_vpy_script,
 )
 from videotuner.media import VideoInfo
 from videotuner.metric_colour import (
@@ -26,11 +28,14 @@ from videotuner.metric_colour import (
     linearisation_mode,
     missing_colour_tags,
     missing_mastering_display,
+    vmaf_encode_source,
 )
 from videotuner.ssimulacra2_assessment import (
     _build_ssim2_script,  # pyright: ignore[reportPrivateUsage]
+    _calculate_stats_from_scores,  # pyright: ignore[reportPrivateUsage]
     _run_vszip_assessment,  # pyright: ignore[reportPrivateUsage]
 )
+from videotuner.vmaf_script import build_vmaf_vpy_script, read_ssim2_scores
 
 
 @pytest.mark.parametrize(
@@ -601,6 +606,72 @@ def test_a_pq_input_with_no_mastering_display_is_still_scored(
     assert result.count == 24
 
 
+@requires_vapoursynth
+@requires_libx265
+def test_one_pass_scores_exactly_what_two_separate_passes_score(
+    tmp_path: Path,
+) -> None:
+    # The combined pass is only a speed-up if neither metric can tell it from
+    # its own pass: VMAF's raw frames and SSIMULACRA2's statistics must match
+    # to the bit.
+    ref, dis = _write_pq_pair(tmp_path)
+    info = VideoInfo(
+        fps=24.0,
+        duration=1.0,
+        color_trc="smpte2084",
+        color_primaries="bt2020",
+        color_space="bt2020nc",
+    )
+    ref_script = _sampling(IndexerType.FFMS2, ref)
+    dis_cache = distorted_index_path(dis, IndexerType.FFMS2)
+    vs_env = VapourSynthEnv.from_cwd(REPO_ROOT)
+
+    separate_ssim2 = _run_vszip_assessment(
+        ref_script=ref_script,
+        dis_path=dis,
+        vs_env=vs_env,
+        temp_dir=tmp_path,
+        info=info,
+        indexer=IndexerType.FFMS2,
+    )
+
+    scores = tmp_path / "ssim2.txt"
+    scripts: dict[str, Path] = {}
+    for name, scores_arg in (("separate", None), ("combined", scores)):
+        scripts[name] = tmp_path / f"{name}.vpy"
+        write_vpy_script(
+            scripts[name],
+            build_vmaf_vpy_script(
+                ref_script=ref_script,
+                dis_path=dis,
+                dis_cache=dis_cache,
+                indexer=IndexerType.FFMS2,
+                info=info,
+                ssim2_scores=scores_arg,
+            ),
+        )
+
+    def frames(name: str, output: int) -> bytes:
+        raw = tmp_path / f"{name}-{output}.raw"
+        proc = subprocess.run(
+            [str(vs_env.vspipe_bin), "-o", str(output), str(scripts[name]), str(raw)],
+            capture_output=True,
+            text=True,
+            env=vs_env.build_env(),
+            check=False,
+        )
+        assert proc.returncode == 0, f"{name} output {output}:\n{proc.stderr}"
+        return raw.read_bytes()
+
+    # Output 0 last: every run of the combined script reopens the scores
+    # file, and only output 0 writes to it.
+    assert frames("combined", 1) == frames("separate", 1)
+    assert frames("combined", 0) == frames("separate", 0)
+
+    combined_ssim2 = _calculate_stats_from_scores(read_ssim2_scores(scores))
+    assert combined_ssim2 == separate_ssim2
+
+
 def test_a_fully_declared_input_assumes_nothing() -> None:
     info = VideoInfo(
         fps=24.0,
@@ -758,6 +829,41 @@ def test_both_targets_share_one_tonemap_call(mode: LinearisationMode) -> None:
     vmaf = colour_preamble(mode, missing=[], target=ColourTarget.VMAF)
     for call in ("core.tonemap.BT2390(", "core.tonemap.BT2407(", "core.tonemap.HLG("):
         assert (call in ssim2) == (call in vmaf)
+
+
+@pytest.mark.parametrize(
+    ("mode", "missing", "mastering_missing"),
+    [
+        (LinearisationMode.PQ, [], False),
+        (LinearisationMode.PQ, [], True),
+        (LinearisationMode.PQ, ["primaries", "matrix"], False),
+        (LinearisationMode.HLG, [], False),
+        (LinearisationMode.HLG, ["matrix"], False),
+    ],
+    ids=["pq", "pq_no_mastering", "pq_untagged", "hlg", "hlg_untagged"],
+)
+def test_the_ssim2_chain_plus_the_vmaf_encode_is_the_vmaf_chain(
+    mode: LinearisationMode, missing: list[str], mastering_missing: bool
+) -> None:
+    # The combined pass hands VMAF SSIMULACRA2's frames through
+    # encode_for_vmaf. It scores what the separate VMAF path scores only if
+    # the VMAF chain is the SSIMULACRA2 chain with that one step added.
+    # Line 1 of each preamble is its docstring, which names the target.
+    ssim2 = colour_preamble(
+        mode, missing=missing, mastering_missing=mastering_missing
+    ).splitlines()
+    vmaf = colour_preamble(
+        mode,
+        missing=missing,
+        mastering_missing=mastering_missing,
+        target=ColourTarget.VMAF,
+    ).splitlines()
+    encode = vmaf_encode_source().splitlines()
+
+    assert vmaf[0] == ssim2[0] == "def prepare(clip):"
+    assert ssim2[-1] == "    return out"
+    assert encode[0] == "def encode_for_vmaf(out):"
+    assert vmaf[2:] == ssim2[2:-1] + encode[1:]
 
 
 # Measured against vs-tonemap 0.2.0 on 2026-09-18. _Range=0 is limited.

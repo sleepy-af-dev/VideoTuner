@@ -325,6 +325,124 @@ def _run_vszip_assessment(
             vpy_path.unlink()
 
 
+def build_distorted_index(
+    *,
+    distorted_path: Path,
+    indexer: IndexerType,
+    display: PipelineDisplay,
+    repo_root: Path,
+) -> None:
+    """Build the distorted encode's index up front, with a progress display.
+
+    Otherwise the source filter builds it silently on first decode. The
+    reference needs nothing here: the sampling script reads the source
+    through indexes the job built before encoding.
+
+    ``distorted_index_path`` names it beside the encode, so VMAF reuses this
+    one rather than building a second under a different name. Nothing is
+    deleted first: the encode's own name carries its CRF and iteration, so
+    an index at that path can only ever describe the file beside it.
+
+    Args:
+        distorted_path: The encode to index.
+        indexer: Source filter the metrics load it with.
+        display: Progress display manager.
+        repo_root: Repository root, used to locate the indexer executable.
+            The job's workdir is a folder under it, not the directory
+            ``vapoursynth-portable`` lives in.
+    """
+    with display.stage(
+        f"Indexing distorted ({indexer_spec(indexer).display_name})",
+        total=1,
+        show_eta=True,
+        transient=True,
+        show_done=True,
+    ) as index_stage:
+        _ = build_source_index(
+            source_path=distorted_path,
+            cache_file=distorted_index_path(distorted_path, indexer),
+            indexer=indexer,
+            cwd=repo_root,
+            line_handler=index_stage.make_index_handler(),
+        )
+
+
+def ssim2_from_scores(
+    scores: list[float],
+    *,
+    workdir: Path,
+    profile: Profile,
+    iteration: int,
+    log: logging.Logger,
+) -> list[SSIM2Result]:
+    """Summarise per-frame scores and record them as the separate pass does.
+
+    Args:
+        scores: One SSIMULACRA2 score per frame.
+        workdir: Working directory for output files.
+        profile: Encoding profile, which names the output directory.
+        iteration: Current iteration number.
+        log: Logger instance.
+
+    Returns:
+        List containing the single SSIM2Result.
+    """
+    return _record_ssim2_result(
+        _calculate_stats_from_scores(scores),
+        workdir=workdir,
+        profile=profile,
+        iteration=iteration,
+        log=log,
+    )
+
+
+def _record_ssim2_result(
+    result: SSIM2Result,
+    *,
+    workdir: Path,
+    profile: Profile,
+    iteration: int,
+    log: logging.Logger,
+) -> list[SSIM2Result]:
+    """Write the result's JSON log and summary line.
+
+    Returns:
+        List containing ``result``.
+    """
+    from .pipeline_types import get_profile_dir
+
+    ssim2_log_path = (
+        get_profile_dir(workdir, profile) / f"ssim2_concatenated_iter{iteration}.json"
+    )
+    try:
+        _ = ensure_dir(ssim2_log_path.parent)
+        with open(ssim2_log_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "tool": "vszip",
+                    "count": result.count,
+                    "mean": result.mean,
+                    "median": result.median,
+                    "p5_low": result.p5_low,
+                    "p95_high": result.p95_high,
+                    "std_dev": result.std_dev,
+                },
+                f,
+                indent=2,
+            )
+    except Exception:
+        pass  # Log writing is optional
+
+    log.info(
+        "SSIMULACRA2: mean=%.2f, median=%.2f, 5%%=%.2f, 95%%=%.2f",
+        result.mean,
+        result.median,
+        result.p5_low,
+        result.p95_high,
+    )
+    return [result]
+
+
 def assess_ssim2_concatenated(
     reference_script: str,
     reference_frames: int,
@@ -366,36 +484,12 @@ def assess_ssim2_concatenated(
     Returns:
         List containing single SSIM2Result for the concatenated comparison
     """
-    from .pipeline_types import get_profile_dir
-
-    ssim2_log_path = (
-        get_profile_dir(workdir, profile) / f"ssim2_concatenated_iter{iteration}.json"
+    build_distorted_index(
+        distorted_path=distorted_path,
+        indexer=indexer,
+        display=display,
+        repo_root=repo_root,
     )
-
-    # Build the distorted index up front so it gets a progress display, rather
-    # than letting the source filter build it silently on first decode. The
-    # reference needs nothing here: the sampling script reads the source
-    # through indexes the job built before encoding.
-    #
-    # `distorted_index_path` names it beside the encode, so VMAF reuses this
-    # one rather than building a second under a different name. Nothing is
-    # deleted first: the encode's own name carries its CRF and iteration, so
-    # an index at that path can only ever describe the file beside it.
-    dis_cache = distorted_index_path(distorted_path, indexer)
-    with display.stage(
-        f"Indexing distorted ({indexer_spec(indexer).display_name})",
-        total=1,
-        show_eta=True,
-        transient=True,
-        show_done=True,
-    ) as index_stage:
-        _ = build_source_index(
-            source_path=distorted_path,
-            cache_file=dis_cache,
-            indexer=indexer,
-            cwd=repo_root,
-            line_handler=index_stage.make_index_handler(),
-        )
 
     with display.stage(
         "Running SSIMULACRA2 assessment",
@@ -414,31 +508,6 @@ def assess_ssim2_concatenated(
             line_handler=stage.make_vszip_handler(total_frames=reference_frames),
         )
 
-    # Write JSON log
-    try:
-        _ = ensure_dir(ssim2_log_path.parent)
-        with open(ssim2_log_path, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "tool": "vszip",
-                    "count": result.count,
-                    "mean": result.mean,
-                    "median": result.median,
-                    "p5_low": result.p5_low,
-                    "p95_high": result.p95_high,
-                    "std_dev": result.std_dev,
-                },
-                f,
-                indent=2,
-            )
-    except Exception:
-        pass  # Log writing is optional
-
-    log.info(
-        "SSIMULACRA2: mean=%.2f, median=%.2f, 5%%=%.2f, 95%%=%.2f",
-        result.mean,
-        result.median,
-        result.p5_low,
-        result.p95_high,
+    return _record_ssim2_result(
+        result, workdir=workdir, profile=profile, iteration=iteration, log=log
     )
-    return [result]

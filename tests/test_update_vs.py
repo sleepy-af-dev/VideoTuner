@@ -128,6 +128,24 @@ def test_nothing_changed_builds_and_deletes_nothing(
     assert fakes.provisions == [(tmp_path, tmp_path / update_vs.FFMS2_BUILD / "out")]
 
 
+def test_a_tree_from_before_stamps_settles_after_one_run(
+    tmp_path: Path, fakes: Fakes
+) -> None:
+    """Review focus: the stamps the script writes are the ones it accepts, so
+    the second run rebuilds, checks and deletes nothing."""
+    make_tree(tmp_path, ffms2=None, downloads=None)
+
+    update_vs.main(tmp_path)
+    marker = tmp_path / "vapoursynth-portable" / "vs-plugins" / "marker.dll"
+    _ = marker.write_bytes(b"")
+    update_vs.main(tmp_path)
+
+    assert len(fakes.builds) == 1
+    assert fakes.tool_checks == 1
+    assert len(fakes.provisions) == 2
+    assert marker.exists()
+
+
 @pytest.mark.parametrize("downloads", ["stale", None])
 def test_changed_or_unrecorded_download_pins_reset_only_the_downloads(
     tmp_path: Path, fakes: Fakes, downloads: Stamp

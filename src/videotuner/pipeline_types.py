@@ -24,10 +24,8 @@ from .vmaf_types import VmafFamily
 class IterationContext:
     """Shared context for pipeline iterations."""
 
-    # Paths. ``input_path`` names the job: the file it reads, or the folder
-    # when several files are read as one source. ``sources`` is what is
-    # actually decoded, one entry per file with its own usable range.
-    input_path: Path
+    # Paths. ``sources`` is what is actually decoded, one entry per file with
+    # its own usable range.
     sources: list[SampledSource]
     workdir: Path
     temp_dir: Path
@@ -38,11 +36,6 @@ class IterationContext:
 
     # Profile and settings
     selected_profile: Profile
-
-    # Periodic sampling parameters
-    total_frames: int
-    guard_start_frames: int
-    guard_end_frames: int
 
     # Command-line args
     args: PipelineArgs

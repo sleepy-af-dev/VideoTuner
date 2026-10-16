@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, cast
 from .constants import (
     COMBINED_PASS_MAX_REQUESTS,
     MIN_CROP_FRACTION,
+    PERCENTILE_1PCT,
     RESOLUTION_CONFIDENCE_THRESHOLD,
     RESOLUTION_RELATIVE_TOLERANCE,
     VMAF_HFR_FPS_THRESHOLD,
@@ -89,8 +90,6 @@ class ResolutionResult:
     Result of commercial resolution classification.
 
     Attributes:
-        width: Actual video width in pixels
-        height: Actual video height in pixels
         base_label: Resolution tier without scan type (e.g., "1080", "720")
         base_height: Standard height for this tier (e.g., 1080 for 1080p)
         confidence: Classification confidence from 0.0 to 1.0
@@ -98,8 +97,6 @@ class ResolutionResult:
         extras: Additional metadata (aspect ratios, error metrics, etc.)
     """
 
-    width: int
-    height: int
     base_label: str
     base_height: int
     confidence: float
@@ -171,8 +168,6 @@ class CommercialResolutionInfer:
         if h == 0:
             # Prevent division by zero
             return ResolutionResult(
-                width=w,
-                height=h,
                 base_label="480",
                 base_height=480,
                 confidence=0.0,
@@ -223,8 +218,6 @@ class CommercialResolutionInfer:
                 if err < best_err:
                     best_err = err
                     best = ResolutionResult(
-                        width=w,
-                        height=h,
                         base_label=label,
                         base_height=bh,
                         confidence=cls._err_to_conf(err),
@@ -244,8 +237,6 @@ class CommercialResolutionInfer:
         if best is None:
             label, bh, bw = min(cls.BASES, key=lambda b: abs(h - b[1]))
             best = ResolutionResult(
-                width=w,
-                height=h,
                 base_label=label,
                 base_height=bh,
                 confidence=0.3,
@@ -815,7 +806,7 @@ def run_vmaf(
             if pooled_minimum is None:
                 pooled_minimum = min(frame_scores)
             minimum = float(pooled_minimum)
-            k = max(1, math.ceil(0.01 * len(frame_scores)))
+            k = max(1, math.ceil(PERCENTILE_1PCT * len(frame_scores)))
             low = sorted(frame_scores)[:k]
             p1_low = sum(low) / len(low)
             if mean is None:

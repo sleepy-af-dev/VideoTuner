@@ -787,27 +787,6 @@ def get_all_groups(profiles: dict[str, Profile]) -> set[str]:
     return groups
 
 
-def validate_groups_exist(profiles: dict[str, Profile], groups: list[str]) -> None:
-    """Validate that all specified groups exist in the profiles.
-
-    Args:
-        profiles: Dictionary of profiles from load_profiles()
-        groups: List of group names to validate
-
-    Raises:
-        ProfileError: If any group does not exist
-    """
-    available_groups = get_all_groups(profiles)
-    for group in groups:
-        if group not in available_groups:
-            available = (
-                ", ".join(sorted(available_groups)) if available_groups else "(none)"
-            )
-            raise ProfileError(
-                f"Profile group '{group}' not found.\nAvailable groups: {available}"
-            )
-
-
 def validate_profile_and_group_names(profiles: dict[str, Profile]) -> None:
     """Validate that profile names don't collide with group names.
 

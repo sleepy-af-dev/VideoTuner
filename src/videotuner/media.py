@@ -545,22 +545,20 @@ def get_video_format(video_info: VideoInfo) -> VideoFormat:
 class EncodeStats:
     """Statistics for an encoded video file."""
 
-    file_size_bytes: int
-    duration_seconds: float
     bitrate_kbps: float
 
 
 def get_encode_stats(
     file_path: Path, ffprobe_bin: str = "ffprobe"
 ) -> EncodeStats | None:
-    """Get file size, duration, and bitrate for an encoded video file.
+    """Get the average bitrate of an encoded video file, from its size and duration.
 
     Args:
         file_path: Path to the encoded video file
         ffprobe_bin: Path to ffprobe binary (default: "ffprobe")
 
     Returns:
-        EncodeStats with file size, duration, and bitrate, or None if failed
+        EncodeStats with the bitrate, or None if failed
     """
     import os
 
@@ -597,11 +595,7 @@ def get_encode_stats(
         else:
             bitrate_kbps = 0.0
 
-        return EncodeStats(
-            file_size_bytes=file_size_bytes,
-            duration_seconds=duration_seconds,
-            bitrate_kbps=bitrate_kbps,
-        )
+        return EncodeStats(bitrate_kbps=bitrate_kbps)
 
     except Exception as e:
         logger.warning("Failed to get encode stats for %s: %s", file_path, e)

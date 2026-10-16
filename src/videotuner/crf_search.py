@@ -9,14 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .constants import METRIC_DECIMALS
-from .pipeline_cli import DEFAULT_CRF_START_VALUE
 
 
 class CRFFloorError(Exception):
     """Raised when CRF reaches the minimum floor without meeting targets."""
-
-    crf_floor: float
-    unmet_targets: list[tuple[str, float, float]]
 
     def __init__(self, crf_floor: float, unmet_targets: list[tuple[str, float, float]]):
         """
@@ -24,9 +20,6 @@ class CRFFloorError(Exception):
             crf_floor: The CRF floor that was reached
             unmet_targets: List of (metric_name, target_value, current_value) tuples
         """
-        self.crf_floor = crf_floor
-        self.unmet_targets = unmet_targets
-
         target_details = ", ".join(
             f"{name}: {current:.{METRIC_DECIMALS}f} < {target:.{METRIC_DECIMALS}f}"
             for name, target, current in unmet_targets
@@ -462,72 +455,3 @@ class CRFSearchState:
         """
         if current_crf <= CRF_FLOOR and not self.all_targets_met():
             self._raise_floor_error()
-
-
-def estimate_starting_crf_from_results(
-    previous_results: list[CRFResult],
-    targets: list[QualityTarget],
-    default_crf: float = DEFAULT_CRF_START_VALUE,
-) -> float:
-    """Estimate a good starting CRF based on previous search results.
-
-    This is used when switching from preset-based search to profile-based search.
-    It analyzes how close the previous results were to targets and estimates
-    a starting point that should be close to meeting targets.
-
-    Args:
-        previous_results: Results from previous CRF search (e.g., preset-based)
-        targets: Quality targets to meet
-        default_crf: Default CRF if no useful data available
-
-    Returns:
-        Estimated starting CRF for the new search
-    """
-    if not previous_results:
-        return default_crf
-
-    # Find the result closest to meeting all targets
-    # We want the highest CRF where we're close to meeting targets
-    best_result: CRFResult | None = None
-    best_score = float("-inf")
-
-    for result in previous_results:
-        # Calculate aggregate "closeness" to targets
-        # Positive score = meets targets, negative = below targets
-        min_delta = float("inf")
-        all_metrics_present = True
-
-        for target in targets:
-            if target.metric_name not in result.scores:
-                all_metrics_present = False
-                break
-            delta = result.scores[target.metric_name] - target.target_value
-            min_delta = min(min_delta, delta)
-
-        if not all_metrics_present:
-            continue
-
-        # Score: prefer results that meet targets (positive min_delta)
-        # Among those that meet, prefer higher CRF
-        # Among those that don't meet, prefer ones closer to meeting
-        if min_delta >= 0:
-            # Meets all targets - score by CRF (higher is better)
-            score = result.crf + 100  # Offset to prioritize meeting targets
-        else:
-            # Doesn't meet all - score by how close we are
-            score = min_delta
-
-        if score > best_score:
-            best_score = score
-            best_result = result
-
-    if best_result is None:
-        return default_crf
-
-    # If best result meets targets, start slightly higher (try for better compression)
-    if best_score >= 100:  # Means it met targets (score = crf + 100)
-        return min(best_result.crf + 2.0, CRF_CEILING)
-
-    # If best result doesn't quite meet targets, start at that CRF
-    # (the new profile might perform better)
-    return best_result.crf

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .constants import PERCENTILE_5PCT, PERCENTILE_95PCT
 from .encoding_utils import (
     IndexerType,
     VapourSynthEnv,
@@ -64,8 +65,8 @@ def _calculate_stats_from_scores(scores: list[float]) -> SSIM2Result:
     std_dev = statistics.stdev(scores) if count > 1 else 0.0
 
     # Calculate percentiles (5th and 95th)
-    p5_idx = max(0, int(count * 0.05) - 1)
-    p95_idx = min(count - 1, int(count * 0.95))
+    p5_idx = max(0, int(count * PERCENTILE_5PCT) - 1)
+    p95_idx = min(count - 1, int(count * PERCENTILE_95PCT))
     p5_low = scores_sorted[p5_idx]
     p95_high = scores_sorted[p95_idx]
 

@@ -10,17 +10,6 @@ from __future__ import annotations
 import re
 
 # =============================================================================
-# Common Patterns
-# =============================================================================
-
-# Matches float values like: 1.5, -2.3, +0.5, 100, -50
-FLOAT_PATTERN = r"[-+]?\d*\.?\d+"
-
-# Matches percentage values like: 50%, 100%
-PERCENT_PATTERN = r"(\d+)%"
-
-
-# =============================================================================
 # Progress Patterns - for parsing tool output during execution
 # =============================================================================
 
@@ -53,12 +42,6 @@ X264_PROGRESS_RE = re.compile(
 
 # mkvmerge percentage: "Progress: 50%"
 MKVMERGE_PCT_RE = re.compile(r"(\d{1,3})%")
-
-# SSIMULACRA2 progress line: "50.0% 500 / 1000"
-SSIM_LINE_RE = re.compile(
-    r"(?P<percent>\d+(?:\.\d+)?)%\s+(?P<done>\d+)\s*/\s*(?P<total>\d+)",
-    re.IGNORECASE,
-)
 
 # vszip progress: "vszip progress: 50/100"
 VSZIP_PROGRESS_RE = re.compile(r"vszip progress:\s*(\d+)\s*/\s*(\d+)", re.IGNORECASE)

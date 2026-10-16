@@ -321,7 +321,6 @@ class TestIterationContext:
     def test_sharing_samples_defaults_to_false(self):
         """Test that sharing_samples defaults to False."""
         ctx = IterationContext(
-            input_path=Path("test.mkv"),
             sources=[],
             workdir=Path("/tmp/work"),
             temp_dir=Path("/tmp/temp"),
@@ -330,9 +329,6 @@ class TestIterationContext:
             selected_profile=Profile(
                 name="Test", description="Test", settings={}, encoder=EncoderType.X265
             ),
-            total_frames=10000,
-            guard_start_frames=100,
-            guard_end_frames=100,
             args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),
@@ -342,7 +338,6 @@ class TestIterationContext:
     def test_sharing_samples_can_be_set_true(self):
         """Test that sharing_samples can be set to True."""
         ctx = IterationContext(
-            input_path=Path("test.mkv"),
             sources=[],
             workdir=Path("/tmp/work"),
             temp_dir=Path("/tmp/temp"),
@@ -351,9 +346,6 @@ class TestIterationContext:
             selected_profile=Profile(
                 name="Test", description="Test", settings={}, encoder=EncoderType.X265
             ),
-            total_frames=10000,
-            guard_start_frames=100,
-            guard_end_frames=100,
             args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),
@@ -364,7 +356,6 @@ class TestIterationContext:
     def test_crop_values_defaults_to_none(self):
         """Test that crop_values defaults to None."""
         ctx = IterationContext(
-            input_path=Path("test.mkv"),
             sources=[],
             workdir=Path("/tmp/work"),
             temp_dir=Path("/tmp/temp"),
@@ -373,9 +364,6 @@ class TestIterationContext:
             selected_profile=Profile(
                 name="Test", description="Test", settings={}, encoder=EncoderType.X265
             ),
-            total_frames=10000,
-            guard_start_frames=100,
-            guard_end_frames=100,
             args=PipelineArgs(input=Path("test.mkv")),
             display=MagicMock(),
             log=logging.getLogger("test"),

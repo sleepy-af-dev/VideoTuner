@@ -15,6 +15,7 @@ from io import TextIOWrapper
 from pathlib import Path
 from typing import IO
 
+from .constants import FPS_DENOMINATOR
 from .encoder_type import EncoderType
 from .utils import ensure_dir, run_capture, warn_user
 
@@ -175,20 +176,6 @@ def get_encoder_bin(encoder_type: EncoderType, cwd: Path | None = None) -> Path:
     return bin_path
 
 
-def get_vapoursynth_portable_dir(cwd: Path | None = None) -> Path:
-    """Get path to VapourSynth portable directory.
-
-    Args:
-        cwd: Working directory (if None, uses relative path)
-
-    Returns:
-        Path to vapoursynth-portable directory
-    """
-    if cwd:
-        return Path(cwd) / VAPOURSYNTH_PORTABLE_DIR
-    return Path(VAPOURSYNTH_PORTABLE_DIR)
-
-
 def resolve_absolute_path(path: Path, cwd: Path | None = None) -> Path:
     """Convert path to absolute, resolving relative to cwd if provided.
 
@@ -204,44 +191,6 @@ def resolve_absolute_path(path: Path, cwd: Path | None = None) -> Path:
     if cwd:
         return Path(cwd) / path
     return path.resolve()
-
-
-def calculate_usable_frames(
-    total_frames: int,
-    guard_start_frames: int,
-    guard_end_frames: int,
-) -> int:
-    """Calculate number of usable frames after excluding guard bands.
-
-    Guard bands are regions at the start and end of the video that are
-    excluded from sampling to avoid credits, intros, and outros.
-
-    Args:
-        total_frames: Total number of frames in the video.
-        guard_start_frames: Frames to skip at the start.
-        guard_end_frames: Frames to skip at the end.
-
-    Returns:
-        Number of frames available for sampling.
-
-    Raises:
-        ValueError: If parameters are invalid or result in no usable frames.
-    """
-    if total_frames < 1:
-        raise ValueError(f"total_frames must be >= 1, got {total_frames}")
-    if guard_start_frames < 0:
-        raise ValueError(f"guard_start_frames must be >= 0, got {guard_start_frames}")
-    if guard_end_frames < 0:
-        raise ValueError(f"guard_end_frames must be >= 0, got {guard_end_frames}")
-
-    usable = total_frames - guard_start_frames - guard_end_frames
-    if usable <= 0:
-        msg = (
-            f"No usable frames after guards (total={total_frames}, "
-            f"start={guard_start_frames}, end={guard_end_frames})"
-        )
-        raise ValueError(msg)
-    return usable
 
 
 def write_vpy_script(vpy_path: Path, content: str) -> None:
@@ -305,7 +254,6 @@ class IndexerSpec:
         index_suffix: Extension for the index file. The two differ, so
             switching indexers cannot collide.
         indexer_exe: Executable that builds an index up front, with progress.
-        plugin_dll: Plugin the source filter lives in.
         display_name: Name shown to a user, as distinct from the enum value,
             which is the ``--indexer`` CLI token.
     """
@@ -313,7 +261,6 @@ class IndexerSpec:
     source_call: str
     index_suffix: str
     indexer_exe: str
-    plugin_dll: str
     display_name: str
 
     def source_expr(self, source_path: str, cache_file: str) -> str:
@@ -334,7 +281,6 @@ _INDEXERS: dict[IndexerType, IndexerSpec] = {
         source_call='core.ffms2.Source(r"{source}", cachefile=r"{cache}")',
         index_suffix=".ffindex",
         indexer_exe="ffmsindex.exe",
-        plugin_dll="ffms2.dll",
         display_name="FFMS2",
     ),
     IndexerType.LSMASH: IndexerSpec(
@@ -343,7 +289,6 @@ _INDEXERS: dict[IndexerType, IndexerSpec] = {
         ),
         index_suffix=".lwi",
         indexer_exe="LSMASHSource_indexing.exe",
-        plugin_dll="LSMASHSource.dll",
         display_name="LSMASHSource",
     ),
 }
@@ -716,48 +661,6 @@ class EncoderPaths:
 
 
 @dataclass(frozen=True)
-class SamplingParams:
-    """Parameters for periodic frame sampling.
-
-    Attributes:
-        interval_frames: Sample every N frames
-        region_frames: Number of consecutive frames per sample
-        guard_start_frames: Frames to skip at start (intros/credits)
-        guard_end_frames: Frames to skip at end (credits)
-        total_frames: Total frames in source video
-    """
-
-    interval_frames: int
-    region_frames: int
-    guard_start_frames: int
-    guard_end_frames: int
-    total_frames: int
-
-    def validate(self) -> None:
-        """Validate sampling parameters.
-
-        Raises:
-            ValueError: If any parameter is invalid.
-        """
-        if self.interval_frames < 1:
-            raise ValueError(
-                f"interval_frames must be >= 1, got {self.interval_frames}"
-            )
-        if self.region_frames < 1:
-            raise ValueError(f"region_frames must be >= 1, got {self.region_frames}")
-        if self.guard_start_frames < 0:
-            raise ValueError(
-                f"guard_start_frames must be >= 0, got {self.guard_start_frames}"
-            )
-        if self.guard_end_frames < 0:
-            raise ValueError(
-                f"guard_end_frames must be >= 0, got {self.guard_end_frames}"
-            )
-        if self.total_frames < 1:
-            raise ValueError(f"total_frames must be >= 1, got {self.total_frames}")
-
-
-@dataclass(frozen=True)
 class UsableRange:
     """Result of calculating usable frame range after guard bands.
 
@@ -770,35 +673,6 @@ class UsableRange:
     start: int
     end: int
     frame_count: int
-
-
-def calculate_usable_range(params: SamplingParams) -> UsableRange:
-    """Calculate usable frame range after excluding guard bands.
-
-    Args:
-        params: Sampling parameters with guard frame counts
-
-    Returns:
-        UsableRange with start, end, and frame_count
-
-    Raises:
-        ValueError: If guards leave no usable frames or fewer than region_frames
-    """
-    usable_start = params.guard_start_frames
-    usable_end = params.total_frames - params.guard_end_frames
-
-    if usable_end <= usable_start:
-        raise ValueError(
-            f"No usable frames after guards (start={usable_start}, end={usable_end})"
-        )
-
-    usable_frames = usable_end - usable_start
-    if usable_frames < params.region_frames:
-        raise ValueError(
-            f"Usable frames ({usable_frames}) less than region size ({params.region_frames})"  # noqa: E501  # TODO(E501): shorten line
-        )
-
-    return UsableRange(start=usable_start, end=usable_end, frame_count=usable_frames)
 
 
 def calculate_sample_count(
@@ -861,7 +735,7 @@ def build_sampling_vpy_script(
     Returns:
         VapourSynth script content as string
     """
-    fps_num = int(fps * 1000)
+    fps_num = int(fps * FPS_DENOMINATOR)
 
     vpy_lines = [
         "import vapoursynth as vs",
@@ -903,7 +777,7 @@ def build_sampling_vpy_script(
         "",
         "# Reset FPS to original rate (SelectEvery preserves timestamps, creating gaps)",  # noqa: E501  # TODO(E501): shorten line
         "# This renumbers frames sequentially at the original FPS",
-        f"sampled = sampled.std.AssumeFPS(fpsnum={fps_num}, fpsden=1000)",
+        f"sampled = sampled.std.AssumeFPS(fpsnum={fps_num}, fpsden={FPS_DENOMINATOR})",
     ]
 
     # Apply crop if provided

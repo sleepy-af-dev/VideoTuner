@@ -27,12 +27,10 @@ from videotuner.encoding_utils import (
     build_x264_command,
     build_x265_command,
     calculate_sample_count,
-    calculate_usable_frames,
     combine_crop_values,
     create_temp_encode_paths,
     distorted_index_path,
     get_encoder_bin,
-    get_vapoursynth_portable_dir,
     indexer_spec,
     is_hdr_video,
     read_indexed_frame_count,
@@ -140,30 +138,6 @@ class TestGetEncoderBin:
         # Check the path ends with the expected components (platform-agnostic)
         assert result.name == "x265.exe"
         assert result.parent.name == "tools"
-
-
-class TestGetVapourSynthPortableDir:
-    """Tests for VapourSynth portable directory path resolution."""
-
-    def test_returns_relative_path_when_no_cwd(self):
-        """Test returns relative path when cwd is None."""
-        result = get_vapoursynth_portable_dir(cwd=None)
-        assert result == Path("vapoursynth-portable")
-        assert not result.is_absolute()
-
-    def test_returns_absolute_path_when_cwd_provided(self):
-        """Test returns absolute path when cwd is provided."""
-        cwd = Path("C:/test/dir")
-        result = get_vapoursynth_portable_dir(cwd=cwd)
-        assert result == Path("C:/test/dir") / "vapoursynth-portable"
-
-    def test_preserves_cwd_path_type(self):
-        """Test preserves the type of cwd."""
-        cwd = Path("/opt/videotuner")
-        result = get_vapoursynth_portable_dir(cwd=cwd)
-        assert isinstance(result, Path)
-        # Check the path ends with the expected component (platform-agnostic)
-        assert result.name == "vapoursynth-portable"
 
 
 class TestResolveAbsolutePath:
@@ -575,106 +549,6 @@ class TestEncoderPaths:
             setattr(paths, "encoder_bin", Path("new/path"))
 
 
-class TestCalculateUsableFrames:
-    """Tests for calculate_usable_frames function."""
-
-    def test_calculates_usable_frames(self):
-        """Test basic usable frames calculation."""
-        result = calculate_usable_frames(
-            total_frames=1000,
-            guard_start_frames=100,
-            guard_end_frames=100,
-        )
-        assert result == 800
-
-    def test_no_guards(self):
-        """Test with zero guard frames."""
-        result = calculate_usable_frames(
-            total_frames=1000,
-            guard_start_frames=0,
-            guard_end_frames=0,
-        )
-        assert result == 1000
-
-    def test_asymmetric_guards(self):
-        """Test with different start and end guards."""
-        result = calculate_usable_frames(
-            total_frames=1000,
-            guard_start_frames=50,
-            guard_end_frames=150,
-        )
-        assert result == 800
-
-    def test_raises_when_total_frames_zero(self):
-        """Test raises ValueError when total_frames is zero."""
-        with pytest.raises(ValueError) as exc_info:
-            _ = calculate_usable_frames(
-                total_frames=0,
-                guard_start_frames=0,
-                guard_end_frames=0,
-            )
-        assert "total_frames must be >= 1" in str(exc_info.value)
-
-    def test_raises_when_total_frames_negative(self):
-        """Test raises ValueError when total_frames is negative."""
-        with pytest.raises(ValueError) as exc_info:
-            _ = calculate_usable_frames(
-                total_frames=-10,
-                guard_start_frames=0,
-                guard_end_frames=0,
-            )
-        assert "total_frames must be >= 1" in str(exc_info.value)
-
-    def test_raises_when_guard_start_negative(self):
-        """Test raises ValueError when guard_start_frames is negative."""
-        with pytest.raises(ValueError) as exc_info:
-            _ = calculate_usable_frames(
-                total_frames=1000,
-                guard_start_frames=-10,
-                guard_end_frames=0,
-            )
-        assert "guard_start_frames must be >= 0" in str(exc_info.value)
-
-    def test_raises_when_guard_end_negative(self):
-        """Test raises ValueError when guard_end_frames is negative."""
-        with pytest.raises(ValueError) as exc_info:
-            _ = calculate_usable_frames(
-                total_frames=1000,
-                guard_start_frames=0,
-                guard_end_frames=-10,
-            )
-        assert "guard_end_frames must be >= 0" in str(exc_info.value)
-
-    def test_raises_when_guards_exceed_total(self):
-        """Test raises ValueError when guards exceed total frames."""
-        with pytest.raises(ValueError) as exc_info:
-            _ = calculate_usable_frames(
-                total_frames=100,
-                guard_start_frames=60,
-                guard_end_frames=60,
-            )
-        assert "No usable frames after guards" in str(exc_info.value)
-
-    def test_raises_when_guards_equal_total(self):
-        """Test raises ValueError when guards equal total frames."""
-        with pytest.raises(ValueError) as exc_info:
-            _ = calculate_usable_frames(
-                total_frames=100,
-                guard_start_frames=50,
-                guard_end_frames=50,
-            )
-        assert "No usable frames after guards" in str(exc_info.value)
-
-    def test_minimum_usable_frames(self):
-        """Test with guards leaving exactly 1 usable frame."""
-        result = calculate_usable_frames(
-            total_frames=101,
-            guard_start_frames=50,
-            guard_end_frames=50,
-        )
-        assert result == 1
-
-
 class TestCalculateSampleCount:
     """Counts must match what each file's SelectEvery yields."""
 
@@ -950,7 +824,6 @@ def test_ffms2_spec_names_its_own_filter_and_tools() -> None:
     spec = indexer_spec(IndexerType.FFMS2)
     assert spec.index_suffix == ".ffindex"
     assert spec.indexer_exe == "ffmsindex.exe"
-    assert spec.plugin_dll == "ffms2.dll"
     assert spec.display_name == "FFMS2"
 
 
@@ -958,7 +831,6 @@ def test_lsmash_spec_names_its_own_filter_and_tools() -> None:
     spec = indexer_spec(IndexerType.LSMASH)
     assert spec.index_suffix == ".lwi"
     assert spec.indexer_exe == "LSMASHSource_indexing.exe"
-    assert spec.plugin_dll == "LSMASHSource.dll"
     assert spec.display_name == "LSMASHSource"
 
 

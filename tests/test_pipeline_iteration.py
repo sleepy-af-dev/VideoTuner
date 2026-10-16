@@ -40,12 +40,10 @@ class TestMetricSampleParams:
     def test_creation_with_all_fields(self):
         """Test that MetricSampleParams can be created with all fields."""
         params = MetricSampleParams(
-            metric_type="vmaf",
             total_frames=2500,
             interval_frames=1000,
             region_frames=500,
         )
-        assert params.metric_type == "vmaf"
         assert params.total_frames == 2500
         assert params.interval_frames == 1000
         assert params.region_frames == 500
@@ -53,7 +51,6 @@ class TestMetricSampleParams:
     def test_is_frozen(self):
         """Test that MetricSampleParams is immutable."""
         params = MetricSampleParams(
-            metric_type="ssim2",
             total_frames=1500,
             interval_frames=500,
             region_frames=500,
@@ -91,7 +88,6 @@ class TestCalculateMetricParams:
 
         params = calculate_metric_params(ctx, "vmaf")
 
-        assert params.metric_type == "vmaf"
         assert params.interval_frames == 1000
         assert params.region_frames == 500
         # 9 full regions of 500
@@ -108,7 +104,6 @@ class TestCalculateMetricParams:
 
         params = calculate_metric_params(ctx, "ssim2")
 
-        assert params.metric_type == "ssim2"
         assert params.interval_frames == 2000
         assert params.region_frames == 300
         # 4 full regions of 300, and 1000 frames left hold a fifth
@@ -224,7 +219,6 @@ _SOURCE = SampledSource(
 )
 
 _PARAMS = MetricSampleParams(
-    metric_type="vmaf",
     total_frames=20,
     interval_frames=24,
     region_frames=2,

@@ -1,14 +1,10 @@
 """Tests for profile management functionality."""
 
-import pytest
-
 from videotuner.encoder_type import EncoderType
 from videotuner.profiles import (
     Profile,
-    ProfileError,
     get_all_groups,
     get_profiles_by_groups,
-    validate_groups_exist,
 )
 
 
@@ -76,25 +72,6 @@ class TestProfileGroups:
         groups = get_all_groups(profiles)
 
         assert groups == set()
-
-    def test_validate_groups_exist_passes_for_valid_groups(self):
-        """Test that validate_groups_exist passes for existing groups."""
-        profiles = self._create_test_profiles()
-
-        # Should not raise
-        validate_groups_exist(profiles, ["Default"])
-        validate_groups_exist(profiles, ["Default", "animation"])
-        validate_groups_exist(profiles, ["live-action", "animation"])
-
-    def test_validate_groups_exist_raises_for_invalid_group(self):
-        """Test that validate_groups_exist raises ProfileError for non-existent groups."""  # noqa: E501  # TODO(E501): shorten line
-        profiles = self._create_test_profiles()
-
-        with pytest.raises(ProfileError) as exc_info:
-            validate_groups_exist(profiles, ["nonexistent"])
-
-        assert "Profile group 'nonexistent' not found" in str(exc_info.value)
-        assert "Default" in str(exc_info.value)  # Should list available groups
 
     def test_get_profiles_by_groups_returns_all_when_no_filter(self):
         """Test that get_profiles_by_groups returns all profiles when no groups specified."""  # noqa: E501  # TODO(E501): shorten line

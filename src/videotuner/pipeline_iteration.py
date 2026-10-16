@@ -37,7 +37,6 @@ IterationResult = tuple[
 class MetricSampleParams:
     """Calculated sampling parameters for a metric."""
 
-    metric_type: Literal["vmaf", "ssim2"]
     total_frames: int
     interval_frames: int
     region_frames: int
@@ -72,7 +71,6 @@ def calculate_metric_params(
     )
 
     return MetricSampleParams(
-        metric_type=metric_type,
         total_frames=total_frames,
         interval_frames=interval_frames,
         region_frames=region_frames,

@@ -175,20 +175,6 @@ def get_encoder_bin(encoder_type: EncoderType, cwd: Path | None = None) -> Path:
     return bin_path
 
 
-def get_vapoursynth_portable_dir(cwd: Path | None = None) -> Path:
-    """Get path to VapourSynth portable directory.
-
-    Args:
-        cwd: Working directory (if None, uses relative path)
-
-    Returns:
-        Path to vapoursynth-portable directory
-    """
-    if cwd:
-        return Path(cwd) / VAPOURSYNTH_PORTABLE_DIR
-    return Path(VAPOURSYNTH_PORTABLE_DIR)
-
-
 def resolve_absolute_path(path: Path, cwd: Path | None = None) -> Path:
     """Convert path to absolute, resolving relative to cwd if provided.
 
@@ -204,44 +190,6 @@ def resolve_absolute_path(path: Path, cwd: Path | None = None) -> Path:
     if cwd:
         return Path(cwd) / path
     return path.resolve()
-
-
-def calculate_usable_frames(
-    total_frames: int,
-    guard_start_frames: int,
-    guard_end_frames: int,
-) -> int:
-    """Calculate number of usable frames after excluding guard bands.
-
-    Guard bands are regions at the start and end of the video that are
-    excluded from sampling to avoid credits, intros, and outros.
-
-    Args:
-        total_frames: Total number of frames in the video.
-        guard_start_frames: Frames to skip at the start.
-        guard_end_frames: Frames to skip at the end.
-
-    Returns:
-        Number of frames available for sampling.
-
-    Raises:
-        ValueError: If parameters are invalid or result in no usable frames.
-    """
-    if total_frames < 1:
-        raise ValueError(f"total_frames must be >= 1, got {total_frames}")
-    if guard_start_frames < 0:
-        raise ValueError(f"guard_start_frames must be >= 0, got {guard_start_frames}")
-    if guard_end_frames < 0:
-        raise ValueError(f"guard_end_frames must be >= 0, got {guard_end_frames}")
-
-    usable = total_frames - guard_start_frames - guard_end_frames
-    if usable <= 0:
-        msg = (
-            f"No usable frames after guards (total={total_frames}, "
-            f"start={guard_start_frames}, end={guard_end_frames})"
-        )
-        raise ValueError(msg)
-    return usable
 
 
 def write_vpy_script(vpy_path: Path, content: str) -> None:
@@ -305,7 +253,6 @@ class IndexerSpec:
         index_suffix: Extension for the index file. The two differ, so
             switching indexers cannot collide.
         indexer_exe: Executable that builds an index up front, with progress.
-        plugin_dll: Plugin the source filter lives in.
         display_name: Name shown to a user, as distinct from the enum value,
             which is the ``--indexer`` CLI token.
     """
@@ -313,7 +260,6 @@ class IndexerSpec:
     source_call: str
     index_suffix: str
     indexer_exe: str
-    plugin_dll: str
     display_name: str
 
     def source_expr(self, source_path: str, cache_file: str) -> str:
@@ -334,7 +280,6 @@ _INDEXERS: dict[IndexerType, IndexerSpec] = {
         source_call='core.ffms2.Source(r"{source}", cachefile=r"{cache}")',
         index_suffix=".ffindex",
         indexer_exe="ffmsindex.exe",
-        plugin_dll="ffms2.dll",
         display_name="FFMS2",
     ),
     IndexerType.LSMASH: IndexerSpec(
@@ -343,7 +288,6 @@ _INDEXERS: dict[IndexerType, IndexerSpec] = {
         ),
         index_suffix=".lwi",
         indexer_exe="LSMASHSource_indexing.exe",
-        plugin_dll="LSMASHSource.dll",
         display_name="LSMASHSource",
     ),
 }

@@ -15,6 +15,7 @@ from io import TextIOWrapper
 from pathlib import Path
 from typing import IO
 
+from .constants import FPS_DENOMINATOR
 from .encoder_type import EncoderType
 from .utils import ensure_dir, run_capture, warn_user
 
@@ -734,7 +735,7 @@ def build_sampling_vpy_script(
     Returns:
         VapourSynth script content as string
     """
-    fps_num = int(fps * 1000)
+    fps_num = int(fps * FPS_DENOMINATOR)
 
     vpy_lines = [
         "import vapoursynth as vs",
@@ -776,7 +777,7 @@ def build_sampling_vpy_script(
         "",
         "# Reset FPS to original rate (SelectEvery preserves timestamps, creating gaps)",  # noqa: E501  # TODO(E501): shorten line
         "# This renumbers frames sequentially at the original FPS",
-        f"sampled = sampled.std.AssumeFPS(fpsnum={fps_num}, fpsden=1000)",
+        f"sampled = sampled.std.AssumeFPS(fpsnum={fps_num}, fpsden={FPS_DENOMINATOR})",
     ]
 
     # Apply crop if provided

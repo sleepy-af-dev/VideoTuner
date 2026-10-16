@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, cast
 from .constants import (
     COMBINED_PASS_MAX_REQUESTS,
     MIN_CROP_FRACTION,
+    PERCENTILE_1PCT,
     RESOLUTION_CONFIDENCE_THRESHOLD,
     RESOLUTION_RELATIVE_TOLERANCE,
     VMAF_HFR_FPS_THRESHOLD,
@@ -805,7 +806,7 @@ def run_vmaf(
             if pooled_minimum is None:
                 pooled_minimum = min(frame_scores)
             minimum = float(pooled_minimum)
-            k = max(1, math.ceil(0.01 * len(frame_scores)))
+            k = max(1, math.ceil(PERCENTILE_1PCT * len(frame_scores)))
             low = sorted(frame_scores)[:k]
             p1_low = sum(low) / len(low)
             if mean is None:

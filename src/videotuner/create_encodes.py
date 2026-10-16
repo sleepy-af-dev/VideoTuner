@@ -26,7 +26,7 @@ from .encoding_utils import (
     write_vpy_script,
 )
 from .media import get_video_format
-from .profiles import Profile, create_multipass_profile
+from .profiles import Profile
 from .utils import log_separator, run_capture
 
 logger = logging.getLogger(__name__)
@@ -373,13 +373,12 @@ def encode_concatenated_bitrate(
     Supports single-pass (pass=1 or no pass) and multi-pass (pass=2/3) encoding.
 
     Args:
-        source_path: Input source video path
+        sources: Files to sample, each carrying its own usable range. Guard
+            bands are a fraction of a file's length, so ranges differ per file
+            and are settled by the caller.
         output_path: Output MKV path
         interval_frames: Sample every N frames
         region_frames: Number of consecutive frames per sample
-        guard_start_frames: Frames to skip at start
-        guard_end_frames: Frames to skip at end
-        total_frames: Total frames in source video
         fps: Video framerate
         profile: Encoding profile (must have bitrate set)
         video_info: MediaInfo from ffprobe
@@ -591,186 +590,4 @@ def encode_concatenated_bitrate(
         if vpy_path.exists():
             vpy_path.unlink()
 
-    return final_output
-
-
-def encode_multipass_bitrate(
-    sources: Sequence[SampledSource],
-    output_path: Path,
-    interval_frames: int,
-    region_frames: int,
-    fps: float,
-    profile: Profile,
-    video_info: VideoInfo,
-    *,
-    indexer: IndexerType,
-    mkvmerge_bin: str = "mkvmerge",
-    cwd: Path | None = None,
-    temp_dir: Path | None = None,
-    stats_file: Path,
-    line_handler: Callable[[str], bool] | None = None,
-    mux_handler: Callable[[str], bool] | None = None,
-    enable_cropdetect: bool = False,
-    crop_values: CropValues | None = None,
-) -> Path:
-    """
-    Encode concatenated clip using multi-pass bitrate encoding.
-
-    Automatically handles 2-pass or 3-pass encoding based on profile settings:
-    - 2-pass mode (pass=2): Pass 1 → Pass 2
-    - 3-pass mode (pass=3): Pass 1 → Pass 3 → Pass 2 (three sequential passes)
-
-    Pass sequence:
-    - Pass 1: Analyzes video and creates initial stats file
-    - Pass 3: Refines stats file using initial analysis (intermediate pass, 3-pass only)
-    - Pass 2: Creates final encode using refined stats file (final pass)
-
-    Args:
-        source_path: Input source video path
-        output_path: Output MKV path
-        interval_frames: Sample every N frames
-        region_frames: Number of consecutive frames per sample
-        guard_start_frames: Frames to skip at start
-        guard_end_frames: Frames to skip at end
-        total_frames: Total frames in source video
-        fps: Video framerate
-        profile: Encoding profile (must have pass=2 or pass=3)
-        video_info: MediaInfo from ffprobe
-        indexer: Source filter to load each file with.
-        mkvmerge_bin: Path to mkvmerge binary
-        cwd: Working directory
-        temp_dir: Directory for temporary files
-        stats_file: Path for stats file (shared across all passes)
-        line_handler: Optional callback for x265 progress
-        mux_handler: Optional callback for mkvmerge progress
-        enable_cropdetect: Whether to apply cropdetect
-        crop_values: Pre-calculated crop values
-
-    Returns:
-        Path to final output file
-
-    Raises:
-        ValueError: If profile doesn't use multi-pass (pass=2 or pass=3)
-    """
-    log = logging.getLogger(__name__)
-
-    pass_num = profile.pass_number
-    if pass_num not in (2, 3):
-        raise ValueError(
-            f"Profile '{profile.name}' must specify pass=2 or pass=3 for multi-pass encoding"  # noqa: E501  # TODO(E501): shorten line
-        )
-
-    # Create a modified profile for pass 1
-    pass1_profile = create_multipass_profile(profile, 1)
-
-    # Determine pass sequence based on final pass number
-    if pass_num == 3:
-        log.info("Starting 3-pass bitrate encoding (Pass 1 -> Pass 3 -> Pass 2)")
-    else:
-        log.info("Starting 2-pass bitrate encoding (Pass 1 -> Pass 2)")
-
-    # Pass 1: Create stats file
-    log.info("=== Pass 1: Analyzing video and creating stats file ===")
-    if temp_dir:
-        pass1_output = temp_dir / f"pass1_{output_path.name}"
-    else:
-        pass1_output = output_path.parent / f"pass1_{output_path.name}"
-
-    _ = encode_concatenated_bitrate(
-        sources=sources,
-        output_path=pass1_output,
-        interval_frames=interval_frames,
-        region_frames=region_frames,
-        fps=fps,
-        profile=pass1_profile,
-        video_info=video_info,
-        indexer=indexer,
-        mkvmerge_bin=mkvmerge_bin,
-        cwd=cwd,
-        temp_dir=temp_dir,
-        stats_file=stats_file,
-        line_handler=line_handler,
-        mux_handler=None,  # Don't mux pass 1 output
-        perform_mux=False,
-        enable_cropdetect=enable_cropdetect,
-        crop_values=crop_values,
-    )
-
-    # Clean up pass 1 output (we only need stats file)
-    if pass1_output.exists():
-        try:
-            pass1_output.unlink()
-            log.debug("Cleaned up pass 1 output: %s", pass1_output)
-        except Exception as e:
-            log.warning("Failed to clean up pass 1 output: %s", e)
-
-    # For 3-pass: Run Pass 3 (intermediate) before Pass 2 (final)
-    if pass_num == 3:
-        log.info("=== Pass 3: Refining stats file (intermediate pass) ===")
-
-        # Create a modified profile for pass 3
-        pass3_profile = create_multipass_profile(profile, 3)
-
-        if temp_dir:
-            pass3_output = temp_dir / f"pass3_{output_path.name}"
-        else:
-            pass3_output = output_path.parent / f"pass3_{output_path.name}"
-
-        _ = encode_concatenated_bitrate(
-            sources=sources,
-            output_path=pass3_output,
-            interval_frames=interval_frames,
-            region_frames=region_frames,
-            fps=fps,
-            profile=pass3_profile,
-            video_info=video_info,
-            indexer=indexer,
-            mkvmerge_bin=mkvmerge_bin,
-            cwd=cwd,
-            temp_dir=temp_dir,
-            stats_file=stats_file,
-            line_handler=line_handler,
-            mux_handler=None,  # Don't mux pass 3 output
-            perform_mux=False,
-            enable_cropdetect=enable_cropdetect,
-            crop_values=crop_values,
-        )
-
-        # Clean up pass 3 output (we only need stats file)
-        if pass3_output.exists():
-            try:
-                pass3_output.unlink()
-                log.debug("Cleaned up pass 3 output: %s", pass3_output)
-            except Exception as e:
-                log.warning("Failed to clean up pass 3 output: %s", e)
-
-    # Final pass: Pass 2 (always the final encoding pass)
-    # For 2-pass mode: this runs after Pass 1
-    # For 3-pass mode: this runs after Pass 1 → Pass 3
-    log.info("=== Pass 2: Final encode using refined stats file ===")
-
-    # Create a modified profile for final pass 2
-    pass2_profile = create_multipass_profile(profile, 2)
-
-    final_output = encode_concatenated_bitrate(
-        sources=sources,
-        output_path=output_path,
-        interval_frames=interval_frames,
-        region_frames=region_frames,
-        fps=fps,
-        profile=pass2_profile,  # Always use pass 2 for final encode
-        video_info=video_info,
-        indexer=indexer,
-        mkvmerge_bin=mkvmerge_bin,
-        cwd=cwd,
-        temp_dir=temp_dir,
-        stats_file=stats_file,
-        line_handler=line_handler,
-        mux_handler=mux_handler,
-        perform_mux=True,
-        enable_cropdetect=enable_cropdetect,
-        crop_values=crop_values,
-    )
-
-    log.info("Multi-pass bitrate encoding complete")
     return final_output

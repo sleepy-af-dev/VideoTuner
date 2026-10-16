@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import io
 import logging
-import re
 from collections.abc import Callable, Generator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import TracebackType
 from typing import override
@@ -28,7 +27,6 @@ from .tool_parsers import (
     FFMPEG_FRAME_RE,
     INDEX_PROGRESS_RE,
     MKVMERGE_PCT_RE,
-    SSIM_LINE_RE,
     VSZIP_PROGRESS_RE,
     X264_ENCODED_RE,
     X264_FRAME_RE,
@@ -136,7 +134,6 @@ class PipelineDisplay:
         name: str,
         *,
         total: float | None = None,
-        unit: str = "",
         show_eta: bool = True,
         transient: bool = True,
         show_done: bool = True,
@@ -146,7 +143,6 @@ class PipelineDisplay:
             console=self.console,
             name=name,
             total=total,
-            unit=unit,
             show_eta=show_eta,
             transient=transient,
             show_done=show_done,
@@ -161,7 +157,6 @@ class Stage:
 
     console: Console
     name: str
-    unit: str
     total: float | None
     show_eta: bool
     transient: bool
@@ -178,7 +173,6 @@ class Stage:
         console: Console,
         name: str,
         total: float | None,
-        unit: str = "",
         show_eta: bool = True,
         transient: bool = True,
         show_done: bool = True,
@@ -186,7 +180,6 @@ class Stage:
     ) -> None:
         self.console = console
         self.name = name
-        self.unit = unit
         self.total = float(total) if total not in (None, 0) else None
         self.show_eta = show_eta
         self.transient = transient
@@ -372,35 +365,6 @@ class Stage:
 
         return handler
 
-    def make_ssim_handler(
-        self, *, total_frames: int | None = None, use_native_display: bool = False
-    ) -> LineHandler:
-        """Create a handler for SSIMULACRA2 output.
-
-        Args:
-            total_frames: Expected total frame count
-            use_native_display: If True, don't update Rich progress (let SSIMULACRA2's native display show)
-        """  # noqa: E501  # TODO(E501): shorten line
-        if total_frames:
-            self.set_total(total_frames)
-
-        def handler(line: str) -> bool:
-            line = clean_ansi(line)
-            match = SSIM_LINE_RE.search(line)
-            if not match:
-                return False
-
-            if not use_native_display:
-                done = float(match.group("done"))
-                total = float(match.group("total"))
-                self.set_total(total)
-                # Always use the exact 'done' count since we have it (e.g., "481/481")
-                # rather than recalculating from percentage which may be less accurate
-                self.update(completed=done)
-            return True  # Mark as consumed so it doesn't print
-
-        return handler
-
     def make_index_handler(self) -> LineHandler:
         """Create a handler for index-building progress output.
 
@@ -444,54 +408,6 @@ class Stage:
             frame = int(match.group(1))
             self.update(completed=frame)
             return True
-
-        return handler
-
-    def make_ssim_verbose_handler(
-        self, *, total_frames: int | None = None
-    ) -> LineHandler:
-        """Create a handler for SSIMULACRA2 --verbose output.
-
-        The --verbose flag outputs per-frame scores in the format:
-            Frame 0: 91.63643741
-            Frame 1: 86.03377399
-            ...
-
-        Args:
-            total_frames: Expected total frame count
-        """
-        if total_frames:
-            self.set_total(total_frames)
-
-        # Pattern to match tolerant variants such as:
-        # "Frame 0: 91.6", "Frame 12/480: 88.1", etc.
-        frame_pattern = re.compile(r"Frame\s+(\d+)(?:\s*/\s*(\d+))?", re.IGNORECASE)
-        last_frame = -1
-
-        def handler(line: str) -> bool:
-            nonlocal last_frame
-            line = clean_ansi(line)
-            match = frame_pattern.search(line)
-            if not match:
-                return False
-
-            frame_num = int(match.group(1))
-            total_reported = match.group(2)
-            if total_reported:
-                with suppress(ValueError):
-                    self.set_total(int(total_reported))
-            elif total_frames:
-                self.set_total(total_frames)
-
-            if frame_num < last_frame:
-                frame_index = last_frame
-            else:
-                frame_index = frame_num
-                last_frame = frame_num
-
-            # Frame numbers are 0-indexed, so completed = frame_index + 1
-            self.update(completed=frame_index + 1)
-            return True  # Mark as consumed so it doesn't print
 
         return handler
 

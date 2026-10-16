@@ -772,16 +772,12 @@ def _run_pipeline_body(
 
         # Create iteration context
         ctx = IterationContext(
-            input_path=input_path,
             sources=sampled_sources,
             workdir=workdir,
             temp_dir=temp_dir,
             repo_root=repo_root,
             info=info,
             selected_profile=selected_profile,
-            total_frames=total_frames,
-            guard_start_frames=guard_start_frames,
-            guard_end_frames=guard_end_frames,
             args=args,
             display=display,
             log=log,
@@ -844,16 +840,12 @@ def _run_pipeline_body(
 
         # Create iteration context with selected profile (may have been updated by profile search)  # noqa: E501  # TODO(E501): shorten line
         ctx = IterationContext(
-            input_path=input_path,
             sources=sampled_sources,
             workdir=workdir,
             temp_dir=temp_dir,
             repo_root=repo_root,
             info=info,
             selected_profile=selected_profile,
-            total_frames=total_frames,
-            guard_start_frames=guard_start_frames,
-            guard_end_frames=guard_end_frames,
             args=args,
             display=display,
             log=log,
@@ -1061,16 +1053,12 @@ def _run_pipeline_body(
         # Create context factory for multi-profile search
         def ctx_factory(profile: Profile) -> IterationContext:
             return IterationContext(
-                input_path=input_path,
                 sources=sampled_sources,
                 workdir=workdir,
                 temp_dir=temp_dir,
                 repo_root=repo_root,
                 info=info,
                 selected_profile=profile,
-                total_frames=total_frames,
-                guard_start_frames=guard_start_frames,
-                guard_end_frames=guard_end_frames,
                 args=args,
                 display=display,
                 log=log,
@@ -1086,7 +1074,6 @@ def _run_pipeline_body(
             crf_start_value=args.crf_start_value,
             crf_interval=args.crf_interval,
             max_iterations=CRF_SEARCH_MAX_ITERATIONS,
-            args=args,
             display=display,
             log=log,
         )

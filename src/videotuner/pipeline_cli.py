@@ -551,7 +551,6 @@ class ValidationResult:
     selected_profile: Profile | None  # None when using multi-profile search
     multi_profile_list: list[Profile]
     multi_profile_display: str
-    has_quality_targets: bool
 
 
 def validate_time_args(args: PipelineArgs, parser: argparse.ArgumentParser) -> None:
@@ -950,5 +949,4 @@ def validate_args(
         selected_profile=selected_profile,
         multi_profile_list=multi_profile_list,
         multi_profile_display=multi_profile_display,
-        has_quality_targets=has_quality_targets,
     )

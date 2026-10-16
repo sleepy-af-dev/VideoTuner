@@ -516,7 +516,6 @@ def _encode_crf_metric(
     with ctx.display.stage(
         f"Encoding {metric_label} samples",
         total=metric_params.total_frames,
-        unit="frames",
         transient=True,
         show_done=True,
     ) as enc_stage:
@@ -557,7 +556,6 @@ def _encode_crf_metric(
     with ctx.display.stage(
         f"Muxing {metric_label} samples",
         total=100,
-        unit="%",
         transient=True,
         show_done=True,
     ) as mux_stage:
@@ -989,7 +987,6 @@ def _encode_bitrate_metric(
         with ctx.display.stage(
             f"{metric_label} Pass 1: Analyzing",
             total=metric_params.total_frames,
-            unit="frames",
             transient=True,
             show_done=False,
         ) as enc_stage:
@@ -1040,7 +1037,6 @@ def _encode_bitrate_metric(
             with ctx.display.stage(
                 f"{metric_label} Pass 3: Refining",
                 total=metric_params.total_frames,
-                unit="frames",
                 transient=True,
                 show_done=False,
             ) as enc_stage:
@@ -1093,7 +1089,6 @@ def _encode_bitrate_metric(
         with ctx.display.stage(
             f"{metric_label} Pass 2: Encoding",
             total=metric_params.total_frames,
-            unit="frames",
             transient=True,
             show_done=True,
         ) as enc_stage:
@@ -1126,7 +1121,6 @@ def _encode_bitrate_metric(
         with ctx.display.stage(
             f"Encoding {metric_label} samples",
             total=metric_params.total_frames,
-            unit="frames",
             transient=True,
             show_done=True,
         ) as enc_stage:

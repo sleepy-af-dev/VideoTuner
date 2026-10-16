@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from .crf_search import QualityTarget
-    from .pipeline_cli import PipelineArgs
     from .pipeline_types import BudgetPoint, IterationContext, MultiProfileResult
     from .profiles import Profile
     from .progress import PipelineDisplay
@@ -25,7 +24,6 @@ class MultiProfileSearchParams:
         crf_start_value: Default starting CRF value
         crf_interval: CRF interval for search
         max_iterations: Maximum CRF search iterations per profile
-        args: Pipeline arguments
         display: Pipeline display instance
         log: Logger instance
     """
@@ -35,7 +33,6 @@ class MultiProfileSearchParams:
     crf_start_value: float
     crf_interval: float
     max_iterations: int
-    args: PipelineArgs
     display: PipelineDisplay
     log: logging.Logger
 

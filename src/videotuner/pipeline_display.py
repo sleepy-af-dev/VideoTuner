@@ -55,7 +55,6 @@ class PipelineArgsProtocol(Protocol):
     vmaf_region_frames: int
     ssim2_interval_frames: int
     ssim2_region_frames: int
-    vmaf_model: str | None
     indexer: IndexerType
     guard_start_percent: float
     guard_end_percent: float

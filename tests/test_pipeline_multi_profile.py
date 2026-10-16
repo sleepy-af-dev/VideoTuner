@@ -29,7 +29,6 @@ class TestMultiProfileSearchParams:
             )
         ]
         targets = [QualityTarget(metric_name="vmaf_mean", target_value=90.0)]
-        args = MagicMock()
         display = MagicMock()
         log = MagicMock()
 
@@ -39,7 +38,6 @@ class TestMultiProfileSearchParams:
             crf_start_value=18.0,
             crf_interval=0.5,
             max_iterations=10,
-            args=args,
             display=display,
             log=log,
         )

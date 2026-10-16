@@ -1,6 +1,5 @@
 import hashlib
 import logging
-import math
 import os
 import re
 import shlex
@@ -174,22 +173,6 @@ def get_app_root() -> Path:
     else:
         # Development: src/videotuner/utils.py -> repo root
         return Path(__file__).resolve().parents[2]
-
-
-def clean_float(val: float | None) -> float | None:
-    """Clean a float value by rounding to 2 decimal places and handling NaN.
-
-    Args:
-        val: Float value to clean, or None
-
-    Returns:
-        Rounded float value, or None if input is None or NaN
-    """
-    if val is None:
-        return None
-    if math.isnan(val):
-        return None
-    return round(val, 2)
 
 
 def sanitize_filename(name: str) -> str:
